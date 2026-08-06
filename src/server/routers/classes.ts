@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
-import { classes, bookings, users } from "@/db/schema";
+import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { classes, bookings, users, memberships, corporateBookings, companies } from "@/db/schema";
 import { router, publicProcedure, staffProcedure, adminProcedure } from "../trpc";
+import { checkTrainerAvailability } from "./trainers";
 
 export const classesRouter = router({
   list: publicProcedure
@@ -51,6 +52,11 @@ export const classesRouter = router({
       }));
     }),
 
+  // ---------------------------------------------------------------------------
+  // byId is public for class details — but the roster (names + emails) is
+  // intentionally NOT returned here. Trainers/staff must use
+  // trainers.rosterWithCorporate or bookings.rosterFor instead.
+  // ---------------------------------------------------------------------------
   byId: publicProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -64,20 +70,14 @@ export const classesRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
-      const roster = await ctx.db
-        .select({
-          bookingId: bookings.id,
-          status: bookings.status,
-          memberName: users.name,
-          memberEmail: users.email,
-        })
-        .from(bookings)
-        .innerJoin(users, eq(bookings.userId, users.id))
-        .where(eq(bookings.classId, cls.id));
-
-      return { ...cls, roster };
+      // Return class details only — no member names/emails on a public endpoint.
+      return cls;
     }),
 
+  // ---------------------------------------------------------------------------
+  // Fix #8: Validate trainerId is an existing, active trainer user.
+  // Fix #7: Enforce that the class time falls within the trainer's availability.
+  // ---------------------------------------------------------------------------
   create: staffProcedure
     .input(
       z.object({
@@ -92,6 +92,48 @@ export const classesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Fix #8: validate trainerId if provided
+      if (input.trainerId != null) {
+        const trainer = await ctx.db
+          .select({ id: users.id, role: users.role, active: users.active })
+          .from(users)
+          .where(eq(users.id, input.trainerId))
+          .get();
+
+        if (!trainer) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Trainer ID ${input.trainerId} does not exist.`,
+          });
+        }
+        if (trainer.role !== "trainer") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `User ${input.trainerId} is not a trainer.`,
+          });
+        }
+        if (!trainer.active) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Trainer ${input.trainerId} is deactivated and cannot be assigned to classes.`,
+          });
+        }
+
+        // Fix #7: enforce availability server-side
+        const avail = await checkTrainerAvailability(
+          ctx.db,
+          input.trainerId,
+          input.startsAt,
+          input.durationMin,
+        );
+        if (!avail.available) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Trainer is not available for this time slot: ${avail.reason}`,
+          });
+        }
+      }
+
       return ctx.db
         .insert(classes)
         .values({
@@ -103,6 +145,10 @@ export const classesRouter = router({
         .get();
     }),
 
+  // ---------------------------------------------------------------------------
+  // Fix #7 (update path): Also enforce availability when updating a class's
+  // start time or trainer assignment.
+  // ---------------------------------------------------------------------------
   update: staffProcedure
     .input(
       z.object({
@@ -116,6 +162,66 @@ export const classesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...patch } = input;
+
+      // If trainer or time is being changed, re-validate availability
+      if (patch.trainerId != null && (patch.startsAt || patch.trainerId !== undefined)) {
+        // Fetch the current class to fill in any fields not being changed
+        const existingClass = await ctx.db
+          .select()
+          .from(classes)
+          .where(eq(classes.id, id))
+          .get();
+
+        if (!existingClass) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+        }
+
+        const effectiveTrainerId = patch.trainerId ?? existingClass.trainerId;
+        const effectiveStartsAt = patch.startsAt ?? existingClass.startsAt;
+        const effectiveDuration = existingClass.durationMin;
+
+        // Fix #8: validate trainer still active and has trainer role
+        const trainer = await ctx.db
+          .select({ id: users.id, role: users.role, active: users.active })
+          .from(users)
+          .where(eq(users.id, effectiveTrainerId))
+          .get();
+
+        if (!trainer) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Trainer ID ${effectiveTrainerId} does not exist.`,
+          });
+        }
+        if (trainer.role !== "trainer") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `User ${effectiveTrainerId} is not a trainer.`,
+          });
+        }
+        if (!trainer.active) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Trainer ${effectiveTrainerId} is deactivated.`,
+          });
+        }
+
+        // Fix #7: enforce availability, excluding the class being updated from conflict check
+        const avail = await checkTrainerAvailability(
+          ctx.db,
+          effectiveTrainerId,
+          effectiveStartsAt,
+          effectiveDuration,
+          id, // exclude current class from conflict check
+        );
+        if (!avail.available) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Trainer is not available for this time slot: ${avail.reason}`,
+          });
+        }
+      }
+
       const updated = await ctx.db
         .update(classes)
         .set(patch)
@@ -129,6 +235,11 @@ export const classesRouter = router({
       return updated;
     }),
 
+  // ---------------------------------------------------------------------------
+  // Fix #14: Proper class cancellation — cancels ALL bookings (booked +
+  // waitlisted) across both normal and corporate tables, refunds credits to
+  // personal memberships and company credit pools, and sends notifications.
+  // ---------------------------------------------------------------------------
   cancel: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -143,12 +254,96 @@ export const classesRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
-      await ctx.db
-        .update(bookings)
-        .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+      const { formatDateTime } = await import("@/lib/format");
+      const { notifyClassCancelled } = await import("../services/notifications");
+
+      // --- Cancel ALL normal bookings (booked + waitlisted) ---
+      const activeNormalBookings = await ctx.db
+        .select()
+        .from(bookings)
         .where(
-          and(eq(bookings.classId, input.id), eq(bookings.status, "booked")),
+          and(
+            eq(bookings.classId, input.id),
+            inArray(bookings.status, ["booked", "waitlisted"]),
+          ),
         );
+
+      for (const booking of activeNormalBookings) {
+        await ctx.db
+          .update(bookings)
+          .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+          .where(eq(bookings.id, booking.id));
+
+        // Refund credits for booked entries
+        if (booking.creditsUsed > 0 && booking.membershipId) {
+          const ms = await ctx.db
+            .select()
+            .from(memberships)
+            .where(eq(memberships.id, booking.membershipId))
+            .get();
+
+          if (ms && ms.creditsRemaining < 999) {
+            await ctx.db
+              .update(memberships)
+              .set({ creditsRemaining: ms.creditsRemaining + booking.creditsUsed })
+              .where(eq(memberships.id, ms.id));
+          }
+        }
+
+        // Notify the member
+        await notifyClassCancelled(
+          ctx.db,
+          booking.userId,
+          cls.name,
+          formatDateTime(cls.startsAt),
+          booking.creditsUsed,
+        );
+      }
+
+      // --- Cancel ALL corporate bookings (booked + waitlisted) ---
+      const activeCorpBookings = await ctx.db
+        .select()
+        .from(corporateBookings)
+        .where(
+          and(
+            eq(corporateBookings.classId, input.id),
+            inArray(corporateBookings.status, ["booked", "waitlisted"]),
+          ),
+        );
+
+      for (const booking of activeCorpBookings) {
+        await ctx.db
+          .update(corporateBookings)
+          .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+          .where(eq(corporateBookings.id, booking.id));
+
+        // Refund company credits for booked entries
+        if (booking.creditsUsed > 0) {
+          const company = await ctx.db
+            .select()
+            .from(companies)
+            .where(eq(companies.id, booking.companyId))
+            .get();
+
+          if (company) {
+            await ctx.db
+              .update(companies)
+              .set({
+                creditPoolBalance: company.creditPoolBalance + booking.creditsUsed,
+              })
+              .where(eq(companies.id, company.id));
+          }
+        }
+
+        // Notify the corporate member
+        await notifyClassCancelled(
+          ctx.db,
+          booking.userId,
+          cls.name,
+          formatDateTime(cls.startsAt),
+          booking.creditsUsed,
+        );
+      }
 
       return cls;
     }),

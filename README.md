@@ -1,111 +1,101 @@
-# 🏋️‍♂️ FlexFit Studio
+# 🏋️‍♂️ FlexFit Studio – Team Collaboration Hub
 
-A full-stack fitness class booking and membership management application built with **Next.js 15**, **tRPC**, **Drizzle ORM**, and **SQLite**.
+Welcome to the **FlexFit Studio** repository! This project is being actively developed as a collaborative team. This document serves as our team guide for setting up the project, branch conventions, team communication, and contribution workflows.
 
 ---
 
-## 🚀 Quick Start (How to Run This Project)
+## 👥 Team Communication & Workflow
 
-Follow these simple steps to set up and run the project locally on your machine after cloning.
+To work seamlessly as a single team without code conflicts:
 
-### 1. Clone the Repository
+### 1. Branching Strategy
+* **`main`**: Production-ready, stable code. Do not push directly to `main`.
+* **Feature / Task Branches**: Create branches using the naming convention:
+  * `feature/<feature-name>` (e.g., `feature/user-profile`)
+  * `fix/<bug-name>` (e.g., `fix/kiosk-checkin`)
+  * `refactor/<architecture-change>` (e.g., `refactor/architecture`)
+
 ```bash
+# Create and switch to your task branch
+git checkout -b feature/your-feature-name
+```
+
+### 2. Pull Request (PR) Process
+1. Before starting work, sync your branch with `main`:
+   ```bash
+   git checkout main
+   git pull origin main
+   git checkout feature/your-feature-name
+   git merge main
+   ```
+2. Commit your changes with clear messages (`git commit -m "feat: add user check-in button"`).
+3. Push your feature branch and open a Pull Request (PR) on GitHub.
+4. Notify the team for a code review before merging into `main`.
+
+---
+
+## 🚀 Quick Setup Guide for Team Members
+
+Follow these steps when setting up the project on your local machine after cloning:
+
+```bash
+# 1. Clone your team repository
 git clone https://github.com/KarthikKP2005/flexfit-studio.git
 cd flexfit-studio
-```
 
-### 2. Prerequisites
-Make sure you have **Node.js (v20 or newer)** installed.
-
-We recommend using **pnpm** as the package manager:
-```bash
-npm install -g pnpm
-```
-
----
-
-### 3. Setup & Start Server
-
-Run the following commands in order inside the project directory:
-
-#### Using `pnpm` (Recommended):
-```bash
-# 1. Install dependencies
+# 2. Install dependencies (pnpm recommended)
 pnpm install
 
-# 2. Push database schema & seed sample data
+# 3. Setup SQLite Database & Seed Data
 pnpm db:push
 pnpm db:seed
 
-# 3. Start the development server
+# 4. Start local development server
 pnpm dev
 ```
 
-#### Using `npm`:
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Push database schema & seed sample data
-npm run db:push
-npm run db:seed
-
-# 3. Start the development server
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser to start using the app! 🎉
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🔐 Pre-configured Test Accounts
+## 🔐 Shared Test Credentials
 
-Once the database is seeded (`db:seed`), you can log in using these demo credentials:
+Seed data creates standard accounts for testing all roles:
 
-| Role | Email | Password | Description |
+| Role | Email | Password | Access Details |
 | :--- | :--- | :--- | :--- |
-| 🛡️ **Admin** | `admin@flexfit.test` | `admin123` | Full administrative access |
-| 🏋️ **Trainer** | `arjun@flexfit.test` | `trainer123` | Class roster & attendance management |
-| 👤 **Member** | `rahul.k@example.com` | `member123` | Member booking & plan selection |
-
-> 💡 *Note: All demo member accounts use the password `member123`. You can inspect additional seeded emails in `src/db/seed.ts`.*
+| 🛡️ **Admin** | `admin@flexfit.test` | `admin123` | Management, system analytics, configuration |
+| 🏋️ **Trainer** | `arjun@flexfit.test` | `trainer123` | Class rosters, attendance tracking |
+| 👤 **Member** | `rahul.k@example.com` | `member123` | Class booking, waitlist, memberships |
 
 ---
 
-## 🛠️ Available Scripts
+## 🛠️ Common Team Commands
 
-| Command | Description |
+| Command | Usage in Team |
 | :--- | :--- |
-| `pnpm dev` | Starts the Next.js development server at `http://localhost:3000` |
-| `pnpm build` | Compiles the production build |
-| `pnpm db:push` | Syncs database schema (`src/db/schema.ts`) to SQLite (`flexfit.db`) |
-| `pnpm db:seed` | Populates SQLite database with sample classes, plans, & users |
-| `pnpm db:reset` | Resets SQLite database file, re-runs schema push & seed |
-| `pnpm test` | Runs unit tests using Vitest |
+| `pnpm dev` | Starts local dev server at `http://localhost:3000` |
+| `pnpm db:push` | Run whenever a teammate adds/updates database schema in `src/db/schema.ts` |
+| `pnpm db:seed` | Reseed your local database with fresh test data |
+| `pnpm db:reset` | Wipes local database file and re-seeds (use when local DB gets messy) |
+| `pnpm test` | Runs unit test suite before creating a PR |
 
 ---
 
-## 📁 Project Folder Structure
+## 📂 System Architecture & Shared Docs
 
-```text
-flexfit-studio/
-├── documents/       # Project design, behavior inventories & architecture notes
-├── src/
-│   ├── app/         # Next.js App Router (pages & API routes)
-│   ├── components/  # Reusable UI & layout components
-│   ├── db/          # Drizzle ORM schema, client setup, and seed scripts
-│   ├── lib/         # Utility helper functions
-│   └── server/      # tRPC backend context & routers
-├── drizzle.config.ts# Drizzle ORM configuration
-├── next.config.mjs  # Next.js configuration
-├── package.json     # Project dependencies & scripts
-└── README.md        # Documentation
-```
+Detailed team documentation is maintained in the [`documents/`](./documents) directory:
+
+- 📋 [Behavior Inventory](./documents/behavior-inventory.md) – User stories, features & flows.
+- 🗺️ [System Map](./documents/system-map.md) – Architecture layout, routes, and tRPC mappings.
+- 🏗️ [Architecture Plan](./documents/architecture-plan.md) – Technical roadmap & design patterns.
+- 🐛 [Known Issues](./documents/known-issues.md) – Common setup & runtime gotchas.
+- 📊 [Baseline Results](./documents/baseline-results.md) – Test coverage & build status.
 
 ---
 
-## ❓ Troubleshooting & Tips
+## 🤝 Team Rules & Best Practices
 
-* **Database Errors / HTTP 500 on start**: If API calls fail when loading the app for the first time, run `pnpm db:reset` to generate a fresh `flexfit.db` database with sample data.
-* **Schema Changes**: If you modify `src/db/schema.ts`, run `pnpm db:push` to apply the updates to your local SQLite database.
-* **Dev Server Conflict**: Avoid running `pnpm build` while `pnpm dev` is active. If you encounter missing module errors, stop the dev server, delete `.next` folder, and run `pnpm dev` again.
+1. **Database Schema Changes**: If you modify `src/db/schema.ts`, inform the team in group chat so everyone can run `pnpm db:push` on their local branch.
+2. **Never push broken builds**: Run `pnpm test` and ensure `pnpm dev` starts cleanly before creating your PR.
+3. **Keep PRs focused**: Keep pull requests focused on a single feature or bug fix so reviews are fast and simple.

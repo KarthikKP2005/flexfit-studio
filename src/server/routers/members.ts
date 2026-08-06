@@ -5,7 +5,10 @@ import { users, memberships, membershipPlans, bookings } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure, adminProcedure } from "../trpc";
 
 export const membersRouter = router({
+  // Fix #18/#19: Use the same membership filter as activeMembershipFor() in
+  // bookings.ts so dashboard and booking-eligibility always agree.
   profile: protectedProcedure.query(async ({ ctx }) => {
+    const today = new Date().toISOString().slice(0, 10);
     const membership = await ctx.db
       .select({
         id: memberships.id,
@@ -18,7 +21,14 @@ export const membersRouter = router({
       })
       .from(memberships)
       .innerJoin(membershipPlans, eq(memberships.planId, membershipPlans.id))
-      .where(eq(memberships.userId, ctx.user.id))
+      .where(
+        and(
+          eq(memberships.userId, ctx.user.id),
+          eq(memberships.status, "active"),
+          sql`${memberships.endDate} >= ${today}`,
+          sql`${memberships.startDate} <= ${today}`,
+        ),
+      )
       .orderBy(desc(memberships.endDate))
       .get();
 
@@ -29,6 +39,19 @@ export const membersRouter = router({
         and(eq(bookings.userId, ctx.user.id), eq(bookings.status, "attended")),
       );
 
+    const { companies, companyMembers } = await import("@/db/schema");
+    const companyRow = await ctx.db
+      .select({ id: companies.id, name: companies.name })
+      .from(companyMembers)
+      .innerJoin(companies, eq(companyMembers.companyId, companies.id))
+      .where(
+        and(
+          eq(companyMembers.userId, ctx.user.id),
+          eq(companies.active, true),
+        ),
+      )
+      .get();
+
     return {
       id: ctx.user.id,
       name: ctx.user.name,
@@ -36,6 +59,7 @@ export const membersRouter = router({
       phone: ctx.user.phone,
       role: ctx.user.role,
       membership: membership ?? null,
+      company: companyRow ?? null,
       classesAttended: Number(attended),
     };
   }),

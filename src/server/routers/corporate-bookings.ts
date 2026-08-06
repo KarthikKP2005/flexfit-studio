@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
   corporateBookings,
+  bookings,
   classes,
   companies,
   companyMembers,
@@ -10,6 +11,7 @@ import {
   users,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { promoteNextWaitlisted } from "./bookings";
 
 /**
  * Corporate members may cancel free of charge up to this many hours before
@@ -36,6 +38,31 @@ async function getCompanyForMember(
       ),
     )
     .get();
+}
+
+// ---------------------------------------------------------------------------
+// Fix #6: Unified capacity check — counts BOTH normal + corporate bookings.
+// ---------------------------------------------------------------------------
+async function totalBookedCount(
+  db: typeof import("@/db").db,
+  classId: number,
+): Promise<number> {
+  const [{ normalCount }] = await db
+    .select({ normalCount: sql<number>`count(*)` })
+    .from(bookings)
+    .where(and(eq(bookings.classId, classId), eq(bookings.status, "booked")));
+
+  const [{ corpCount }] = await db
+    .select({ corpCount: sql<number>`count(*)` })
+    .from(corporateBookings)
+    .where(
+      and(
+        eq(corporateBookings.classId, classId),
+        eq(corporateBookings.status, "booked"),
+      ),
+    );
+
+  return Number(normalCount) + Number(corpCount);
 }
 
 export const corporateBookingsRouter = router({
@@ -128,17 +155,9 @@ export const corporateBookingsRouter = router({
         });
       }
 
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(corporateBookings)
-        .where(
-          and(
-            eq(corporateBookings.classId, cls.id),
-            eq(corporateBookings.status, "booked"),
-          ),
-        );
-
-      const isFull = Number(count) >= cls.capacity;
+      // Fix #6: unified capacity — count BOTH normal + corporate bookings
+      const count = await totalBookedCount(ctx.db, cls.id);
+      const isFull = count >= cls.capacity;
 
       const created = await ctx.db
         .insert(corporateBookings)
@@ -221,44 +240,10 @@ export const corporateBookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes the member who has waited longest.
+      // Fix #7/#8: Use unified promotion — picks oldest across both queues,
+      // checks credits BEFORE promoting.
       if (row.booking.status === "booked") {
-        const next = await ctx.db
-          .select()
-          .from(corporateBookings)
-          .where(
-            and(
-              eq(corporateBookings.classId, row.cls.id),
-              eq(corporateBookings.status, "waitlisted"),
-            ),
-          )
-          .orderBy(asc(corporateBookings.bookedAt))
-          .get();
-
-        if (next) {
-          await ctx.db
-            .update(corporateBookings)
-            .set({ status: "booked", creditsUsed: row.cls.creditCost })
-            .where(eq(corporateBookings.id, next.id));
-
-          const company = await ctx.db
-            .select()
-            .from(companies)
-            .where(eq(companies.id, next.companyId))
-            .get();
-
-          if (company && company.creditPoolBalance >= row.cls.creditCost) {
-            await ctx.db
-              .update(companies)
-              .set({
-                creditPoolBalance: Math.max(
-                  0,
-                  company.creditPoolBalance - row.cls.creditCost,
-                ),
-              })
-              .where(eq(companies.id, company.id));
-          }
-        }
+        await promoteNextWaitlisted(ctx.db, row.cls.id, row.cls);
       }
 
       return { ok: true, refunded: refundable };

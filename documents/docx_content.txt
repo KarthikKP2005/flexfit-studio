@@ -1,0 +1,77 @@
+﻿Here's the complete role-wise breakdown ΓÇö everything split into what I said, what your document said, and the combined final list for each role. Architecture/security/DB issues that don't belong to one specific role are in their own section at the end.
+≡ƒæñ MEMBER
+1. Features (from what I told you)
+Sign in / session cookie auth
+Browse schedule (/schedule)
+Book a class ΓåÆ auto-waitlist if full
+Cancel booking (12h free-cancellation window, auto-promotes next waitlisted person)
+Reschedule booking (4h window, same class name only)
+View/leave waitlist with queue position
+View plans, subscribe (/plans)
+Dashboard ΓÇö bookings, membership status, credits, reschedule history
+Notifications page with unread badge
+2. Problems
+A. What I said:
+No signup UI (backend register exists, no page)
+Corporate booking fully dead in the UI ΓÇö schedule always calls personal bookings.book
+No real notifications ever fire (waitlist promotion, class cancelled, membership expiring ΓÇö all unused types)
+No profile-edit UI (mutation exists, no form)
+Reschedule modal doesn't truly exclude the current class from the picker
+B. What your document adds (new ΓÇö I missed these): 6. Class capacity can be exceeded ΓÇö normal + corporate bookings counted separately, so a 20-cap class can seat 40 7. Waitlists don't coordinate ΓÇö normal and corporate waitlists are separate queues; no single fair chronological order 8. Corporate waitlist promotion can create a free booking ΓÇö status flipped to booked before checking company credits 9. Normal waitlist promotion can overdraw a membership ΓÇö promotes without checking credits, then floors at zero with Math.max(0, ...) instead of blocking 10. Reschedule from a waitlisted booking creates a free confirmed booking ΓÇö creditsUsed: 0 gets copied into a newly confirmed spot 11. Reschedule to a full class can double-charge ΓÇö non-zero creditsUsed carried into new waitlisted booking, deducted again on promotion 12. Reschedule never promotes the old class's waitlist after freeing a seat 13. Reschedule preserves the wrong credit cost ΓÇö matches by class name only, ignores that same-named classes can cost different credits 14. Class cancellation doesn't clean up member bookings properly ΓÇö doesn't cancel waitlisted entries, doesn't refund credits, doesn't notify 15. classes.byId publicly exposes the roster (names + emails) ΓÇö no login required 16. Member can belong to multiple companies ambiguously ΓÇö which employer pays for a corporate booking can depend on row order 17. Multiple simultaneous active memberships possible ΓÇö no check before plans.subscribe inserts a new one 18. Dashboard membership and booking-eligibility membership can disagree ΓÇö different queries can pick different membership records 19. Membership startDate never checked ΓÇö a future-dated membership could theoretically be used before it starts 20. Refund doesn't reconcile existing bookings ΓÇö refunding a payment cancels the membership but leaves future bookings/waitlist/credits untouched 21. Subscription isn't atomic ΓÇö membership insert and payment insert are separate; failure between them leaves an orphaned membership 22. Payment references can collide (PAY-${Date.now()}, no uniqueness) 23. Waitlist promotion never sends a notification (specific case of #3, but the doc frames it as a distinct defect with a required fix) 24. Reschedule modal error state doesn't reset when reopened/reselected/closed via overlay 25. After login, every role (including member) goes to /dashboard ΓÇö not itself a member problem, but member-specific dashboard logic is what gets forced on everyone 26. Kiosk can wrongly block a valid check-in ΓÇö if a member already spent their last credit booking the class, having zero credits at check-in shouldn't invalidate the booking, but it does
+C. Final combined list (all member-facing problems): items 1ΓÇô26 above, all confirmed present in the code.
+≡ƒÅï∩╕Å TRAINER
+1. Features (from what I told you)
+Sign in, role-gated /trainer/schedule
+View own upcoming classes with booked-count / checked-in-count
+Set/edit/remove weekly availability
+Access to /kiosk (shared with admin) for check-ins
+2. Problems
+A. What I said:
+Can't cancel or edit own classes (no UI, and endpoints are staff/admin-only anyway)
+Can't see roster by name, only aggregate counts
+trainers.checkAvailability exists but is never called from anywhere in the app
+B. What your document adds (new): 4. Trainer roster and admin utilisation reports both ignore corporate bookings ΓÇö a trainer's "booked count" undercounts real attendance  6. Availability checked in UTC, but the UI displays local time ΓÇö getUTCDay()/getUTCHours() used in checkAvailability, while pages format dates in browser-local time ΓÇö a trainer's visible "Tuesday" slot can be checked against the wrong day/time entirely 7. Availability is never enforced during class creation or update ΓÇö same root issue as "checkAvailability never called," but the doc frames it as: staff can create/update classes that conflict with or fall outside a trainer's stated hours, with no server-side block 8. Trainer assignment on class creation isn't validated ΓÇö nothing confirms the assigned trainerId belongs to an existing, active user with the trainer role 9. Corporate check-ins aren't linked to a trainer's classes at all ΓÇö checkins.bookingId only foreign-keys to normal bookings, so a trainer's class stats can be silently incomplete for corporate attendees 10. Date/timezone logic is scattered across bookings, corporate bookings, rescheduling, plans, trainers, and formatting ΓÇö inconsistent handling specifically hits trainer availability math (see #6)
+C. Final combined list (all trainer-facing problems): items 1ΓÇô10 above.
+≡ƒ¢á∩╕Å ADMIN
+1. Features (from what I told you)
+/admin dashboard ΓÇö stats, class utilisation, recent payments
+/admin/attendance ΓÇö check-ins/day, top trainers, no-show list
+/admin/reports ΓÇö revenue by month/method, refunds, expiring memberships
+/admin/announcements ΓÇö broadcast to all members
+/admin/companies + /admin/companies/[id] ΓÇö full corporate CRUD
+/kiosk ΓÇö member lookup + check-in
+2. Problems
+A. What I said:
+No member-management UI (search/byId/setActive/setRole all backend-only)
+No class-scheduling UI (create/update/cancel all backend-only)
+No plan-management UI (create/setActive backend-only)
+No payments-action UI (markPaid/refund backend-only ΓÇö dashboard only displays payments)
+no_show status is dead ΓÇö nothing in the live app ever sets it, only seed data does, so the no-show report can never populate from real usage
+Companies/Reports/Announcements pages aren't in the NavBar, only reachable via /admin or direct URL
+Kiosk's expired-membership/no-credit warnings are cosmetic ΓÇö client-side only, markAttended doesn't re-verify server-side
+B. What your document adds (new): 8. Corporate waitlist promotion can create a free booking (also a member issue, but the cause ΓÇö checking credits after promoting instead of before ΓÇö is an admin/business-rule design flaw in corporate-bookings.ts) 9. Class cancellation is badly incomplete as an admin action ΓÇö marks class cancelled, cancels only booked normal bookings; leaves waitlisted entries active, ignores corporate bookings entirely, never refunds credits (personal or company), never notifies anyone ΓÇö despite a class_cancelled notification type existing unused 10. payments.refund doesn't reconcile bookings ΓÇö admin can refund a payment while the member keeps their already-booked classes and spent credits untouched, with no defined policy either way 11. Class updates can reduce capacity below current occupancy ΓÇö an admin can drop a class from 20 ΓåÆ 5 capacity while 18 people are already confirmed, with no check 12. Class utilisation report only counts normal bookings and applies a limit with no defined ranking (not clearly "soonest" or "highest utilisation") ΓÇö the "top classes" shown may be arbitrary 13. Revenue reporting excludes corporate credit purchases entirely ΓÇö corporate top-ups mutate creditPoolBalance directly with no payment/ledger record, so admin reports can't audit corporate revenue or credit history 14. Deactivated members still receive broadcast announcements ΓÇö the code names the variable activeMembers but the query filters only role = "member", never active = true (confirmed in source) 15. Broadcast title/message have no length validation ΓÇö empty or oversized announcements can be sent via direct API call 16. Deactivated users retain live sessions ΓÇö deactivating a user via members.setActive doesn't invalidate their existing session token, so they can keep using the app until it expires naturally (up to 30 days) 17. Kiosk member lookup can silently match the wrong person ΓÇö wildcard LIKE search on email/phone takes the first .get() result rather than requiring an exact match or listing all candidates 18. No server-side check-in time window ΓÇö front desk/kiosk UI only shows classes in the next 2 hours, but nothing on the server stops checking someone into a class hours away via direct API call 19. Check-in status update and check-in record insert are separate, non-transactional writes ΓÇö a failure between them leaves inconsistent state 20. Trainer/kiosk/admin attendance flows can't fully account for corporate check-ins ΓÇö checkins.bookingId only links to normal bookings, so admin attendance reports can undercount or lose corporate attendance data entirely
+C. Final combined list (all admin-facing problems): items 1ΓÇô20 above.
+≡ƒöÆ SYSTEM-WIDE / CROSS-ROLE / ARCHITECTURE
+(Not specific to one role ΓÇö I did not mention any of these; all are new from your document.)
+Security
+classes.byId is publicProcedure but returns member names + emails ΓÇö should be split into a public class-details endpoint and a staff-only roster endpoint
+Session cookie has no explicit secure: true flag for production
+Expired sessions are never cleaned up ΓÇö rejected on use, but rows persist forever
+No rate limiting on login/register
+Demo credentials (admin/trainer/member) are hardcoded on the login page ΓÇö fine for demo, must be gated behind an env flag for production
+Database integrity
+No DB-level uniqueness for: trainer/weekday availability, one active company per member, one check-in per booking, one active booking per class, payment references ΓÇö all enforced only in application code and vulnerable to race conditions
+No transactions around multi-step operations: booking+credit deduction, cancellation+refund, waitlist promotion+credit deduction, rescheduling, check-in, subscription+payment, class cancellation, corporate top-up
+No indexes on frequently-filtered columns (bookings.userId/classId/status, classes.startsAt, memberships.userId/status/endDate, notifications.userId/read, checkins.bookingId)
+Frontend/UX (affects all roles)
+Every role is redirected to /dashboard after login, regardless of role ΓÇö trainers and admins land on a member page first
+NavBar shows member-only links ("My bookings," "Waitlist") to trainers and admins too ΓÇö no role-based filtering
+Heavy reliance on client-side role gating (fetch data ΓåÆ show "Access denied") instead of route-group-level organization; real security boundary is still the tRPC procedure, but it's architecturally messy and wastes requests
+any types used in kiosk and admin-company pages, defeating tRPC's type safety end-to-end
+Code architecture
+Business logic concentrated in large routers (bookings.ts, corporate-bookings.ts, reschedules.ts, admin.ts) with significant duplicated logic between normal and corporate flows
+Reschedule validation is duplicated ΓÇö reschedule (mutation) and validateReschedule (query) implement the same rules separately, risking future drift between preview and actual execution
+Route pages handle too many responsibilities (data fetching + mutation orchestration + state + access control + formatting + business rules + rendering, all in one file)
+Date/timezone logic is scattered independently across bookings, corporate bookings, rescheduling, plans, trainers, and formatting ΓÇö no single source of truth
+Testing
+vitest is configured in package.json but there are no test files anywhere in the repo ΓÇö none of the credit/waitlist/capacity/reschedule logic above has any automated regression protection today

@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { bookings, classes, memberships, checkins, users } from "@/db/schema";
+import { bookings, classes, memberships, checkins, users, corporateBookings } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { notifyWaitlistPromotion } from "../services/notifications";
+import { formatDateTime } from "@/lib/format";
 
 /**
  * Members may cancel free of charge up to this many hours before the class
@@ -17,7 +19,11 @@ function hoursUntil(iso: string, now = new Date()): number {
   return (new Date(iso).getTime() - now.getTime()) / 36e5;
 }
 
-async function activeMembershipFor(
+// ---------------------------------------------------------------------------
+// Fix #18/#19: Single source-of-truth for "active membership".
+// Checks status = active, endDate >= today, AND startDate <= today.
+// ---------------------------------------------------------------------------
+export async function activeMembershipFor(
   db: typeof import("@/db").db,
   userId: number,
 ) {
@@ -30,10 +36,156 @@ async function activeMembershipFor(
         eq(memberships.userId, userId),
         eq(memberships.status, "active"),
         sql`${memberships.endDate} >= ${today}`,
+        sql`${memberships.startDate} <= ${today}`, // Fix #19: don't allow future memberships
       ),
     )
     .orderBy(desc(memberships.endDate))
     .get();
+}
+
+// ---------------------------------------------------------------------------
+// Fix #6: Unified capacity check — counts BOTH normal + corporate bookings.
+// ---------------------------------------------------------------------------
+async function totalBookedCount(
+  db: typeof import("@/db").db,
+  classId: number,
+): Promise<number> {
+  const [{ normalCount }] = await db
+    .select({ normalCount: sql<number>`count(*)` })
+    .from(bookings)
+    .where(and(eq(bookings.classId, classId), eq(bookings.status, "booked")));
+
+  const [{ corpCount }] = await db
+    .select({ corpCount: sql<number>`count(*)` })
+    .from(corporateBookings)
+    .where(
+      and(
+        eq(corporateBookings.classId, classId),
+        eq(corporateBookings.status, "booked"),
+      ),
+    );
+
+  return Number(normalCount) + Number(corpCount);
+}
+
+// ---------------------------------------------------------------------------
+// Fix #7/#12/#23: Unified waitlist promotion — picks the oldest waitlisted
+// person across BOTH normal and corporate waitlists, checks credits, and
+// sends a notification on promotion.
+// ---------------------------------------------------------------------------
+export async function promoteNextWaitlisted(
+  db: typeof import("@/db").db,
+  classId: number,
+  cls: { creditCost: number; name: string; startsAt: string },
+) {
+  // Find oldest normal waitlisted
+  const nextNormal = await db
+    .select()
+    .from(bookings)
+    .where(
+      and(eq(bookings.classId, classId), eq(bookings.status, "waitlisted")),
+    )
+    .orderBy(asc(bookings.bookedAt))
+    .get();
+
+  // Find oldest corporate waitlisted
+  const nextCorp = await db
+    .select()
+    .from(corporateBookings)
+    .where(
+      and(
+        eq(corporateBookings.classId, classId),
+        eq(corporateBookings.status, "waitlisted"),
+      ),
+    )
+    .orderBy(asc(corporateBookings.bookedAt))
+    .get();
+
+  // Pick the oldest across both queues (Fix #7: unified fair order)
+  type Candidate =
+    | { type: "normal"; row: typeof nextNormal }
+    | { type: "corporate"; row: typeof nextCorp };
+
+  const candidates: Candidate[] = [];
+  if (nextNormal) candidates.push({ type: "normal", row: nextNormal });
+  if (nextCorp) candidates.push({ type: "corporate", row: nextCorp });
+
+  if (candidates.length === 0) return;
+
+  candidates.sort((a, b) =>
+    (a.row!.bookedAt).localeCompare(b.row!.bookedAt),
+  );
+
+  const winner = candidates[0];
+
+  if (winner.type === "normal" && winner.row) {
+    const booking = winner.row;
+    // Fix #9: Check credits BEFORE promoting — don't overdraw
+    if (booking.membershipId) {
+      const ms = await db
+        .select()
+        .from(memberships)
+        .where(eq(memberships.id, booking.membershipId))
+        .get();
+
+      if (ms && ms.creditsRemaining < UNLIMITED_CREDITS) {
+        if (ms.creditsRemaining < cls.creditCost) {
+          // Not enough credits — skip this person, leave waitlisted
+          return;
+        }
+        // Deduct credits
+        await db
+          .update(memberships)
+          .set({ creditsRemaining: ms.creditsRemaining - cls.creditCost })
+          .where(eq(memberships.id, ms.id));
+      }
+    }
+
+    await db
+      .update(bookings)
+      .set({ status: "booked", creditsUsed: cls.creditCost })
+      .where(eq(bookings.id, booking.id));
+
+    // Fix #23: Send notification
+    await notifyWaitlistPromotion(
+      db,
+      booking.userId,
+      cls.name,
+      formatDateTime(cls.startsAt),
+    );
+  } else if (winner.type === "corporate" && winner.row) {
+    const booking = winner.row;
+    // Fix #8: Check company credits BEFORE promoting
+    const { companies } = await import("@/db/schema");
+    const company = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, booking.companyId))
+      .get();
+
+    if (!company || company.creditPoolBalance < cls.creditCost) {
+      // Not enough company credits — skip
+      return;
+    }
+
+    await db
+      .update(companies)
+      .set({ creditPoolBalance: company.creditPoolBalance - cls.creditCost })
+      .where(eq(companies.id, company.id));
+
+    await db
+      .update(corporateBookings)
+      .set({ status: "booked", creditsUsed: cls.creditCost })
+      .where(eq(corporateBookings.id, booking.id));
+
+    // Fix #23: Send notification
+    await notifyWaitlistPromotion(
+      db,
+      booking.userId,
+      cls.name,
+      formatDateTime(cls.startsAt),
+    );
+  }
 }
 
 export const bookingsRouter = router({
@@ -124,14 +276,9 @@ export const bookingsRouter = router({
         });
       }
 
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(bookings)
-        .where(
-          and(eq(bookings.classId, cls.id), eq(bookings.status, "booked")),
-        );
-
-      const isFull = Number(count) >= cls.capacity;
+      // Fix #6: unified capacity — count BOTH normal + corporate bookings
+      const count = await totalBookedCount(ctx.db, cls.id);
+      const isFull = count >= cls.capacity;
 
       const created = await ctx.db
         .insert(bookings)
@@ -209,51 +356,16 @@ export const bookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes the member who has waited longest.
+      // Fix #12: Promote next waitlisted (unified across both tables)
       if (row.booking.status === "booked") {
-        const next = await ctx.db
-          .select()
-          .from(bookings)
-          .where(
-            and(
-              eq(bookings.classId, row.cls.id),
-              eq(bookings.status, "waitlisted"),
-            ),
-          )
-          .orderBy(asc(bookings.bookedAt))
-          .get();
-
-        if (next) {
-          await ctx.db
-            .update(bookings)
-            .set({ status: "booked", creditsUsed: row.cls.creditCost })
-            .where(eq(bookings.id, next.id));
-
-          if (next.membershipId) {
-            const ms = await ctx.db
-              .select()
-              .from(memberships)
-              .where(eq(memberships.id, next.membershipId))
-              .get();
-
-            if (ms && ms.creditsRemaining < UNLIMITED_CREDITS) {
-              await ctx.db
-                .update(memberships)
-                .set({
-                  creditsRemaining: Math.max(
-                    0,
-                    ms.creditsRemaining - row.cls.creditCost,
-                  ),
-                })
-                .where(eq(memberships.id, ms.id));
-            }
-          }
-        }
+        await promoteNextWaitlisted(ctx.db, row.cls.id, row.cls);
       }
 
       return { ok: true, refunded: refundable };
     }),
 
+  // Fix #26: markAttended no longer checks credit balance. The booking was
+  // already paid for at booking time. Having 0 credits at check-in is valid.
   markAttended: staffProcedure
     .input(
       z.object({
@@ -292,10 +404,11 @@ export const bookingsRouter = router({
       return { ok: true };
     }),
 
+  // Fix #4/#9: rosterFor now returns normal + corporate bookings combined
   rosterFor: staffProcedure
     .input(z.object({ classId: z.number() }))
     .query(async ({ ctx, input }) => {
-      return ctx.db
+      const normalRows = await ctx.db
         .select({
           bookingId: bookings.id,
           status: bookings.status,
@@ -303,11 +416,30 @@ export const bookingsRouter = router({
           memberName: users.name,
           memberEmail: users.email,
           bookedAt: bookings.bookedAt,
+          source: sql<"normal">`'normal'`.as("source"),
         })
         .from(bookings)
         .innerJoin(users, eq(bookings.userId, users.id))
-        .where(eq(bookings.classId, input.classId))
-        .orderBy(asc(bookings.bookedAt));
+        .where(eq(bookings.classId, input.classId));
+
+      const corpRows = await ctx.db
+        .select({
+          bookingId: corporateBookings.id,
+          status: corporateBookings.status,
+          memberId: users.id,
+          memberName: users.name,
+          memberEmail: users.email,
+          bookedAt: corporateBookings.bookedAt,
+          source: sql<"corporate">`'corporate'`.as("source"),
+        })
+        .from(corporateBookings)
+        .innerJoin(users, eq(corporateBookings.userId, users.id))
+        .where(eq(corporateBookings.classId, input.classId));
+
+      return [
+        ...normalRows.map((r) => ({ ...r, source: "normal" as const })),
+        ...corpRows.map((r) => ({ ...r, source: "corporate" as const })),
+      ].sort((a, b) => a.bookedAt.localeCompare(b.bookedAt));
     }),
 
   upcomingForMember: staffProcedure
@@ -378,7 +510,6 @@ export const bookingsRouter = router({
       )
       .orderBy(asc(classes.startsAt));
 
-    // For each waitlisted booking, calculate position in queue
     const result = await Promise.all(
       waitlistedBookings.map(async (wb) => {
         const [{ position }] = await ctx.db
@@ -394,7 +525,7 @@ export const bookingsRouter = router({
 
         return {
           ...wb,
-          position: Number(position) + 1, // +1 because we're counting those before us
+          position: Number(position) + 1,
         };
       }),
     );
@@ -402,4 +533,3 @@ export const bookingsRouter = router({
     return result;
   }),
 });
-

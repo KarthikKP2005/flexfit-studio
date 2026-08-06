@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 
@@ -11,9 +12,19 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   const login = trpc.auth.login.useMutation({
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await utils.invalidate();
-      router.push("/dashboard");
+      // Fix #25: Role-based redirect after login
+      switch (data.role) {
+        case "admin":
+          router.push("/admin");
+          break;
+        case "trainer":
+          router.push("/trainer/schedule");
+          break;
+        default:
+          router.push("/dashboard");
+      }
     },
   });
 
@@ -64,6 +75,17 @@ export default function LoginPage() {
           {login.isPending ? "Signing in..." : "Sign in"}
         </button>
       </form>
+
+      <p className="text-sm text-center muted">
+        Don&apos;t have an account?{" "}
+        <Link
+          href="/register"
+          className="font-medium"
+          style={{ color: "var(--accent)" }}
+        >
+          Create one
+        </Link>
+      </p>
 
       <div className="panel p-4 text-sm muted">
         <p className="mb-2 font-medium" style={{ color: "var(--text)" }}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
@@ -10,6 +10,7 @@ interface RescheduleModalProps {
   fromBookingId: number;
   fromClassName: string;
   fromClassTime: string;
+  fromClassId: number; // Fix #5: pass class ID to properly exclude it
   onSuccess: () => void;
 }
 
@@ -19,10 +20,19 @@ export function RescheduleModal({
   fromBookingId,
   fromClassName,
   fromClassTime,
+  fromClassId,
   onSuccess,
 }: RescheduleModalProps) {
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Fix #24: Reset error and selection when modal opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      setError(null);
+      setSelectedClassId(null);
+    }
+  }, [isOpen]);
 
   const utils = trpc.useUtils();
 
@@ -36,9 +46,9 @@ export function RescheduleModal({
     }
   );
 
-  // Filter to only same-name classes (excluding the original)
+  // Fix #5: Filter to same-name classes AND exclude the current class by ID
   const sameNameClasses = (availableClasses || []).filter(
-    (cls) => cls.name === fromClassName
+    (cls) => cls.name === fromClassName && cls.id !== fromClassId
   );
 
   const reschedule = trpc.reschedules.reschedule.useMutation({
@@ -48,6 +58,7 @@ export function RescheduleModal({
       await utils.reschedules.history.invalidate();
       await utils.classes.list.invalidate();
       setSelectedClassId(null);
+      setError(null);
       onClose();
       onSuccess();
     },
@@ -69,7 +80,10 @@ export function RescheduleModal({
         justifyContent: "center",
         zIndex: 50,
       }}
-      onClick={onClose}
+      onClick={() => {
+        setError(null); // Fix #24: clear error on overlay click
+        onClose();
+      }}
     >
       <div
         className="panel space-y-4 p-6"
@@ -117,6 +131,9 @@ export function RescheduleModal({
                 </div>
                 <p className="muted text-xs mt-1">
                   {formatDateTime(cls.startsAt)} • {cls.room}
+                  {cls.creditCost !== undefined && (
+                    <span> • {cls.creditCost} credit{cls.creditCost === 1 ? "" : "s"}</span>
+                  )}
                 </p>
               </button>
             ))
@@ -131,7 +148,10 @@ export function RescheduleModal({
           <button
             className="btn"
             disabled={reschedule.isPending}
-            onClick={onClose}
+            onClick={() => {
+              setError(null);
+              onClose();
+            }}
           >
             Cancel
           </button>

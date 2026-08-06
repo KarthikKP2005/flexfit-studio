@@ -31,7 +31,7 @@ export function NavBar() {
           Schedule
         </Link>
 
-        {user && (
+        {user?.role === "member" && (
           <>
             <Link href="/dashboard" className="text-sm muted hover:text-white">
               My bookings
