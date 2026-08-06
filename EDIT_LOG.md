@@ -10,6 +10,42 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-06 — FIX(auth): add member signup page
+
+**Type:** FIX
+**Defect:** AUTH-002
+**Behavior change:** yes — a new route (`/signup`) now exists and is
+reachable from `/login` and `NavBar`. No existing route, procedure input/
+output, error code, or error message changed; `auth.register` and
+`auth.login` were called exactly as they already existed, not modified.
+**Files:** `src/app/signup/page.tsx` (new), `src/app/login/page.tsx`
+(fixed a now-inaccurate header comment claiming no signup page exists;
+added a "Create an account" link), `src/components/NavBar.tsx` (added a
+"Sign up" button next to "Sign in" for signed-out visitors)
+**Tests:** no automated test harness in this branch (removed at request
+on `organizing-the-code`) — verified manually against the running dev
+server via direct HTTP calls to the tRPC endpoints:
+1. `auth.register` with a fresh email → 200, returns `{id, name}`.
+2. `auth.login` with the same email/password → 200, returns
+   `{id, name, role}`, sets a session cookie.
+3. `auth.me` with that cookie → returns the newly-created user, confirming
+   the session is real and the signup→login chain actually authenticates.
+4. A second `auth.register` with the same email → `CONFLICT`, unchanged
+   message, confirming the existing duplicate-email behavior still holds.
+Also ran `tsc --noEmit` and `pnpm build` (clean, `/signup` compiles as a
+static route). The test user created during manual verification was
+deleted from the dev database afterward so `flexfit.db` is unpolluted.
+
+Closes plan.md's member-flow item #1 ("No signup UI — backend register
+exists, no page") and known-issues.md's AUTH-002. `auth.register` was
+read closely for other defects before building on top of it — found
+none; plan.md's own framing already treats it as backend-correct,
+UI-only gap, which the manual verification above confirms. No other
+files were touched — AUTH-001 (passwordHash leak via `auth.me`) is
+unrelated to this fix and remains open.
+
+---
+
 ## 2026-08-06 — CHORE: remove all test files and test infrastructure
 
 **Type:** CHORE

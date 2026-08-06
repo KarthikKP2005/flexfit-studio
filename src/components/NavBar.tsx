@@ -102,9 +102,14 @@ export function NavBar() {
               </button>
             </>
           ) : (
-            <Link href="/login" className="btn">
-              Sign in
-            </Link>
+            <>
+              <Link href="/signup" className="btn">
+                Sign up
+              </Link>
+              <Link href="/login" className="btn btn-primary">
+                Sign in
+              </Link>
+            </>
           )}
         </div>
       </nav>

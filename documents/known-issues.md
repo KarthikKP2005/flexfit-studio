@@ -46,6 +46,40 @@ signed in` — passes today, documenting the leak.
 
 ---
 
+### AUTH-002 — No member signup UI (backend `register` had no caller)
+
+**Severity:** Medium (feature gap, not a misbehaving code path — new
+members could previously only be created by an admin or via seed data)
+**Status:** Fixed on branch `signup-member`
+**Area:** Authentication / Member onboarding
+**File:** `src/app/signup/page.tsx` (new), `src/app/login/page.tsx`,
+`src/components/NavBar.tsx`
+
+**Original behavior:** `auth.ts`'s `register` mutation existed and
+worked correctly (creates a `role: "member"` account, rejects a
+duplicate email with `CONFLICT`), but no page in `src/app/**` ever
+called it — see plan.md's member-flow item #1. The only ways to create a
+member account were the admin backend or `seed.ts`.
+
+**Fix:** added `/signup`, a new page composing the *unmodified*
+`auth.register` mutation with the existing `auth.login` mutation —
+registers the account, then immediately signs in with the same
+credentials and redirects to `/dashboard`, since `register` itself never
+created a session. Linked from `/login` ("New here? Create an account")
+and from `NavBar` (a "Sign up" button next to "Sign in" for signed-out
+visitors). Neither `auth.register` nor `auth.login` was changed — same
+input schema, same output shape, same error codes/messages, verified via
+direct HTTP calls against the running dev server (register → login with
+the returned credentials → `auth.me` confirms the session → a second
+register with the same email correctly returns `CONFLICT`).
+
+**Not in scope for this fix:** AUTH-001 (passwordHash still returned by
+`auth.me`) is untouched and still reproducible from the new page's own
+flow — this fix only closes the "no UI" gap, not other auth-related
+defects.
+
+---
+
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
 
 **Severity:** Low (a deactivated user can't sign in to read it, so the
