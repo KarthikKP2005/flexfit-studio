@@ -91,11 +91,26 @@ export async function checkTrainerAvailability(
 }
 
 export const trainersRouter = router({
-  // -------------------------------------------------------------------------
-  // Upcoming classes for the logged-in trainer.
-  // Fix #4/#9: now includes total booked count (normal + corporate combined).
-  // -------------------------------------------------------------------------
+  /**
+   * Returns all upcoming (non-cancelled, future) classes for the logged-in trainer.
+   *
+   * WHY (TRAINER-04): The original query only counted rows from the `bookings`
+   * table. Corporate bookings live in a separate `corporateBookings` table, so
+   * the "booked count" shown to trainers was systematically lower than actual
+   * attendance. A trainer with 15 personal + 5 corporate bookings would see
+   * "15 booked" instead of "20 booked". This fix adds a second subquery for
+   * corporate bookings and sums the two into `totalBookedCount`.
+   *
+   * Defect: TRAINER-04 ("Trainer roster and admin utilisation reports both
+   *         ignore corporate bookings")
+   * Source: finallist_phase1.docx — Trainer Problem #4
+   *
+   * @returns Array of class objects with normalBookedCount,
+   *          corporateBookedCount, totalBookedCount, and checkinCount.
+   * @throws FORBIDDEN if the caller's role is not "trainer"
+   */
   upcomingClasses: protectedProcedure.query(async ({ ctx }) => {
+    // Role gate: this endpoint is trainer-only
     if (ctx.user.role !== "trainer") {
       throw new TRPCError({
         code: "FORBIDDEN",
@@ -114,19 +129,22 @@ export const trainersRouter = router({
         durationMin: classes.durationMin,
         capacity: classes.capacity,
         cancelled: classes.cancelled,
-        // Count of normal confirmed/attended bookings
+        // TRAINER-04: Subquery counting personal-membership confirmed/attended bookings
         normalBookedCount: sql<number>`(
           select count(*) from ${bookings}
           where ${bookings.classId} = ${classes.id}
             and (${bookings.status} = 'booked' or ${bookings.status} = 'attended')
         )`.as("normal_booked_count"),
-        // Count of corporate confirmed/attended bookings
+        // TRAINER-04: Subquery counting corporate confirmed/attended bookings
+        // Without this, corporate attendees were invisible to trainers.
         corporateBookedCount: sql<number>`(
           select count(*) from ${corporateBookings}
           where ${corporateBookings.classId} = ${classes.id}
             and (${corporateBookings.status} = 'booked' or ${corporateBookings.status} = 'attended')
         )`.as("corporate_booked_count"),
-        // Total check-ins (normal only — corporate check-ins link to normal bookings)
+        // Check-in count via the checkins table (joined through normal bookings).
+        // KNOWN LIMITATION (TRAINER-09): corporate check-ins that don't link
+        // through bookings.id won't appear here — see known-issues.md.
         checkinCount: sql<number>`(
           select count(*) from ${checkins}
           inner join ${bookings} on ${checkins.bookingId} = ${bookings.id}
@@ -143,6 +161,8 @@ export const trainersRouter = router({
       )
       .orderBy(classes.startsAt);
 
+    // Map raw SQL counts (returned as strings by SQLite) to numbers and
+    // compute the unified totalBookedCount that the UI displays.
     return rows.map((r) => ({
       ...r,
       totalBookedCount: Number(r.normalBookedCount) + Number(r.corporateBookedCount),
