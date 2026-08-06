@@ -23,11 +23,16 @@ export async function checkTrainerAvailability(
   durationMin: number,
   excludeClassId?: number,
 ): Promise<{ available: boolean; reason?: string }> {
-  // Use LOCAL time (not UTC) so the day/hour matches what the trainer sees in
-  // the browser. Bug #6 was using getUTCDay()/getUTCHours() here.
+  // TRAINER-06: Use LOCAL time (getDay/getHours) instead of UTC methods
+  // (getUTCDay/getUTCHours). The trainer schedule UI formats the availability
+  // days/hours based on the browser's local timezone. If the server evaluates
+  // them in UTC, a 9am Monday class in New York (EST, UTC-5) would evaluate as
+  // 2pm Monday, potentially rejecting a valid slot or accepting an invalid one.
   const classStart = new Date(startsAt);
   const classEnd = new Date(classStart.getTime() + durationMin * 60000);
 
+  // Rule: evaluate against the trainer's stated availability on the same local
+  // day-of-week they selected in the UI.
   const dayOfWeek = classStart.getDay(); // LOCAL day-of-week (0=Sun…6=Sat)
   const startTimeStr =
     String(classStart.getHours()).padStart(2, "0") +
