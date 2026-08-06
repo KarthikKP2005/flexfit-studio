@@ -11,11 +11,43 @@ import {
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 
-// ---------------------------------------------------------------------------
-// Internal helper: check if a class time falls within a trainer's stated
-// availability, using LOCAL time (not UTC) so the check matches the UI.
-// Returns { available: true } or { available: false, reason: string }
-// ---------------------------------------------------------------------------
+/**
+ * Checks whether a trainer is available for a proposed class time slot.
+ *
+ * This function is the single source of truth for trainer scheduling
+ * conflicts. It is called from:
+ *   1. `classes.create` — blocks class creation if trainer unavailable
+ *   2. `classes.update` — blocks time/trainer changes if unavailable
+ *   3. `trainers.checkAvailability` — exposes the check as a tRPC query
+ *      for UI pre-validation
+ *
+ * WHY this exists (TRAINER-03): Before this fix, the function existed in the
+ * codebase but was never actually called from anywhere. Class creation and
+ * updates could freely schedule a trainer during their off-hours or double-
+ * book them. Now it is wired into classes.create and classes.update as a
+ * mandatory server-side gate.
+ *
+ * The function performs two checks:
+ *   a) Does the trainer have an availability record for this day of the week,
+ *      and does the proposed time fall within that window?
+ *   b) Does the trainer already have another (non-cancelled) class that
+ *      overlaps with the proposed time range?
+ *
+ * IMPORTANT (TRAINER-06): Uses LOCAL time (getDay/getHours) not UTC
+ * (getUTCDay/getUTCHours) — see fix/trainer-06 for the timezone rationale.
+ *
+ * Defect: TRAINER-03 ("checkAvailability exists but is never called")
+ * Source: finallist_phase1.docx — Trainer Problem #3
+ *
+ * @param db       — Drizzle database instance
+ * @param trainerId — the trainer's user ID
+ * @param startsAt  — ISO-8601 string of the proposed class start time
+ * @param durationMin — class duration in minutes
+ * @param excludeClassId — optional class ID to exclude from overlap check
+ *                         (used during class updates so the class doesn't
+ *                         conflict with itself)
+ * @returns { available: true } or { available: false, reason: string }
+ */
 export async function checkTrainerAvailability(
   db: Parameters<Parameters<typeof protectedProcedure.query>[0]>[0]["ctx"]["db"],
   trainerId: number,
@@ -74,6 +106,10 @@ export async function checkTrainerAvailability(
       ),
     );
 
+  // Walk every non-cancelled class this trainer is assigned to and check for
+  // time-range overlap with the proposed slot. If excludeClassId is set (i.e.
+  // we are updating an existing class), skip that class so it doesn't falsely
+  // conflict with itself.
   for (const cls of conflictingClasses) {
     if (excludeClassId && cls.id === excludeClassId) continue;
     const existStart = new Date(cls.startsAt);
@@ -299,13 +335,27 @@ export const trainersRouter = router({
       return { success: true };
     }),
 
-  // -------------------------------------------------------------------------
-  // Availability check — now uses LOCAL time via the shared helper.
-  // Fix #3: Now exposed as a proper query that can be called from the UI or
-  // server-side (classes.create/update enforce it too — see classes.ts).
-  // Fix #6/#10: Delegates to checkTrainerAvailability() which uses getDay()
-  // instead of getUTCDay() — local time matches UI display.
-  // -------------------------------------------------------------------------
+  /**
+   * Public tRPC query exposing checkTrainerAvailability() for UI pre-validation.
+   *
+   * WHY (TRAINER-03): Before this fix, the availability-checking logic existed
+   * but was only a dead-code helper. This procedure exposes it so the admin
+   * class-scheduling UI can show live feedback ("trainer available" / "conflict")
+   * before the form is submitted. The actual enforcement happens server-side
+   * in `classes.create` and `classes.update` — this query is a convenience
+   * preview, not a security gate.
+   *
+   * Defect: TRAINER-03 ("checkAvailability exists but is never called")
+   * Also relates to: TRAINER-06 (UTC fix), TRAINER-10 (timezone centralization)
+   * Source: finallist_phase1.docx — Trainer Problems #3, #6, #10
+   *
+   * @param trainerId — the trainer to check
+   * @param startsAt — proposed class start (ISO-8601)
+   * @param durationMin — class duration in minutes
+   * @param excludeClassId — optional, skip this class from overlap check
+   * @returns { available: boolean, reason?: string }
+   * @throws FORBIDDEN if caller is not a trainer or admin
+   */
   checkAvailability: protectedProcedure
     .input(
       z.object({
@@ -316,6 +366,7 @@ export const trainersRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
+      // Role gate: only trainers and admins may check trainer availability
       if (ctx.user.role !== "trainer" && ctx.user.role !== "admin") {
         throw new TRPCError({
           code: "FORBIDDEN",
