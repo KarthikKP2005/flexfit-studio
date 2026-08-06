@@ -12,11 +12,38 @@ import {
   SESSION_COOKIE,
 } from "../trpc";
 
+/**
+ * Sign-up, sign-in, sign-out, and "who am I" for all roles. Not
+ * responsible for: authorization (see trpc.ts's procedure builders) or
+ * password strength beyond the zod min-length check below.
+ */
+
 const SESSION_DAYS = 30;
 
 export const authRouter = router({
+  /**
+   * Returns the signed-in user from context, or null if not signed in.
+   *
+   * Behavior note (see AUTH-001 in known-issues.md — not fixed here):
+   * returns ctx.user unmodified, which includes passwordHash. Every
+   * authenticated client currently receives their own password hash on
+   * every call to this procedure.
+   */
   me: publicProcedure.query(({ ctx }) => ctx.user),
 
+  /**
+   * Verifies email/password, creates a session row, and sets the
+   * flexfit_session cookie. Returns only {id, name, role} — unlike `me`,
+   * this does not leak passwordHash.
+   *
+   * Behavior note: the zod .email() check runs on the raw input before
+   * this handler's .toLowerCase().trim() — a value with surrounding
+   * whitespace is rejected as an invalid email, not silently trimmed.
+   *
+   * @throws UNAUTHORIZED if the email doesn't exist or the password is wrong
+   *   (same message either way, so a caller can't distinguish the two)
+   * @throws FORBIDDEN if the account has been deactivated (active: false)
+   */
   login: publicProcedure
     .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
@@ -61,6 +88,13 @@ export const authRouter = router({
       return { id: user.id, name: user.name, role: user.role };
     }),
 
+  /**
+   * Creates a new member account (role is always "member" — there is no
+   * self-serve way to register as trainer/admin). Does not sign the new
+   * user in; that's a separate `login` call.
+   *
+   * @throws CONFLICT if the (lowercased/trimmed) email is already registered
+   */
   register: publicProcedure
     .input(
       z.object({
@@ -100,6 +134,12 @@ export const authRouter = router({
       return { id: created.id, name: created.name };
     }),
 
+  /**
+   * Deletes the current session row (if ctx.token is set — a caller with
+   * a signed-in user but no token, which shouldn't occur through the real
+   * cookie flow but is possible via a caller built directly, skips the
+   * delete) and always clears the flexfit_session cookie.
+   */
   logout: protectedProcedure.mutation(async ({ ctx }) => {
     if (ctx.token) {
       await ctx.db.delete(sessions).where(eq(sessions.token, ctx.token));

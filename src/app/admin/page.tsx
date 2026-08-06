@@ -4,6 +4,17 @@ import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { formatMoney, formatDateTime } from "@/lib/format";
 
+/**
+ * Admin dashboard: headline stats, class utilisation, recent payments,
+ * and links to Companies/Reports/Announcements — the only place those
+ * three pages are reachable from, since NavBar doesn't link them.
+ *
+ * Behavior note: unlike attendance/trainer-schedule/kiosk, this page has
+ * no client-side role check of its own — a non-admin just sees
+ * `admin.stats`'s FORBIDDEN error message raw, not a friendly
+ * "Access denied." The server-side rejection is still the real security
+ * boundary either way.
+ */
 export default function AdminPage() {
   const { data: stats, isLoading, error } = trpc.admin.stats.useQuery(undefined, {
     retry: false,

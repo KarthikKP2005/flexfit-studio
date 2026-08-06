@@ -4,7 +4,16 @@ import { eq, and, gte } from "drizzle-orm";
 import { classes, users, trainerAvailability } from "@/db/schema";
 import { router, protectedProcedure } from "../trpc";
 
+/**
+ * Trainer self-service: own upcoming classes, weekly availability CRUD,
+ * and an availability/conflict check used for scheduling. Every
+ * procedure role-checks manually (not staffProcedure) since "trainer" is
+ * the specific role required, not "trainer or admin" — except
+ * checkAvailability, which staff and trainers can both call.
+ */
+
 export const trainersRouter = router({
+  /** This trainer's own future, non-cancelled classes. @throws FORBIDDEN if the caller isn't a trainer */
   upcomingClasses: protectedProcedure.query(async ({ ctx }) => {
     if (ctx.user.role !== "trainer") {
       throw new TRPCError({
@@ -35,6 +44,7 @@ export const trainersRouter = router({
       .orderBy(classes.startsAt);
   }),
 
+  /** This trainer's own weekly availability rows. @throws FORBIDDEN if the caller isn't a trainer */
   availability: protectedProcedure.query(async ({ ctx }) => {
     if (ctx.user.role !== "trainer") {
       throw new TRPCError({
@@ -52,6 +62,16 @@ export const trainersRouter = router({
     return rows;
   }),
 
+  /**
+   * Upserts this trainer's availability for one day of week — updates
+   * the existing row for that day if one exists, otherwise inserts.
+   *
+   * Behavior note (see TRAINER-001 in known-issues.md — not fixed here):
+   * startTime/endTime accept any string, not just HH:mm, and there's no
+   * check that startTime is before endTime.
+   *
+   * @throws FORBIDDEN if the caller isn't a trainer
+   */
   setAvailability: protectedProcedure
     .input(
       z.object({
@@ -103,6 +123,13 @@ export const trainersRouter = router({
       }
     }),
 
+  /**
+   * Removes this trainer's availability row for one day of week, if one
+   * exists. Always returns { success: true }, even if there was nothing
+   * to remove.
+   *
+   * @throws FORBIDDEN if the caller isn't a trainer
+   */
   removeAvailability: protectedProcedure
     .input(z.object({ dayOfWeek: z.number().int().min(0).max(6) }))
     .mutation(async ({ ctx, input }) => {
@@ -133,6 +160,21 @@ export const trainersRouter = router({
       return { success: true };
     }),
 
+  /**
+   * Checks whether `trainerId` is free at `startsAt` for `durationMin`:
+   * has an availability row for that day, the requested window falls
+   * inside it, and it doesn't overlap an existing non-cancelled class of
+   * theirs. This procedure exists but is never invoked from
+   * classes.ts's create/update — nothing currently stops staff from
+   * scheduling a class that this check would flag.
+   *
+   * Behavior note (see TRAINER-002 in known-issues.md — not fixed here):
+   * day-of-week and clock time are derived via getUTCDay()/getUTCHours(),
+   * i.e. availability rows are implicitly in UTC, not a trainer's local
+   * time.
+   *
+   * @throws FORBIDDEN if the caller is neither a trainer nor an admin
+   */
   checkAvailability: protectedProcedure
     .input(
       z.object({
@@ -195,6 +237,8 @@ export const trainersRouter = router({
           ),
         );
 
+      // Check every one of this trainer's non-cancelled classes for a
+      // time overlap with the requested window; stop at the first hit.
       for (const cls of conflictingClasses) {
         const existStart = new Date(cls.startsAt);
         const existEnd = new Date(

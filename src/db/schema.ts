@@ -1,6 +1,17 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text, real } from "drizzle-orm/sqlite-core";
 
+/**
+ * Drizzle table definitions for the whole app — the single source of
+ * truth for what's in flexfit.db. Not responsible for: query logic,
+ * business rules, or validation (those live in the routers/services that
+ * use these tables). Per AGENT_RULES.md Rule 1.2, changes here need a
+ * migration, a recorded reason in architecture-decisions.md, and a check
+ * that nothing downstream breaks — this pass only adds comments, no
+ * column/type/constraint changed.
+ */
+
+/** Every person with an account: members, trainers, admins (see `role`). */
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   email: text("email").notNull().unique(),
@@ -16,6 +27,11 @@ export const users = sqliteTable("users", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * Auth session tokens, one row per signed-in device/browser. `token` is
+ * the value stored in the flexfit_session cookie (see trpc.ts's
+ * SESSION_COOKIE / createContext).
+ */
 export const sessions = sqliteTable("sessions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
@@ -28,6 +44,11 @@ export const sessions = sqliteTable("sessions", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * Purchasable plan catalog (name, price, duration, class credits).
+ * `memberships` rows reference these; deactivating a plan (active: false)
+ * does not affect memberships already created from it.
+ */
 export const membershipPlans = sqliteTable("membership_plans", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -38,6 +59,14 @@ export const membershipPlans = sqliteTable("membership_plans", {
   active: integer("active", { mode: "boolean" }).notNull().default(true),
 });
 
+/**
+ * A member's purchased plan instance. `creditsRemaining >=
+ * UNLIMITED_CREDITS` (999, see bookings.ts) is treated as an unlimited
+ * plan that never decrements. `status` is tracked independently of the
+ * date range — a row can be status: "active" with an already-past
+ * endDate; callers that need "usable today" check both (see bookings.ts's
+ * activeMembershipFor).
+ */
 export const memberships = sqliteTable("memberships", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
@@ -57,6 +86,12 @@ export const memberships = sqliteTable("memberships", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * A single scheduled class instance, not a recurring series — two
+ * "Sunrise Yoga" sessions on different days are two separate rows with
+ * the same `name`. Same-named instances are not required to share the
+ * same `creditCost`.
+ */
 export const classes = sqliteTable("classes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -73,6 +108,13 @@ export const classes = sqliteTable("classes", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * A member's personal booking, paid from their own membership credits.
+ * Structurally parallel to `corporateBookings` below (same status/credit
+ * shape), which is paid from a company's credit pool instead — the two
+ * tables are tracked, capacitated, and waitlisted independently of each
+ * other in the current code.
+ */
 export const bookings = sqliteTable("bookings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   classId: integer("class_id")
@@ -94,6 +136,13 @@ export const bookings = sqliteTable("bookings", {
   cancelledAt: text("cancelled_at"),
 });
 
+/**
+ * Attendance record. `bookingId` only foreign-keys to `bookings`
+ * (personal) — corporate check-ins currently insert this with
+ * `bookingId: null` (see corporate-bookings.ts's markAttended), so a
+ * corporate attendee's check-in row can't be traced back to their
+ * corporate booking through this column.
+ */
 export const checkins = sqliteTable("checkins", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
@@ -108,6 +157,11 @@ export const checkins = sqliteTable("checkins", {
     .default("front_desk"),
 });
 
+/**
+ * One row per payment event. `plans.ts`'s subscribe mutation inserts one
+ * automatically as status: "paid" — there's no real payment gateway
+ * involved, purchase is instant.
+ */
 export const payments = sqliteTable("payments", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
@@ -125,6 +179,12 @@ export const payments = sqliteTable("payments", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * `type` includes waitlist_promotion / class_cancelled /
+ * membership_expiring, but only "announcement" (admin broadcast, see
+ * notifications.ts) is ever inserted anywhere in the current code — the
+ * other three types are defined here but never triggered.
+ */
 export const notifications = sqliteTable("notifications", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
@@ -142,6 +202,12 @@ export const notifications = sqliteTable("notifications", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * One row per trainer per day-of-week (`dayOfWeek` 0-6). trainers.ts's
+ * checkAvailability compares this against getUTCDay()/getUTCHours(), so
+ * `startTime`/`endTime` here are effectively interpreted as UTC clock
+ * times, not the trainer's local time.
+ */
 export const trainerAvailability = sqliteTable("trainer_availability", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   trainerId: integer("trainer_id")
@@ -155,6 +221,12 @@ export const trainerAvailability = sqliteTable("trainer_availability", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * Audit trail of a reschedule action — links the cancelled fromBooking/
+ * fromClass to the new toBooking/toClass it was moved to. Carries no
+ * credit information itself; that lives on the `bookings` rows it
+ * references.
+ */
 export const reschedules = sqliteTable("reschedules", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
@@ -177,6 +249,11 @@ export const reschedules = sqliteTable("reschedules", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * A corporate account with a shared credit pool (`creditPoolBalance`)
+ * that its linked employees (see `companyMembers`) draw from via
+ * `corporateBookings`.
+ */
 export const companies = sqliteTable("companies", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -188,6 +265,12 @@ export const companies = sqliteTable("companies", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * Links a user to a company. The schema does not enforce one active
+ * company per user — nothing here prevents a user from being linked to
+ * more than one company at once (see admin-companies.ts's linkMember,
+ * which only rejects a duplicate of the same user+company pair).
+ */
 export const companyMembers = sqliteTable("company_members", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
@@ -201,6 +284,12 @@ export const companyMembers = sqliteTable("company_members", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * Same status/credit shape as `bookings`, but paid from the linked
+ * company's `creditPoolBalance` instead of a personal membership. Kept as
+ * a separate table rather than a variant of `bookings` in this pass — see
+ * architecture-decisions.md for the reasoning.
+ */
 export const corporateBookings = sqliteTable("corporate_bookings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   classId: integer("class_id")

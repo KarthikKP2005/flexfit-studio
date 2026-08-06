@@ -3,6 +3,12 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { NavBar } from "@/components/NavBar";
 
+/**
+ * Root layout: global styles, the tRPC/React Query provider tree, and
+ * the persistent NavBar around every route. Not responsible for:
+ * auth/role gating of individual pages — that happens per-page (see
+ * each route's own client component).
+ */
 export const metadata: Metadata = {
   title: "FlexFit Studio",
   description: "Class booking and membership management for FlexFit Studio.",

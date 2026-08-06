@@ -4,6 +4,12 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
+/**
+ * Modal for picking a same-named class to reschedule an existing
+ * booking into. Not responsible for: excluding the original class from
+ * the picker — see the behavior note on `sameNameClasses` below, this
+ * component doesn't receive the original class's id at all.
+ */
 interface RescheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -36,7 +42,12 @@ export function RescheduleModal({
     }
   );
 
-  // Filter to only same-name classes (excluding the original)
+  // Behavior note: despite the comment above, this does NOT exclude the
+  // original class — it only checks the name, and the component is
+  // never given the original class's id to compare against. The
+  // original class stays selectable; picking it fails server-side with
+  // "You already have an active booking for this class." See plan.md
+  // item #37.
   const sameNameClasses = (availableClasses || []).filter(
     (cls) => cls.name === fromClassName
   );
@@ -56,6 +67,10 @@ export function RescheduleModal({
     },
   });
 
+  // Behavior note: `error` is only ever set (in onError above), never
+  // reset — reopening the modal, picking a different target class, or
+  // closing via the overlay all leave a previous error message visible
+  // until the next failed submit overwrites it. See plan.md item #38.
   if (!isOpen) return null;
 
   return (

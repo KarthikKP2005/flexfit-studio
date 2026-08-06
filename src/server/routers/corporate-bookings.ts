@@ -12,15 +12,32 @@ import {
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 
 /**
+ * Corporate (company-credit-pool-funded) class bookings — structurally
+ * parallel to bookings.ts's personal bookings, but a separate table with
+ * its own capacity/waitlist/credit handling that is never reconciled
+ * against the personal side (see CORP-002/CORP-003 in known-issues.md).
+ * Not responsible for: which company a member belongs to when they
+ * belong to more than one (see COMPANY-001 — getCompanyForMember below
+ * just takes whichever active-company link `.get()` happens to return).
+ */
+
+/**
  * Corporate members may cancel free of charge up to this many hours before
  * the class starts. Cancelling later still frees the spot but forfeits the credit.
  */
 export const CORPORATE_FREE_CANCELLATION_HOURS = 24;
 
+/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
 function hoursUntil(iso: string, now = new Date()): number {
   return (new Date(iso).getTime() - now.getTime()) / 36e5;
 }
 
+/**
+ * The active company this user is linked to, if any. Uses a single-row
+ * `.get()` with no ordering — if a user is linked to more than one
+ * active company (schema allows it, see COMPANY-001), which one this
+ * returns is arbitrary.
+ */
 async function getCompanyForMember(
   db: typeof import("@/db").db,
   userId: number,
@@ -39,6 +56,7 @@ async function getCompanyForMember(
 }
 
 export const corporateBookingsRouter = router({
+  /** The caller's own corporate bookings, soonest first; past excluded unless includePast. */
   mine: protectedProcedure
     .input(z.object({ includePast: z.boolean().default(false) }).default({}))
     .query(async ({ ctx, input }) => {
@@ -68,6 +86,21 @@ export const corporateBookingsRouter = router({
       );
     }),
 
+  /**
+   * Books the caller into a class against their linked company's credit
+   * pool, or waitlists them if full.
+   *
+   * Behavior note (see CORP-002 in known-issues.md — not fixed here):
+   * "full" is judged from `corporateBookings` alone — a class already
+   * at capacity from personal bookings (see bookings.ts) can still
+   * accept a confirmed corporate booking here.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   * @throws BAD_REQUEST if the class is cancelled or has already started
+   * @throws CONFLICT if the caller already has an active booking for this class
+   * @throws FORBIDDEN if the caller isn't linked to an active company, or
+   *   that company doesn't have enough credit pool balance
+   */
   book: protectedProcedure
     .input(z.object({ classId: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -164,6 +197,23 @@ export const corporateBookingsRouter = router({
       return created;
     }),
 
+  /**
+   * Cancels a corporate booking and, if eligible, refunds the credit
+   * pool. Also promotes the longest-waiting *corporate* waitlisted
+   * booking into the freed seat, if the cancelled booking was confirmed.
+   *
+   * Behavior notes (see known-issues.md, not fixed here):
+   * - CORP-001: promotion confirms the booking before checking whether
+   *   the company can afford it — insufficient credits skip the
+   *   deduction but not the confirmation, producing a free booking.
+   * - CORP-003: only ever considers the corporate waitlist — a personal
+   *   member waiting for the same class is never considered here, and
+   *   bookings.ts's cancel never considers this table either.
+   *
+   * @throws NOT_FOUND if the booking doesn't exist
+   * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
+   * @throws BAD_REQUEST if the booking is already cancelled/attended
+   */
   cancel: protectedProcedure
     .input(z.object({ bookingId: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -221,7 +271,10 @@ export const corporateBookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes the member who has waited longest.
+      // Freeing a confirmed spot promotes the member who has waited
+      // longest among *corporate* waitlisted bookings for this class
+      // only (see CORP-003 — the personal-bookings waitlist for the
+      // same class is never considered here).
       if (row.booking.status === "booked") {
         const next = await ctx.db
           .select()
@@ -236,6 +289,8 @@ export const corporateBookingsRouter = router({
           .get();
 
         if (next) {
+          // Confirms the booking first, then only *maybe* deducts the
+          // cost below — see CORP-001, this ordering is the bug.
           await ctx.db
             .update(corporateBookings)
             .set({ status: "booked", creditsUsed: row.cls.creditCost })
@@ -264,6 +319,18 @@ export const corporateBookingsRouter = router({
       return { ok: true, refunded: refundable };
     }),
 
+  /**
+   * Checks a corporate booking's member in: marks the booking attended
+   * and records a checkin row.
+   *
+   * Behavior note (see CORP-004 in known-issues.md — not fixed here):
+   * `checkins.bookingId` only foreign-keys to the personal `bookings`
+   * table, so the inserted checkin always has `bookingId: null` — it can
+   * never be traced back to this corporate booking.
+   *
+   * @throws NOT_FOUND if the booking doesn't exist
+   * @throws BAD_REQUEST if the booking isn't currently "booked"
+   */
   markAttended: staffProcedure
     .input(
       z.object({
@@ -301,6 +368,7 @@ export const corporateBookingsRouter = router({
       return { ok: true };
     }),
 
+  /** Every corporate booking (any status) for a class, with member and company name, oldest first. */
   rosterFor: staffProcedure
     .input(z.object({ classId: z.number() }))
     .query(async ({ ctx, input }) => {

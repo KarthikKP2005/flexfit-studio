@@ -4,7 +4,24 @@ import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { users, memberships, membershipPlans, bookings } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure, adminProcedure } from "../trpc";
 
+/**
+ * Member self-service (profile) plus staff-facing member directory
+ * (search, lookup, activate/deactivate, role changes). Not responsible
+ * for: what counts as a member's "current" membership in booking
+ * eligibility — that's a separate query in bookings.ts, and the two can
+ * disagree (see MEMBER-002 in known-issues.md).
+ */
+
 export const membersRouter = router({
+  /**
+   * The caller's own profile: user fields, their membership (see
+   * behavior note below), and a count of attended classes.
+   *
+   * Behavior note (see MEMBER-002 in known-issues.md — not fixed here):
+   * `membership` is whichever row has the latest endDate, regardless of
+   * status — a cancelled/expired membership can be shown as current if
+   * it happens to have a later endDate than the actually-active one.
+   */
   profile: protectedProcedure.query(async ({ ctx }) => {
     const membership = await ctx.db
       .select({
@@ -40,6 +57,7 @@ export const membersRouter = router({
     };
   }),
 
+  /** Updates the caller's own name and/or phone. Fields omitted from the input are left untouched. */
   updateProfile: protectedProcedure
     .input(
       z.object({
@@ -56,6 +74,13 @@ export const membersRouter = router({
         .get();
     }),
 
+  /**
+   * Staff directory search by name/email substring.
+   *
+   * Behavior note: not restricted to role "member" — matches any user
+   * (member, trainer, or admin), and with an empty query returns every
+   * user up to `limit`, not just members.
+   */
   search: staffProcedure
     .input(z.object({ q: z.string().default(""), limit: z.number().default(50) }))
     .query(async ({ ctx, input }) => {
@@ -78,6 +103,12 @@ export const membersRouter = router({
         .limit(input.limit);
     }),
 
+  /**
+   * Full user detail plus membership history, for staff. Strips
+   * passwordHash before returning (unlike auth.ts's `me` — see AUTH-001).
+   *
+   * @throws NOT_FOUND if the user doesn't exist
+   */
   byId: staffProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -109,6 +140,15 @@ export const membersRouter = router({
       return { ...safe, memberships: history };
     }),
 
+  /**
+   * Activates/deactivates a user account.
+   *
+   * Behavior note (see MEMBER-003 in known-issues.md — not fixed here):
+   * a nonexistent id silently returns undefined instead of throwing
+   * NOT_FOUND. Also: this does not invalidate the user's existing
+   * sessions (see trpc.ts's createContext note) — deactivating someone
+   * doesn't sign them out.
+   */
   setActive: adminProcedure
     .input(z.object({ id: z.number(), active: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -120,6 +160,13 @@ export const membersRouter = router({
         .get();
     }),
 
+  /**
+   * Changes a user's role.
+   *
+   * Behavior note (see MEMBER-003 in known-issues.md — not fixed here):
+   * a nonexistent id silently returns undefined instead of throwing
+   * NOT_FOUND.
+   */
   setRole: adminProcedure
     .input(z.object({ id: z.number(), role: z.enum(["member", "trainer", "admin"]) }))
     .mutation(async ({ ctx, input }) => {
@@ -131,6 +178,17 @@ export const membersRouter = router({
         .get();
     }),
 
+  /**
+   * Kiosk/front-desk lookup by email or phone substring, restricted to
+   * role "member" (a match on a trainer/admin's email is treated as not
+   * found).
+   *
+   * Behavior note (see MEMBER-001 in known-issues.md — not fixed here):
+   * wildcard match with no ordering and a single `.get()` — if more than
+   * one member matches, which one is returned is arbitrary.
+   *
+   * @throws NOT_FOUND if no user matches, or the match isn't a member
+   */
   lookupByEmailOrPhone: staffProcedure
     .input(z.object({ query: z.string() }))
     .query(async ({ ctx, input }) => {

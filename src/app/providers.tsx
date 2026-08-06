@@ -6,6 +6,12 @@ import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { trpc } from "@/lib/trpc";
 
+/**
+ * Client-side tRPC + React Query setup, shared by every page. Not
+ * responsible for: auth state itself — pages/components query
+ * `trpc.auth.me` individually rather than this provider exposing a
+ * single auth context.
+ */
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>

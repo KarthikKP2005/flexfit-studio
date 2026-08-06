@@ -3,6 +3,13 @@
 import { trpc } from "@/lib/trpc";
 import { formatDate, formatDateTime } from "@/lib/format";
 
+/**
+ * 14-day attendance dashboard: check-ins by day, top trainers, no-shows.
+ *
+ * Behavior note: the no-shows section will stay empty in a real (non-
+ * seeded) deployment — nothing in the app ever transitions a booking to
+ * `no_show` (see admin.ts's `noShowList` comment).
+ */
 export default function AdminAttendancePage() {
   const { data: user } = trpc.auth.me.useQuery();
   const { data: checkinsPerDay, isLoading: checkinsLoading } =

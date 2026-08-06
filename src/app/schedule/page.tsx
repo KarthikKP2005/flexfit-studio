@@ -3,6 +3,13 @@
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
+/**
+ * Public class browser and personal-booking entry point. Not
+ * responsible for: corporate bookings — always calls the personal
+ * `bookings.book`, with no way for a company-linked member to spend
+ * their employer's credit pool from this page (that flow has no UI
+ * anywhere in the app; see corporate-bookings.ts).
+ */
 export default function SchedulePage() {
   const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();

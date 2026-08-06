@@ -4,6 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 
+/**
+ * Sign-in form. Not responsible for: registration (no signup page exists
+ * — auth.ts's `register` mutation has no UI caller anywhere in the app)
+ * or role-aware routing after login (see the redirect note below).
+ */
 export default function LoginPage() {
   const router = useRouter();
   const utils = trpc.useUtils();
@@ -13,6 +18,9 @@ export default function LoginPage() {
   const login = trpc.auth.login.useMutation({
     onSuccess: async () => {
       await utils.invalidate();
+      // Behavior note: every role lands on /dashboard (the member view)
+      // regardless of the signed-in user's actual role — trainers and
+      // admins have to navigate away manually. See plan.md item #39.
       router.push("/dashboard");
     },
   });
@@ -65,6 +73,9 @@ export default function LoginPage() {
         </button>
       </form>
 
+      {/* Demo credentials are hardcoded here unconditionally — fine for
+          this demo repo, but would need gating behind an env flag before
+          any production deployment. See plan.md item #51. */}
       <div className="panel p-4 text-sm muted">
         <p className="mb-2 font-medium" style={{ color: "var(--text)" }}>
           Demo accounts

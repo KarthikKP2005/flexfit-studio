@@ -5,6 +5,14 @@ import { bookings, classes, memberships, checkins, users } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 
 /**
+ * Personal (membership-credit-funded) class bookings: browse, book,
+ * cancel, check-in, and waitlist. Not responsible for: corporate
+ * bookings — corporate-bookings.ts is a structurally parallel but
+ * entirely separate table/flow, not reconciled against this one for
+ * capacity or waitlist order (see plan.md's capacity/waitlist findings).
+ */
+
+/**
  * Members may cancel free of charge up to this many hours before the class
  * starts. Cancelling later still frees the spot but forfeits the credit.
  */
@@ -13,10 +21,18 @@ export const FREE_CANCELLATION_HOURS = 12;
 /** Plans with this many credits are treated as unlimited and never decrement. */
 export const UNLIMITED_CREDITS = 999;
 
+/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
 function hoursUntil(iso: string, now = new Date()): number {
   return (new Date(iso).getTime() - now.getTime()) / 36e5;
 }
 
+/**
+ * The membership this user should book/pay against right now: status
+ * "active" and endDate >= today, most-distant endDate first if somehow
+ * more than one qualifies. Does not check startDate (see MEMBER-002-
+ * adjacent gap: members.ts's `profile` uses a different, less strict
+ * query and the two can disagree on which membership is "current").
+ */
 async function activeMembershipFor(
   db: typeof import("@/db").db,
   userId: number,
@@ -37,6 +53,7 @@ async function activeMembershipFor(
 }
 
 export const bookingsRouter = router({
+  /** The caller's own bookings, soonest first; past classes excluded unless includePast. */
   mine: protectedProcedure
     .input(z.object({ includePast: z.boolean().default(false) }).default({}))
     .query(async ({ ctx, input }) => {
@@ -64,6 +81,18 @@ export const bookingsRouter = router({
       );
     }),
 
+  /**
+   * Books the caller into a class, or waitlists them if it's full.
+   * Waitlisted bookings always have creditsUsed: 0 — credit is only
+   * spent once a confirmed spot exists.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   * @throws BAD_REQUEST if the class is cancelled or has already started
+   * @throws CONFLICT if the caller already has an active (booked or
+   *   waitlisted) booking for this class
+   * @throws FORBIDDEN if the caller has no active membership, or their
+   *   membership doesn't have enough credits for this class's creditCost
+   */
   book: protectedProcedure
     .input(z.object({ classId: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -155,6 +184,22 @@ export const bookingsRouter = router({
       return created;
     }),
 
+  /**
+   * Cancels a member's booking and, if eligible, refunds the credit.
+   * Also promotes the longest-waiting waitlisted booking into the freed
+   * seat, if the cancelled booking was a confirmed one.
+   *
+   * Behavior notes (do not "fix" silently — see BOOK-004 in
+   * known-issues.md):
+   * - Refund only applies if cancelled >= FREE_CANCELLATION_HOURS before
+   *   class start, and only if the booking had actually spent a credit.
+   * - Promotion does not currently re-check the promoted member's
+   *   credit balance — see BOOK-004.
+   *
+   * @throws NOT_FOUND if the booking doesn't exist
+   * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
+   * @throws BAD_REQUEST if the booking is already cancelled/attended
+   */
   cancel: protectedProcedure
     .input(z.object({ bookingId: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -209,7 +254,10 @@ export const bookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes the member who has waited longest.
+      // Freeing a confirmed spot promotes the member who has waited
+      // longest — find the single oldest waitlisted booking for this
+      // class (see BOOK-004: this does not check whether that member's
+      // membership still has enough credits before promoting them).
       if (row.booking.status === "booked") {
         const next = await ctx.db
           .select()
@@ -254,6 +302,16 @@ export const bookingsRouter = router({
       return { ok: true, refunded: refundable };
     }),
 
+  /**
+   * Checks a member in: marks the booking attended and records a
+   * checkin row. Two separate writes, not wrapped in a transaction.
+   * Does not enforce a check-in time window server-side — the 2-hour
+   * window in the kiosk UI is not re-verified here (a direct API call
+   * could check in a booking for a class hours away).
+   *
+   * @throws NOT_FOUND if the booking doesn't exist
+   * @throws BAD_REQUEST if the booking isn't currently "booked"
+   */
   markAttended: staffProcedure
     .input(
       z.object({
@@ -292,6 +350,7 @@ export const bookingsRouter = router({
       return { ok: true };
     }),
 
+  /** Every personal booking (any status) for a class, with member name/email, oldest first. */
   rosterFor: staffProcedure
     .input(z.object({ classId: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -310,6 +369,12 @@ export const bookingsRouter = router({
         .orderBy(asc(bookings.bookedAt));
     }),
 
+  /**
+   * A member's confirmed, non-cancelled bookings starting within the
+   * next `hoursAhead` hours (default 2) — used by the kiosk to show who
+   * can check in soon. Personal bookings only; a corporate attendee's
+   * upcoming classes aren't included (see corporate-bookings.ts).
+   */
   upcomingForMember: staffProcedure
     .input(z.object({ userId: z.number(), hoursAhead: z.number().default(2) }))
     .query(async ({ ctx, input }) => {
@@ -344,6 +409,7 @@ export const bookingsRouter = router({
         .orderBy(classes.startsAt);
     }),
 
+  /** Count of check-ins recorded against personal bookings for a class. */
   checkinCountFor: staffProcedure
     .input(z.object({ classId: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -356,6 +422,7 @@ export const bookingsRouter = router({
       return { count: Number(result?.count ?? 0) };
     }),
 
+  /** The caller's own waitlisted bookings, each with its 1-indexed queue position. */
   waitlisted: protectedProcedure.query(async ({ ctx }) => {
     const waitlistedBookings = await ctx.db
       .select({
@@ -378,7 +445,9 @@ export const bookingsRouter = router({
       )
       .orderBy(asc(classes.startsAt));
 
-    // For each waitlisted booking, calculate position in queue
+    // For each of the caller's waitlisted bookings, count how many
+    // other waitlisted bookings for that same class are older, to
+    // derive this one's position in the queue.
     const result = await Promise.all(
       waitlistedBookings.map(async (wb) => {
         const [{ position }] = await ctx.db

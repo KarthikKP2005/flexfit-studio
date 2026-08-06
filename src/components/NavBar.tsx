@@ -4,6 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 
+/**
+ * Persistent top navigation, rendered on every page via layout.tsx.
+ * Determines what to show from `trpc.auth.me` client-side. Not
+ * responsible for: actually restricting access to the pages it links to
+ * — that's enforced server-side by each tRPC procedure's role check.
+ *
+ * Behavior note: "My bookings" and "Waitlist" are shown to *any*
+ * signed-in user (`{user && (...)}`, not role-gated), so trainers and
+ * admins see these member-specific links too, alongside their own
+ * role-specific ones. See plan.md item #40.
+ */
 export function NavBar() {
   const router = useRouter();
   const utils = trpc.useUtils();

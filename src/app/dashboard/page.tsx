@@ -5,6 +5,14 @@ import { trpc } from "@/lib/trpc";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { RescheduleModal } from "@/components/reschedule-modal";
 
+/**
+ * Member-facing home: membership summary, upcoming bookings with
+ * cancel/reschedule actions, and reschedule history. Not responsible
+ * for: corporate bookings (only personal `bookings`/`reschedules` are
+ * queried here) or role-aware content — this is the page every role
+ * lands on after login regardless of their actual role (see
+ * login/page.tsx's redirect note).
+ */
 export default function DashboardPage() {
   const [rescheduleModal, setRescheduleModal] = useState<{
     isOpen: boolean;

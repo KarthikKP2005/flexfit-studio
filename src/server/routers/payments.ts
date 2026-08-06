@@ -4,7 +4,16 @@ import { desc, eq } from "drizzle-orm";
 import { payments, users, memberships, membershipPlans } from "@/db/schema";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 
+/**
+ * Payment records: a member's own history, the admin-facing full list,
+ * and admin mark-paid/refund actions. Not responsible for: actually
+ * processing a payment (there's no gateway — plans.ts's subscribe
+ * inserts a "paid" row directly) or reconciling bookings/credits when a
+ * payment is refunded (see PAY-001 in known-issues.md).
+ */
+
 export const paymentsRouter = router({
+  /** The caller's own payments, newest first, with the plan name joined in. */
   mine: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db
       .select({
@@ -23,6 +32,7 @@ export const paymentsRouter = router({
       .orderBy(desc(payments.createdAt));
   }),
 
+  /** All payments across all users, newest first, capped at `limit` (default 100). */
   all: adminProcedure
     .input(z.object({ limit: z.number().default(100) }).default({}))
     .query(async ({ ctx, input }) => {
@@ -43,6 +53,14 @@ export const paymentsRouter = router({
         .limit(input.limit);
     }),
 
+  /**
+   * Sets a payment's status to "paid". Only blocks the "refunded" case —
+   * a "pending" or even a "failed" payment can be marked paid directly,
+   * consistent with there being no real payment gateway to fail against.
+   *
+   * @throws NOT_FOUND if the payment doesn't exist
+   * @throws BAD_REQUEST if the payment is currently "refunded"
+   */
   markPaid: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -70,6 +88,18 @@ export const paymentsRouter = router({
         .get();
     }),
 
+  /**
+   * Sets a payment's status to "refunded" and, if it's linked to a
+   * membership, cancels that membership.
+   *
+   * Behavior note (see PAY-001 in known-issues.md — not fixed here):
+   * does not touch any bookings already made against the cancelled
+   * membership, and does not adjust its remaining credits — a member
+   * keeps classes they were refunded for.
+   *
+   * @throws NOT_FOUND if the payment doesn't exist
+   * @throws BAD_REQUEST if the payment isn't currently "paid"
+   */
   refund: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {

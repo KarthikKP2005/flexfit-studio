@@ -3,6 +3,13 @@
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
+/**
+ * Notification inbox with mark-all-read. Not responsible for:
+ * generating notifications — in practice this list is only ever
+ * populated by admin broadcasts (notifications.ts's `broadcast`);
+ * waitlist-promotion, class-cancellation, and membership-expiry
+ * notifications are defined in the schema but never inserted anywhere.
+ */
 export default function NotificationsPage() {
   const { data: notifications, isLoading, error } = trpc.notifications.list.useQuery(
     undefined,
