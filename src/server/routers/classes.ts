@@ -77,6 +77,8 @@ export const classesRouter = router({
   // ---------------------------------------------------------------------------
   // Fix #8: Validate trainerId is an existing, active trainer user.
   // Fix #7: Enforce that the class time falls within the trainer's availability.
+  // TRAINER-07: Without this check, admins could freely schedule trainers
+  // outside their working hours or double-book them in two rooms at once.
   // ---------------------------------------------------------------------------
   create: staffProcedure
     .input(
@@ -119,7 +121,8 @@ export const classesRouter = router({
           });
         }
 
-        // Fix #7: enforce availability server-side
+        // TRAINER-07: Enforce availability server-side during creation.
+        // Fails the request if the trainer is off-shift or already booked.
         const avail = await checkTrainerAvailability(
           ctx.db,
           input.trainerId,
@@ -148,6 +151,9 @@ export const classesRouter = router({
   // ---------------------------------------------------------------------------
   // Fix #7 (update path): Also enforce availability when updating a class's
   // start time or trainer assignment.
+  // TRAINER-07: Crucially, we pass `id` (the current class ID) to
+  // `checkTrainerAvailability` as `excludeClassId` so the class doesn't
+  // falsely conflict with itself when we just change its room or capacity.
   // ---------------------------------------------------------------------------
   update: staffProcedure
     .input(
@@ -206,7 +212,8 @@ export const classesRouter = router({
           });
         }
 
-        // Fix #7: enforce availability, excluding the class being updated from conflict check
+        // TRAINER-07: Enforce availability during update, excluding current class
+        // from the conflict check.
         const avail = await checkTrainerAvailability(
           ctx.db,
           effectiveTrainerId,
