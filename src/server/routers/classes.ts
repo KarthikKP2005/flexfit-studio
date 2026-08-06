@@ -100,6 +100,10 @@ export const classesRouter = router({
           .where(eq(users.id, input.trainerId))
           .get();
 
+        // TRAINER-08: Validate trainer assignment.
+        // The front-end passes a trainerId integer. Before this fix, the ID
+        // was blindly accepted. Now we check that the user actually exists,
+        // has the "trainer" role, and their account is currently active.
         if (!trainer) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -187,6 +191,9 @@ export const classesRouter = router({
           .where(eq(users.id, effectiveTrainerId))
           .get();
 
+        // TRAINER-08: Validate trainer assignment during update.
+        // Ensures that if an admin changes the trainer for this class, the
+        // new trainer is actually an active trainer account.
         if (!trainer) {
           throw new TRPCError({
             code: "BAD_REQUEST",
