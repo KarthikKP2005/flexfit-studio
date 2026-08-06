@@ -1,3 +1,17 @@
+/**
+ * components/NavBar.tsx — Main navigation header.
+ *
+ * Responsible for: rendering the top navigation bar, checking the current
+ * user's session and unread notifications, and logging out.
+ *
+ * NOT responsible for: page-level route protection (handled by layout.tsx
+ * or tRPC procedures).
+ *
+ * Fix: TRAINER-NAV (System Problem #68)
+ * By using conditional rendering (`user?.role === ...`), we ensure trainers
+ * and admins no longer see irrelevant member links like "My bookings", and
+ * are instead routed to their respective dashboards.
+ */
 "use client";
 
 import Link from "next/link";
@@ -31,6 +45,7 @@ export function NavBar() {
           Schedule
         </Link>
 
+        {/* TRAINER-NAV: Hide member-only links from trainers and admins */}
         {user?.role === "member" && (
           <>
             <Link href="/dashboard" className="text-sm muted hover:text-white">
@@ -42,6 +57,7 @@ export function NavBar() {
           </>
         )}
 
+        {/* TRAINER-NAV: Show trainer-specific links */}
         {user?.role === "trainer" && (
           <Link href="/trainer/schedule" className="text-sm muted hover:text-white">
             My schedule
