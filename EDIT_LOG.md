@@ -10,6 +10,57 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-06 — FIX(bookings): add member-facing UI for corporate booking
+
+**Type:** FIX
+**Defect:** CORP-005
+**Behavior change:** yes — `/schedule`'s book button now offers company
+credits as an explicit option for members linked to an active company,
+and `/dashboard` gained a "Corporate bookings" section. One new
+read-only query added (`corporateBookings.myCompany`); no existing
+procedure's input, output, error code, or error message changed —
+`corporateBookings.book`/`cancel`/`mine` were called exactly as they
+already existed, not modified.
+**Files:** `src/server/routers/corporate-bookings.ts` (new `myCompany`
+query, exposes the existing internal `getCompanyForMember` helper to its
+own caller), `src/app/schedule/page.tsx` (new `BookButton` component:
+unchanged single button for non-linked members, hover/click-expanding
+personal-vs-company choice for linked members), `src/app/dashboard/page.tsx`
+(new "Corporate bookings" section, Cancel-only, parallel to the existing
+"Upcoming bookings" section)
+**Tests:** no automated test harness in this branch (same as AUTH-002) —
+verified manually against the running dev server using seed data's real
+company links (`seed.ts` links `members[0..2]` to "TechCorp Inc", credit
+pool 100):
+1. Signed in as a non-linked member on `/schedule` → book button
+   unchanged, single "Book"/"Join waitlist" label, no split — confirms
+   zero visual/behavioral change for the common case.
+2. Signed in as a TechCorp-linked member → button expands into "Personal
+   credits" / "TechCorp Inc credits" on hover and on click.
+3. Booked with company credits → `corporate_bookings` row inserted with
+   the class's `creditCost`, `companies.creditPoolBalance` decremented by
+   the same amount (checked directly against `flexfit.db`).
+4. Booked the same/another class with personal credits as a different,
+   non-linked member → ordinary `bookings`/`memberships` flow completely
+   unaffected.
+5. `/dashboard` → new "Corporate bookings" section showed the booking;
+   Cancel → status flips to `cancelled`, credit pool refunded per the
+   existing (unmodified) 24h-window rule in `corporate-bookings.ts`.
+6. `tsc --noEmit` and `pnpm build` both clean.
+Test data created during verification was cancelled/left in a clean
+state; no seed data was altered.
+
+Closes plan.md's member-flow item #2 ("Corporate booking fully dead in
+the UI") and known-issues.md's CORP-005. CORP-001 through CORP-004 (all
+pre-existing bugs in `corporate-bookings.ts`'s `book`/`cancel`) were read
+closely before building this UI on top of them and are explicitly **not**
+touched — this fix only closes the "no UI" gap, per AGENT_RULES.md's Rule
+3/4 (one defect per commit; the underlying correctness bugs are separate,
+larger FIXes with their own open policy questions, not guessable here per
+Rule 8).
+
+---
+
 ## 2026-08-06 — FIX(auth): add member signup page
 
 **Type:** FIX

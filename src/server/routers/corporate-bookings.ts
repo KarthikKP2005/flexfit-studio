@@ -390,4 +390,23 @@ export const corporateBookingsRouter = router({
 
       return bookingRows;
     }),
+
+  /**
+   * The active company the caller themselves is linked to, if any — the
+   * member-facing counterpart to `getCompanyForMember` above (which was
+   * previously only used internally by `book`). Added for CORP-005 so the
+   * UI can know whether to offer a company-credit booking option at all;
+   * does not change `getCompanyForMember`'s own logic or its COMPANY-001
+   * caveat (arbitrary pick if linked to more than one active company).
+   */
+  myCompany: protectedProcedure.query(async ({ ctx }) => {
+    const row = await getCompanyForMember(ctx.db, ctx.user.id);
+    if (!row) return null;
+
+    return {
+      id: row.companies.id,
+      name: row.companies.name,
+      creditPoolBalance: row.companies.creditPoolBalance,
+    };
+  }),
 });

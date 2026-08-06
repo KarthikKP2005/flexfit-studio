@@ -723,6 +723,48 @@ columns), needing a migration — out of scope for this pass.
 
 ---
 
+### CORP-005 — No member-facing UI for corporate booking (schedule always called personal `bookings.book`)
+
+**Severity:** Medium (feature gap, not a misbehaving code path — a
+company-linked member could not spend their employer's credit pool from
+anywhere in the app)
+**Status:** Fixed on branch `corporate-booking-member`
+**Area:** Corporate bookings / Member UI
+**File:** `src/app/schedule/page.tsx`, `src/app/dashboard/page.tsx`,
+`src/server/routers/corporate-bookings.ts` (new `myCompany` query)
+
+**Original behavior:** `corporate-bookings.ts`'s `book`/`cancel`/`mine`
+worked correctly and were structurally parallel to the personal booking
+flow, but no page under `src/app/**` ever called them — `/schedule`
+always booked through personal `bookings.book`, and `/dashboard` never
+queried `corporateBookings.mine` — see plan.md's member-flow item #2.
+
+**Fix:** `/schedule`'s book button now offers an explicit personal-vs-
+company credit choice (expands on hover/click, per plan.md's own note
+not to silently pick a credit source) for members linked to an active
+company, calling the *unmodified* `corporateBookings.book`. `/dashboard`
+gained a "Corporate bookings" section (parallel to "Upcoming bookings")
+showing `corporateBookings.mine` with a Cancel action wired to the
+*unmodified* `corporateBookings.cancel`. One new read-only query,
+`corporateBookings.myCompany`, was added to let the UI know whether the
+caller is company-linked at all — it just exposes the existing internal
+`getCompanyForMember` helper's result to its own caller, no new business
+logic.
+
+**Not in scope for this fix:** CORP-001 (promote-before-charge), CORP-002
+(corporate capacity judged independently of personal bookings), CORP-003
+(waitlists don't coordinate), and CORP-004 above (check-ins can't
+reference corporate bookings) are all untouched and still reproducible
+through this new UI — this fix only closes the "no UI" gap, using the
+existing (already-buggy) corporate-bookings mutations exactly as they
+were. `/schedule`'s `spotsLeft`/`full` still reflect personal bookings
+only (see CORP-002) — the new company-credits button does not display a
+separate "full" state for the corporate side. Rescheduling a corporate
+booking is not supported (`reschedules.ts` only operates on the personal
+`bookings` table) — corporate rows on `/dashboard` only get Cancel.
+
+---
+
 ### RESCH-001 — Rescheduling a waitlisted booking to an available class produces an unpaid confirmed booking
 
 **Severity:** High

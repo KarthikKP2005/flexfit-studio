@@ -6,12 +6,13 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { RescheduleModal } from "@/components/reschedule-modal";
 
 /**
- * Member-facing home: membership summary, upcoming bookings with
- * cancel/reschedule actions, and reschedule history. Not responsible
- * for: corporate bookings (only personal `bookings`/`reschedules` are
- * queried here) or role-aware content — this is the page every role
- * lands on after login regardless of their actual role (see
- * login/page.tsx's redirect note).
+ * Member-facing home: membership summary, upcoming personal and
+ * corporate bookings with cancel/reschedule actions, and reschedule
+ * history. Not responsible for: reschedule of corporate bookings —
+ * `reschedules.ts` only ever operates on the personal `bookings` table,
+ * so corporate rows only get a Cancel action (see CORP-005) — or
+ * role-aware content — this is the page every role lands on after login
+ * regardless of their actual role (see login/page.tsx's redirect note).
  */
 export default function DashboardPage() {
   const [rescheduleModal, setRescheduleModal] = useState<{
@@ -33,12 +34,20 @@ export default function DashboardPage() {
     retry: false,
   });
   const { data: bookings } = trpc.bookings.mine.useQuery({ includePast: false });
+  const { data: corporateBookings } = trpc.corporateBookings.mine.useQuery({ includePast: false });
   const { data: rescheduleHistory } = trpc.reschedules.history.useQuery();
 
   const cancel = trpc.bookings.cancel.useMutation({
     onSuccess: async () => {
       await utils.bookings.mine.invalidate();
       await utils.members.profile.invalidate();
+      await utils.classes.list.invalidate();
+    },
+  });
+
+  const cancelCorporate = trpc.corporateBookings.cancel.useMutation({
+    onSuccess: async () => {
+      await utils.corporateBookings.mine.invalidate();
       await utils.classes.list.invalidate();
     },
   });
@@ -152,6 +161,46 @@ export default function DashboardPage() {
           <p className="muted text-sm">No upcoming bookings.</p>
         )}
       </section>
+
+      {corporateBookings && corporateBookings.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="font-medium">Corporate bookings</h2>
+
+          {cancelCorporate.error && (
+            <p className="panel p-3 text-sm" style={{ color: "#f87171" }}>
+              {cancelCorporate.error.message}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {corporateBookings.map((b) => (
+              <div key={b.id} className="panel flex items-center gap-2 p-4 flex-wrap sm:flex-nowrap">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium">{b.className}</h3>
+                    <span className="muted text-xs uppercase tracking-wide">
+                      {b.status}
+                    </span>
+                  </div>
+                  <p className="muted mt-0.5 text-sm">
+                    {formatDateTime(b.startsAt)} &middot; {b.room} &middot; {b.companyName}
+                  </p>
+                </div>
+
+                {(b.status === "booked" || b.status === "waitlisted") && (
+                  <button
+                    className="btn text-sm flex-1 sm:flex-none"
+                    disabled={cancelCorporate.isPending}
+                    onClick={() => cancelCorporate.mutate({ bookingId: b.id })}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {rescheduleHistory && rescheduleHistory.length > 0 && (
         <section className="space-y-3">
