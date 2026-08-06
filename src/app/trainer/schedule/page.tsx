@@ -1,3 +1,17 @@
+/**
+ * trainer/schedule/page.tsx — Trainer-facing dashboard page.
+ *
+ * Responsible for: displaying the trainer's upcoming classes with attendance
+ * stats (normal + corporate combined), an expandable named roster per class,
+ * and weekly availability management (add/edit/remove time slots).
+ *
+ * NOT responsible for: class creation/update/cancellation (admin-only),
+ * booking mutations, or check-in flows (see /kiosk).
+ *
+ * Key fixes applied here:
+ * - TRAINER-02: Added expandable named roster (was aggregate counts only)
+ * - TRAINER-04: Attendance stats now include corporate bookings
+ */
 "use client";
 
 import { useState } from "react";
@@ -7,6 +21,11 @@ import { formatDateTime } from "@/lib/format";
 // ---------------------------------------------------------------------------
 // Status badge
 // ---------------------------------------------------------------------------
+/**
+ * StatusBadge — small colored pill showing booking status.
+ * Maps each booking status string to a background/text color pair.
+ * Used in the roster list to visually distinguish booked/attended/waitlisted/cancelled.
+ */
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; color: string; label: string }> = {
     booked: { bg: "#1e3a5f", color: "#93c5fd", label: "Booked" },
@@ -25,10 +44,20 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Class card — now shows total attendance (normal + corporate) and an
-// expandable named roster. Fix #1, #2, #4.
-// ---------------------------------------------------------------------------
+/**
+ * ClassCard — renders a single class entry on the trainer schedule.
+ *
+ * Shows: class name, time, room, duration, occupancy bar, and booking stats
+ * (normal + corporate combined — TRAINER-04). Includes a toggle button to
+ * expand/collapse the full named roster (TRAINER-02).
+ *
+ * The roster is fetched lazily via `trainers.rosterWithCorporate` only when
+ * the trainer clicks "View Roster", so we don't load member data for every
+ * class on page mount.
+ *
+ * Defects addressed: TRAINER-02 (named roster), TRAINER-04 (corporate count)
+ * Source: finallist_phase1.docx — Trainer Problems #2, #4
+ */
 function ClassCard({
   classId,
   className,
@@ -56,7 +85,9 @@ function ClassCard({
 }) {
   const [showRoster, setShowRoster] = useState(false);
 
-  // Fix #2: fetch named roster (normal + corporate combined)
+  // TRAINER-02: Fetch the named roster (normal + corporate members combined)
+  // from the server. Only fires when the trainer expands this class's roster
+  // panel (enabled: showRoster) to avoid unnecessary API calls on page load.
   const { data: roster, isLoading: rosterLoading } =
     trpc.trainers.rosterWithCorporate.useQuery(
       { classId },
@@ -194,6 +225,9 @@ function ClassCard({
               >
                 Member Roster ({roster.length})
               </div>
+              {/* Walk each roster entry (sorted chronologically by bookedAt)
+                  and render a row with avatar initial, name, email, booking
+                  status badge, and a "Corp" tag for corporate bookings. */}
               {roster.map((entry, i) => (
                 <div
                   key={`${entry.source}-${entry.id}`}

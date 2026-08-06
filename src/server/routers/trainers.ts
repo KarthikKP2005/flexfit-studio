@@ -1,3 +1,14 @@
+/**
+ * trainers.ts — Trainer-facing tRPC router.
+ *
+ * Responsible for: trainer's upcoming class list, named roster retrieval
+ * (normal + corporate), weekly availability CRUD, and availability-check
+ * logic consumed by classes.ts during create/update.
+ *
+ * NOT responsible for: class creation/update/cancellation (see classes.ts),
+ * booking mutations (see bookings.ts / corporate-bookings.ts), or
+ * check-in recording (see bookings.ts markAttended).
+ */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq, and, gte, sql } from "drizzle-orm";
@@ -152,14 +163,31 @@ export const trainersRouter = router({
     }));
   }),
 
-  // -------------------------------------------------------------------------
-  // Named roster for a class — normal + corporate bookings combined.
-  // Fix #2: trainer can now see who is booked, not just counts.
-  // -------------------------------------------------------------------------
+  /**
+   * Returns the full named roster for a given class, combining both normal
+   * (personal-membership) bookings and corporate bookings into one list.
+   *
+   * WHY: Before this fix (TRAINER-02), trainers could only see aggregate
+   * booking counts — not individual member names. This made roll-calls and
+   * attendance tracking impossible from the trainer schedule page.
+   *
+   * The two booking tables (`bookings` and `corporateBookings`) are queried
+   * separately because they have different schemas (e.g. corporate bookings
+   * have a `companyId`). Results are merged and sorted chronologically by
+   * `bookedAt` so the trainer sees members in the order they signed up.
+   *
+   * Defect: TRAINER-02 ("Can't see roster by name, only aggregate counts")
+   * Source: finallist_phase1.docx — Trainer Problem #2
+   *
+   * @param classId — the ID of the class whose roster to return
+   * @returns Array of { id, status, bookedAt, memberId, memberName,
+   *          memberEmail, source: "normal" | "corporate" }
+   * @throws UNAUTHORIZED if the caller is not staff (gated by staffProcedure)
+   */
   rosterWithCorporate: staffProcedure
     .input(z.object({ classId: z.number() }))
     .query(async ({ ctx, input }) => {
-      // Fetch normal bookings with member names
+      // Query 1: Fetch personal-membership bookings with member identity
       const normalBookings = await ctx.db
         .select({
           id: bookings.id,
@@ -174,7 +202,7 @@ export const trainersRouter = router({
         .innerJoin(users, eq(bookings.userId, users.id))
         .where(eq(bookings.classId, input.classId));
 
-      // Fetch corporate bookings with member names
+      // Query 2: Fetch corporate bookings with member identity
       const corpBookings = await ctx.db
         .select({
           id: corporateBookings.id,
@@ -189,7 +217,8 @@ export const trainersRouter = router({
         .innerJoin(users, eq(corporateBookings.userId, users.id))
         .where(eq(corporateBookings.classId, input.classId));
 
-      // Combine and sort by bookedAt
+      // Merge the two result sets into one array and sort chronologically
+      // by booking timestamp so the trainer sees first-come-first-served order.
       const combined = [
         ...normalBookings.map((b) => ({ ...b, source: "normal" as const })),
         ...corpBookings.map((b) => ({ ...b, source: "corporate" as const })),
