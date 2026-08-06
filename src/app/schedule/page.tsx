@@ -1,18 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
 /**
- * Public class browser and personal-booking entry point. Not
- * responsible for: corporate bookings — always calls the personal
- * `bookings.book`, with no way for a company-linked member to spend
- * their employer's credit pool from this page (that flow has no UI
- * anywhere in the app; see corporate-bookings.ts).
+ * Public class browser and booking entry point. Books against the
+ * caller's personal membership credits via `bookings.book` by default;
+ * for a member linked to an active company (CORP-005), the book button
+ * also offers a company-credits option via `corporateBookings.book`.
+ * Not responsible for: reconciling personal and corporate capacity —
+ * `spotsLeft`/`full` below reflect personal bookings only, same as
+ * before (see CORP-002 in known-issues.md, not changed here).
  */
 export default function SchedulePage() {
   const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();
+  const { data: myCompany } = trpc.corporateBookings.myCompany.useQuery(undefined, {
+    enabled: !!user,
+  });
   const { data: classes, isLoading } = trpc.classes.list.useQuery({
     from: new Date().toISOString(),
   });
@@ -23,6 +29,16 @@ export default function SchedulePage() {
       await utils.bookings.mine.invalidate();
     },
   });
+
+  const bookCorporate = trpc.corporateBookings.book.useMutation({
+    onSuccess: async () => {
+      await utils.classes.list.invalidate();
+      await utils.corporateBookings.mine.invalidate();
+    },
+  });
+
+  const bookingError = book.error ?? bookCorporate.error;
+  const isBooking = book.isPending || bookCorporate.isPending;
 
   if (isLoading) return <p className="muted">Loading schedule...</p>;
 
@@ -35,9 +51,9 @@ export default function SchedulePage() {
         </p>
       </div>
 
-      {book.error && (
+      {bookingError && (
         <p className="panel p-3 text-sm" style={{ color: "#f87171" }}>
-          {book.error.message}
+          {bookingError.message}
         </p>
       )}
 
@@ -71,13 +87,13 @@ export default function SchedulePage() {
               </div>
             </div>
 
-            <button
-              className="btn btn-primary"
-              disabled={!user || book.isPending}
-              onClick={() => book.mutate({ classId: c.id })}
-            >
-              {c.full ? "Join waitlist" : "Book"}
-            </button>
+            <BookButton
+              full={c.full}
+              disabled={!user || isBooking}
+              company={myCompany ?? null}
+              onBookPersonal={() => book.mutate({ classId: c.id })}
+              onBookCompany={() => bookCorporate.mutate({ classId: c.id })}
+            />
           </div>
         ))}
       </div>
@@ -85,6 +101,79 @@ export default function SchedulePage() {
       {!user && (
         <p className="muted text-sm">Sign in to book a class.</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Book button for one class row. A member with no active company link
+ * (the common case) sees the exact same single button as before this
+ * change. A company-linked member sees a button that expands on
+ * hover/click into two options — personal vs. company credits — so the
+ * choice is explicit rather than silently picked (see CORP-005).
+ * Expanding on click too (not just hover) so it also works on touch
+ * devices, which don't fire hover events.
+ */
+function BookButton({
+  full,
+  disabled,
+  company,
+  onBookPersonal,
+  onBookCompany,
+}: {
+  full: boolean;
+  disabled: boolean;
+  company: { id: number; name: string; creditPoolBalance: number } | null;
+  onBookPersonal: () => void;
+  onBookCompany: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!company) {
+    return (
+      <button className="btn btn-primary" disabled={disabled} onClick={onBookPersonal}>
+        {full ? "Join waitlist" : "Book"}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="relative flex justify-end"
+      onMouseEnter={() => setExpanded(true)}
+      onMouseLeave={() => setExpanded(false)}
+    >
+      <div
+        className="flex gap-1.5 overflow-hidden transition-all duration-200"
+        style={{ maxWidth: expanded ? 260 : 96 }}
+      >
+        {!expanded ? (
+          <button
+            className="btn btn-primary whitespace-nowrap"
+            disabled={disabled}
+            onClick={() => setExpanded(true)}
+          >
+            {full ? "Join waitlist" : "Book"}
+          </button>
+        ) : (
+          <>
+            <button
+              className="btn btn-primary whitespace-nowrap text-sm"
+              disabled={disabled}
+              onClick={onBookPersonal}
+            >
+              Personal credits
+            </button>
+            <button
+              className="btn whitespace-nowrap text-sm"
+              disabled={disabled}
+              onClick={onBookCompany}
+            >
+              {company.name} credits
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
