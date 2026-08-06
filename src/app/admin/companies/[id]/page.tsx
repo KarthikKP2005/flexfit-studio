@@ -5,6 +5,21 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
+/**
+ * Single company's detail: credit pool + top-up, linked members +
+ * link/unlink, recent corporate bookings.
+ *
+ * Behavior notes:
+ * - Several `any` types below (search results, member/booking list
+ *   items) — see plan.md item #42, this loses the type safety tRPC
+ *   would otherwise infer end-to-end.
+ * - The member search here calls `members.search`, which isn't
+ *   restricted to role "member" (see the comment on that procedure) — a
+ *   trainer/admin can appear in these results and be picked, but
+ *   `linkMember` rejects them server-side with BAD_REQUEST.
+ * - Nothing here warns if the member being added is already linked to a
+ *   different company — see COMPANY-001 in known-issues.md.
+ */
 export default function CompanyDetailsPage() {
   const params = useParams();
   const id = parseInt(params.id as string);

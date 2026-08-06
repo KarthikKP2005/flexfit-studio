@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 
+/**
+ * Admin broadcast form — sends an announcement notification to every
+ * member. This form requires non-empty title/message before submitting,
+ * but that's client-side only; the server accepts empty or arbitrarily
+ * long strings (see notifications.ts's `broadcast`), and also currently
+ * reaches deactivated members (NOTIF-001 in known-issues.md).
+ */
 export default function AnnouncementsPage() {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");

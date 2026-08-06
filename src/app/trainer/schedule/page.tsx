@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
+/** Booked/checked-in counts for one class card — two separate queries per card, no roster names shown, just totals. */
 function ClassCard({ classId, className, startsAt, room, durationMin, cancelled }: { classId: number; className: string; startsAt: string; room: string; durationMin: number; cancelled: boolean }) {
   const { data: roster, isLoading: rosterLoading } = trpc.bookings.rosterFor.useQuery({ classId });
   const { data: checkinData, isLoading: checkinLoading } = trpc.bookings.checkinCountFor.useQuery({ classId });
@@ -45,6 +46,18 @@ const DAYS = [
   "Saturday",
 ];
 
+/**
+ * Trainer's own upcoming classes and weekly availability editor. Not
+ * responsible for: editing/cancelling a trainer's own classes (no UI
+ * calls classes.update/classes.cancel from here — those are admin-only
+ * flows) or validating the time inputs client-side (trainers.ts's
+ * setAvailability has no format/range validation either — see
+ * TRAINER-001 in known-issues.md).
+ *
+ * Behavior note: role gating here is client-side only ("Access denied"
+ * after the page has already loaded) — trpc's staff-only procedures are
+ * the real security boundary underneath, this check is just UX.
+ */
 export default function TrainerSchedulePage() {
   const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();

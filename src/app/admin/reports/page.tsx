@@ -3,6 +3,14 @@
 import { trpc } from "@/lib/trpc";
 import { formatMoney, formatDate } from "@/lib/format";
 
+/**
+ * Revenue and membership-expiry reports.
+ *
+ * Behavior note: "Total Revenue" and the by-month/by-method breakdowns
+ * only ever reflect `payments` rows — corporate credit pool top-ups
+ * never appear here (see ADMIN-002 in known-issues.md), so this
+ * understates real money movement for gyms using corporate accounts.
+ */
 export default function AdminReportsPage() {
   const { data: revenueByMonth, isLoading: monthLoading } =
     trpc.admin.revenueByMonth.useQuery();

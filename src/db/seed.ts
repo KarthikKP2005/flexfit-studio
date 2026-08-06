@@ -17,6 +17,21 @@ import {
 } from "./schema";
 import { hashPassword } from "../lib/password";
 
+/**
+ * Wipes and reseeds flexfit.db with a demo dataset (`pnpm db:seed`) — 3
+ * staff, 12 members, 6 plans, ~2 weeks of classes either side of today,
+ * bookings/checkins/payments to match. Not responsible for schema
+ * creation (`pnpm db:push` does that) or being idempotent/incremental —
+ * every run deletes all rows first.
+ *
+ * Note: `corporateBookings` is never seeded here even though companies
+ * and companyMembers are, and the sample `notifications` rows below
+ * include waitlist_promotion/class_cancelled/membership_expiring types
+ * that no live code path in the app currently generates (see
+ * notifications.ts) — both are illustrative-only, not evidence those
+ * flows are wired up.
+ */
+
 function daysFromNow(n: number): string {
   const d = new Date();
   d.setUTCHours(6, 0, 0, 0);
@@ -31,6 +46,9 @@ function dateOnly(n: number): string {
 async function seed() {
   console.log("Seeding FlexFit Studio...");
 
+  // Delete in FK-dependency order (rows that reference other tables
+  // first), so no delete fails on a foreign key still pointing at a row
+  // that hasn't been removed yet.
   await db.delete(reschedules);
   await db.delete(corporateBookings);
   await db.delete(companyMembers);

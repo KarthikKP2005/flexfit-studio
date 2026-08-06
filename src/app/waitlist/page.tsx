@@ -3,6 +3,7 @@
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
+/** The caller's own waitlisted classes, with queue position and a leave-waitlist action. */
 export default function WaitlistPage() {
   const utils = trpc.useUtils();
   const { data: waitlisted, isLoading } = trpc.bookings.waitlisted.useQuery();

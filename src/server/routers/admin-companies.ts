@@ -10,7 +10,16 @@ import {
 } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 
+/**
+ * Admin CRUD for corporate accounts: company records, credit pool
+ * top-ups, and employee linking. Not responsible for: spending a
+ * company's credit pool (see corporate-bookings.ts) or a ledger of top-up
+ * history (see ADMIN-002 in known-issues.md — top-ups only ever mutate
+ * the balance directly, no audit trail).
+ */
+
 export const adminCompaniesRouter = router({
+  /** All companies, newest first. */
   list: adminProcedure.query(async ({ ctx }) => {
     return ctx.db
       .select({
@@ -25,6 +34,12 @@ export const adminCompaniesRouter = router({
       .orderBy(desc(companies.createdAt));
   }),
 
+  /**
+   * Company detail plus its linked members and its 20 most recent
+   * corporate bookings.
+   *
+   * @throws NOT_FOUND if the company doesn't exist
+   */
   getById: adminProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -75,6 +90,7 @@ export const adminCompaniesRouter = router({
       };
     }),
 
+  /** Creates a new company, always active, with an initial credit pool (default 0). */
   create: adminProcedure
     .input(
       z.object({
@@ -98,6 +114,11 @@ export const adminCompaniesRouter = router({
       return created;
     }),
 
+  /**
+   * Toggles a company's active flag.
+   *
+   * @throws NOT_FOUND if the company doesn't exist
+   */
   updateActive: adminProcedure
     .input(z.object({ id: z.number(), active: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -119,6 +140,12 @@ export const adminCompaniesRouter = router({
         .get();
     }),
 
+  /**
+   * Adds `amount` to a company's credit pool balance. No corresponding
+   * payment/ledger row is created — see ADMIN-002 in known-issues.md.
+   *
+   * @throws NOT_FOUND if the company doesn't exist
+   */
   topUp: adminProcedure
     .input(z.object({ id: z.number(), amount: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
@@ -142,6 +169,17 @@ export const adminCompaniesRouter = router({
         .get();
     }),
 
+  /**
+   * Links a member to a company.
+   *
+   * Behavior note (see COMPANY-001 in known-issues.md — not fixed here):
+   * only rejects an exact duplicate (same user + same company) — nothing
+   * stops a user from being linked to more than one company at once.
+   *
+   * @throws NOT_FOUND if the company or user doesn't exist
+   * @throws BAD_REQUEST if the user's role isn't "member"
+   * @throws CONFLICT if this exact user+company link already exists
+   */
   linkMember: adminProcedure
     .input(z.object({ companyId: z.number(), userId: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -200,6 +238,11 @@ export const adminCompaniesRouter = router({
         .get();
     }),
 
+  /**
+   * Removes a member-company link.
+   *
+   * @throws NOT_FOUND if the link doesn't exist
+   */
   unlinkMember: adminProcedure
     .input(z.object({ companyMemberId: z.number() }))
     .mutation(async ({ ctx, input }) => {

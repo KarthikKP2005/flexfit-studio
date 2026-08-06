@@ -5,6 +5,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatMoney } from "@/lib/format";
 
+/** Corporate account list + create-company form. Links out to each company's detail page. */
 export default function CompaniesPage() {
   const { data: companies, isLoading, refetch } = trpc.adminCompanies.list.useQuery();
   const [showForm, setShowForm] = useState(false);

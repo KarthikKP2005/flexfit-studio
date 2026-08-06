@@ -11,7 +11,16 @@ import {
 } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 
+/**
+ * Read-only admin dashboard/report queries. Not responsible for: any
+ * mutation (see plans.ts/payments.ts/classes.ts/members.ts for those) or
+ * accounting for corporate bookings/revenue — every aggregate here reads
+ * from `bookings`/`payments` only, never `corporateBookings` (see
+ * ADMIN-001/ADMIN-002 in known-issues.md).
+ */
+
 export const adminRouter = router({
+  /** Headline counts for the admin dashboard. */
   stats: adminProcedure.query(async ({ ctx }) => {
     const today = new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
@@ -60,6 +69,17 @@ export const adminRouter = router({
     };
   }),
 
+  /**
+   * Up to `limit` non-cancelled classes with a booked count and
+   * utilisation ratio.
+   *
+   * Behavior notes (see ADMIN-001 in known-issues.md — not fixed here):
+   * `booked` only counts `bookings` rows (booked/attended) — corporate
+   * bookings on the same class are invisible to this number. There's
+   * also no ordering, so which classes fill the `limit` slots isn't
+   * defined as "soonest" or "highest utilisation" — whatever order the
+   * database happens to return them in.
+   */
   classUtilisation: adminProcedure
     .input(z.object({ limit: z.number().default(10) }).default({}))
     .query(async ({ ctx, input }) => {
@@ -86,6 +106,13 @@ export const adminRouter = router({
       }));
     }),
 
+  /**
+   * Total paid-payment revenue grouped by month, newest first.
+   *
+   * Behavior note (see ADMIN-002 in known-issues.md — not fixed here):
+   * corporate credit top-ups (admin-companies.ts's topUp) never create a
+   * payments row, so they're invisible here.
+   */
   revenueByMonth: adminProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
       .select({
@@ -103,6 +130,7 @@ export const adminRouter = router({
     }));
   }),
 
+  /** Total paid-payment revenue and count grouped by payment method, highest first. */
   revenueByMethod: adminProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
       .select({
@@ -122,6 +150,7 @@ export const adminRouter = router({
     }));
   }),
 
+  /** Active memberships whose endDate falls within the next 14 days. */
   expiringMemberships: adminProcedure.query(async ({ ctx }) => {
     const today = new Date().toISOString().slice(0, 10);
     const in14Days = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
@@ -151,6 +180,7 @@ export const adminRouter = router({
     return rows;
   }),
 
+  /** Total count of refunded payments (all time). */
   refundCount: adminProcedure.query(async ({ ctx }) => {
     const [result] = await ctx.db
       .select({ count: sql<number>`count(*)` })
@@ -160,6 +190,7 @@ export const adminRouter = router({
     return { count: Number(result.count) };
   }),
 
+  /** Check-in counts grouped by calendar date, over the last 14 days. */
   checkinsPerDay: adminProcedure.query(async ({ ctx }) => {
     const start = new Date();
     start.setDate(start.getDate() - 14);
@@ -181,6 +212,7 @@ export const adminRouter = router({
     }));
   }),
 
+  /** Top 10 trainers by attended-booking count over the last 14 days. */
   topTrainers: adminProcedure.query(async ({ ctx }) => {
     const start = new Date();
     start.setDate(start.getDate() - 14);
@@ -214,6 +246,16 @@ export const adminRouter = router({
     }));
   }),
 
+  /**
+   * Bookings marked `no_show` in the last 14 days, with trainer name
+   * resolved via a second lookup.
+   *
+   * Behavior note: nothing in the codebase currently sets a booking's
+   * status to `no_show` outside of seed data — no admin action or
+   * scheduled job transitions a `booked` row to `no_show` after the
+   * class passes, so in a live (non-seeded) system this list stays
+   * empty indefinitely.
+   */
   noShowList: adminProcedure.query(async ({ ctx }) => {
     const start = new Date();
     start.setDate(start.getDate() - 14);
@@ -243,6 +285,8 @@ export const adminRouter = router({
     const trainerIds = [...new Set(rows.map((r) => r.trainerId).filter((id) => id != null))];
     const trainers = new Map<number | null, string>();
 
+    // Resolve every distinct trainerId seen across the no-show rows to a
+    // name in one batched lookup, rather than one query per row.
     if (trainerIds.length > 0) {
       const trainerRows = await ctx.db
         .select({ id: users.id, name: users.name })

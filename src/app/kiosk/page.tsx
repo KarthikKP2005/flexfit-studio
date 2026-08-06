@@ -4,6 +4,23 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
+/**
+ * Front-desk check-in flow: look up a member, pick from their classes
+ * starting in the next 2 hours, mark attended. Not responsible for:
+ * corporate check-ins — only `bookings.upcomingForMember`/`markAttended`
+ * (personal) are called here, so a company-linked member's corporate
+ * bookings never show up at this kiosk.
+ *
+ * Behavior notes:
+ * - `selectedMember` is typed `any` (see plan.md item #42), losing the
+ *   type safety tRPC would otherwise provide end-to-end.
+ * - The expired-membership/no-credits warnings below are computed
+ *   client-side from `memberDetails.data.memberships[0]` (the first
+ *   membership row, not necessarily the current one — same ambiguity as
+ *   MEMBER-002) and only disable the button in the UI; `markAttended`
+ *   itself does not re-verify either condition server-side, so a direct
+ *   API call bypasses both checks entirely.
+ */
 export default function KioskPage() {
   const { data: user } = trpc.auth.me.useQuery();
   const [searchQuery, setSearchQuery] = useState("");

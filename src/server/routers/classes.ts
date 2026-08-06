@@ -4,7 +4,22 @@ import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
 import { classes, bookings, users } from "@/db/schema";
 import { router, publicProcedure, staffProcedure, adminProcedure } from "../trpc";
 
+/**
+ * Class scheduling: public browse/detail, staff create/update, admin
+ * cancel. Not responsible for: enforcing trainer availability during
+ * create/update (see trainers.ts's checkAvailability, never called from
+ * here — CLASS-003-adjacent) or counting corporate bookings toward
+ * capacity/roster (that's tracked in a separate table entirely — see
+ * corporate-bookings.ts).
+ */
+
 export const classesRouter = router({
+  /**
+   * Upcoming (or date-ranged) classes, cancelled excluded unless
+   * includeCancelled is set. spotsLeft/full are computed from `booked`
+   * status bookings only — waitlisted/attended/cancelled don't count
+   * against capacity, and neither do corporate bookings.
+   */
   list: publicProcedure
     .input(
       z
@@ -51,6 +66,15 @@ export const classesRouter = router({
       }));
     }),
 
+  /**
+   * Class detail plus its roster.
+   *
+   * Behavior note (see CLASS-001 in known-issues.md — not fixed here):
+   * this is publicProcedure, but the roster it returns includes every
+   * attendee's name and email, with no sign-in required.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   */
   byId: publicProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -78,6 +102,14 @@ export const classesRouter = router({
       return { ...cls, roster };
     }),
 
+  /**
+   * Creates a class.
+   *
+   * Behavior note (see CLASS-003 in known-issues.md — not fixed here):
+   * `trainerId` is only checked at the DB's foreign-key level (must be
+   * an existing user id) — not validated as belonging to an active user
+   * with role "trainer".
+   */
   create: staffProcedure
     .input(
       z.object({
@@ -103,6 +135,15 @@ export const classesRouter = router({
         .get();
     }),
 
+  /**
+   * Patches the given fields of a class.
+   *
+   * Behavior note (see CLASS-002 in known-issues.md — not fixed here):
+   * `capacity` can be set below the number of already-confirmed
+   * bookings with no rejection.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   */
   update: staffProcedure
     .input(
       z.object({
@@ -129,6 +170,16 @@ export const classesRouter = router({
       return updated;
     }),
 
+  /**
+   * Marks a class cancelled and cancels its currently-`booked` bookings.
+   *
+   * Behavior note (see CLASS-004 in known-issues.md — not fixed here):
+   * this is a partial cleanup only — waitlisted bookings, all corporate
+   * bookings (any status), membership/company credit restoration, and
+   * member notifications are all left untouched.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   */
   cancel: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {

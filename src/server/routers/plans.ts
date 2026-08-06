@@ -4,6 +4,13 @@ import { eq } from "drizzle-orm";
 import { membershipPlans, memberships, payments } from "@/db/schema";
 import { router, publicProcedure, protectedProcedure, adminProcedure } from "../trpc";
 
+/**
+ * Membership plan catalog and self-serve subscription. Not responsible
+ * for: payment processing (subscribe just records a "paid" row instantly
+ * — there's no real gateway) or enforcing one active membership per user
+ * (see PLAN-001 in known-issues.md).
+ */
+
 function addDays(dateIso: string, days: number): string {
   const d = new Date(dateIso);
   d.setDate(d.getDate() + days);
@@ -11,6 +18,7 @@ function addDays(dateIso: string, days: number): string {
 }
 
 export const plansRouter = router({
+  /** Active plans by default; pass includeInactive to see retired ones too. */
   list: publicProcedure
     .input(z.object({ includeInactive: z.boolean().default(false) }).default({}))
     .query(async ({ ctx, input }) => {
@@ -18,6 +26,21 @@ export const plansRouter = router({
       return input.includeInactive ? rows : rows.filter((p) => p.active);
     }),
 
+  /**
+   * Creates a new active membership for the caller and an accompanying
+   * "paid" payment row — there is no payment gateway, this is instant.
+   *
+   * Behavior notes (see known-issues.md, not fixed here):
+   * - PLAN-001: does not check for an existing active membership first;
+   *   a user can end up with multiple simultaneous active memberships.
+   * - PLAN-002: the membership insert and payment insert are two
+   *   separate statements, not wrapped in a transaction.
+   * - PLAN-003: payment `reference` is `PAY-${Date.now()}`, which can
+   *   collide across two subscriptions in the same millisecond.
+   *
+   * @throws NOT_FOUND if planId doesn't exist
+   * @throws BAD_REQUEST if the plan exists but is inactive
+   */
   subscribe: protectedProcedure
     .input(
       z.object({
@@ -69,6 +92,7 @@ export const plansRouter = router({
       return membership;
     }),
 
+  /** Adds a new plan to the catalog, active by default. */
   create: adminProcedure
     .input(
       z.object({
@@ -87,6 +111,13 @@ export const plansRouter = router({
         .get();
     }),
 
+  /**
+   * Toggles a plan's active flag.
+   *
+   * Behavior note (see PLAN-004 in known-issues.md — not fixed here):
+   * if `id` doesn't match any plan, this silently returns undefined
+   * instead of throwing NOT_FOUND like most other update procedures do.
+   */
   setActive: adminProcedure
     .input(z.object({ id: z.number(), active: z.boolean() }))
     .mutation(async ({ ctx, input }) => {

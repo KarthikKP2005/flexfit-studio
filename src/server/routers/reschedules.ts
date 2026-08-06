@@ -10,15 +10,39 @@ import {
 import { router, protectedProcedure } from "../trpc";
 
 /**
+ * Moving a personal booking from one class instance to another
+ * same-named one. Not responsible for: credit correctness across the
+ * move (see RESCH-001/002/004 in known-issues.md — this router does not
+ * charge, refund, or validate credits against what the target class
+ * actually costs) or promoting the original class's waitlist after the
+ * move (see RESCH-003).
+ *
+ * `reschedule` (mutation) and `validateReschedule` (query) intentionally
+ * duplicate the same validation steps rather than sharing one function —
+ * see plan.md item #53. Left as-is in this pass (a REFACTOR extracting a
+ * shared `evaluateReschedule` would be reasonable follow-up work, but
+ * risks behavior drift between the preview and the real mutation if not
+ * done carefully with its own characterization tests).
+ */
+
+/**
  * Members may reschedule free of charge up to this many hours before the
  * original class starts. This is more generous than cancellation policy.
  */
 export const FREE_RESCHEDULE_HOURS = 4;
 
+/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
 function hoursUntil(iso: string, now = new Date()): number {
   return (new Date(iso).getTime() - now.getTime()) / 36e5;
 }
 
+/**
+ * The membership this user should reschedule against: status "active"
+ * and endDate >= today. Currently unused — reschedule copies the
+ * *original booking's* membershipId instead of re-resolving this, so
+ * this helper's result never actually affects behavior here (see the
+ * comment at its one call site below).
+ */
 async function activeMembershipFor(
   db: typeof import("@/db").db,
   userId: number,
@@ -39,6 +63,29 @@ async function activeMembershipFor(
 }
 
 export const reschedulesRouter = router({
+  /**
+   * Moves the caller's booking from `fromBookingId`'s class to
+   * `toClassId` (must share the same class name) — creates a new
+   * booking, cancels the old one, and records the move.
+   *
+   * Behavior notes (see known-issues.md, not fixed here):
+   * - RESCH-001/RESCH-002: the new booking's creditsUsed is copied from
+   *   the original rather than recalculated, which can produce an
+   *   unpaid confirmed booking (waitlisted -> confirmed) or a double
+   *   charge later (confirmed -> waitlisted -> promoted).
+   * - RESCH-003: never promotes anyone waitlisted for the class being
+   *   left, even though this cancels a confirmed booking there.
+   * - RESCH-004: doesn't validate or reconcile the target class's own
+   *   creditCost against what was actually charged originally.
+   *
+   * @throws NOT_FOUND if the source booking or target class doesn't exist
+   * @throws FORBIDDEN if the caller doesn't own the source booking
+   * @throws BAD_REQUEST if the source booking is inactive, the reschedule
+   *   window (>= FREE_RESCHEDULE_HOURS before the original class) has
+   *   passed, the target class has a different name / is the same class /
+   *   has already started / is cancelled
+   * @throws CONFLICT if the caller already has an active booking for the target class
+   */
   reschedule: protectedProcedure
     .input(
       z.object({
@@ -169,7 +216,12 @@ export const reschedulesRouter = router({
 
       const targetIsFull = Number(count) >= targetClass.capacity;
 
-      // Get the membership to check for unlimited credits
+      // Looked up but never read below — the new booking's membershipId
+      // and creditsUsed both come from `originalBooking` directly, not
+      // from this query. Dead as of this reading; left in place since
+      // this pass doesn't remove code, only comments it (see RESCH-001/
+      // RESCH-002/RESCH-004 for the actual credit-handling issues this
+      // masks).
       const membership = originalBooking.membershipId
         ? await ctx.db
             .select()
@@ -216,6 +268,7 @@ export const reschedulesRouter = router({
       };
     }),
 
+  /** The caller's past reschedules, newest first, with from/to class detail resolved via subqueries. */
   history: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db
       .select({
@@ -249,6 +302,15 @@ export const reschedulesRouter = router({
       .orderBy(desc(reschedules.rescheduledAt));
   }),
 
+  /**
+   * Preview version of `reschedule` — same checks, but returns
+   * { valid: false, reason } instead of throwing, and never writes
+   * anything. See the file header for why this duplicates `reschedule`'s
+   * logic instead of sharing it, and note that because the mutation
+   * re-runs its own checks rather than trusting this preview, the two
+   * paths can only drift apart silently if one is edited without the
+   * other — there's no shared source of truth to keep them in sync.
+   */
   validateReschedule: protectedProcedure
     .input(
       z.object({

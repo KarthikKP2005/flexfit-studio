@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+/** Public marketing/landing page — static content, no data fetching. */
 export default function HomePage() {
   return (
     <div className="space-y-8">
