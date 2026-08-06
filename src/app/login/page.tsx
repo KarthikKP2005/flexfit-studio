@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 
 /**
- * Sign-in form. Not responsible for: registration (no signup page exists
- * — auth.ts's `register` mutation has no UI caller anywhere in the app)
- * or role-aware routing after login (see the redirect note below).
+ * Sign-in form. Not responsible for: registration — see /signup (its own
+ * page, composing auth.ts's `register` + `login`) — or role-aware
+ * routing after login (see the redirect note below).
  */
 export default function LoginPage() {
   const router = useRouter();
@@ -72,6 +73,13 @@ export default function LoginPage() {
           {login.isPending ? "Signing in..." : "Sign in"}
         </button>
       </form>
+
+      <p className="muted text-center text-sm">
+        New here?{" "}
+        <Link href="/signup" className="hover:text-white" style={{ color: "var(--text)" }}>
+          Create an account
+        </Link>
+      </p>
 
       {/* Demo credentials are hardcoded here unconditionally — fine for
           this demo repo, but would need gating behind an env flag before
