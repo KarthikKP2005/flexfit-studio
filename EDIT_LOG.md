@@ -10,6 +10,50 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(reschedules): promote the original class's waitlist after a confirmed reschedule
+
+**Type:** FIX
+**Defect:** RESCH-003
+**Behavior change:** yes — rescheduling away from a class you were
+`booked` into now promotes that class's own waitlist (same shared logic
+`bookings.ts`'s/`corporate-bookings.ts`'s `cancel` already use) after the
+original booking is cancelled, instead of leaving the freed seat
+unclaimed and anyone waitlisted there stuck indefinitely. Rescheduling
+away from a `waitlisted` original still triggers no promotion (correct
+— no seat was held to free). No tRPC procedure's input, output shape,
+or error codes/messages changed; no change to the promotion mechanics
+themselves.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: added one
+call to the existing, already-fixed `promoteNextWaitlisted`
+(`src/features/bookings/waitlist-service.ts`) right after the original
+booking is cancelled, guarded by `status === "booked"`; file header and
+the mutation's JSDoc updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded accounts:
+1. Filled a capacity-1 class with one member (real confirmed booking,
+   real charge) and had a second member join its waitlist.
+2. Rescheduled the first member away to a different, same-named class →
+   the reschedule itself succeeded normally (new booking `booked`, same
+   `creditsUsed` — a `booked → booked` transition, untouched by
+   RESCH-001/002).
+3. Confirmed the waitlisted member on the *original* class was
+   correctly promoted: `bookings.mine` showed `status: "booked"`,
+   `creditsUsed` matching the class's cost, and a real
+   `waitlist_promotion` notification was created — none of which
+   happened before this fix.
+4. All test classes/bookings/reschedule records/notifications deleted
+   afterward; the rescheduling member's membership restored to its
+   exact pre-test value (10 credits); the promoted member's unlimited
+   membership confirmed untouched.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #12 ("Reschedule never promotes the
+old class's waitlist after freeing a seat") and known-issues.md's
+RESCH-003 — see that entry for what's still explicitly out of scope
+(RESCH-004, a separate defect ID, untouched by this commit).
+
+---
+
 ## 2026-08-07 — FIX(reschedules): refund credits when a confirmed reschedule becomes waitlisted
 
 **Type:** FIX

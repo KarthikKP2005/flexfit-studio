@@ -9,23 +9,26 @@ import {
 } from "@/db/schema";
 import { router, protectedProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
+import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
 import { UNLIMITED_CREDITS } from "./bookings";
 
 /**
  * Moving a personal booking from one class instance to another
  * same-named one. Not responsible for: reconciling the target class's
  * own `creditCost` against what was originally charged for transitions
- * that don't change status (see RESCH-004 in known-issues.md) or
- * promoting the original class's waitlist after the move (see
- * RESCH-003). Target-class capacity *is* shared with
- * bookings.ts/corporate-bookings.ts (CORP-002, fixed) — both `reschedule`
- * and `validateReschedule` below now call the same `isClassFull`. The two
- * transitions that change confirmation status now both keep the
- * `creditsUsed: 0` <=> "unspent, waitlisted" invariant the rest of the
- * app already relies on: waitlisted -> confirmed charges the target's
- * cost up front (RESCH-001, fixed) and confirmed -> waitlisted refunds
- * what was already charged (RESCH-002, fixed) — see `reschedule` below
- * for both.
+ * that don't change status (see RESCH-004 in known-issues.md).
+ * Target-class capacity *is* shared with bookings.ts/corporate-bookings.ts
+ * (CORP-002, fixed) — both `reschedule` and `validateReschedule` below
+ * now call the same `isClassFull`. The two transitions that change
+ * confirmation status now both keep the `creditsUsed: 0` <=> "unspent,
+ * waitlisted" invariant the rest of the app already relies on: waitlisted
+ * -> confirmed charges the target's cost up front (RESCH-001, fixed) and
+ * confirmed -> waitlisted refunds what was already charged (RESCH-002,
+ * fixed) — see `reschedule` below for both. Cancelling a confirmed
+ * original booking also now promotes that class's own waitlist
+ * (RESCH-003, fixed), the same way `bookings.ts`'s/
+ * `corporate-bookings.ts`'s own `cancel` already do, via the shared
+ * `promoteNextWaitlisted`.
  *
  * `reschedule` (mutation) and `validateReschedule` (query) intentionally
  * duplicate the same validation steps rather than sharing one function —
@@ -105,13 +108,21 @@ export const reschedulesRouter = router({
    * - booked -> booked and waitlisted -> waitlisted: still just carry
    *   `creditsUsed` forward unchanged, exactly as before.
    *
+   * Waitlist promotion (RESCH-003, fixed): if the original booking was
+   * `booked`, cancelling it frees a confirmed seat on the *original*
+   * class — so after cancelling, the original class's own waitlist is
+   * now promoted via the shared `promoteNextWaitlisted` (the same
+   * function `bookings.ts`'s/`corporate-bookings.ts`'s `cancel` already
+   * call), exactly mirroring the guard `bookings.ts`'s `cancel` uses
+   * (`status === "booked"` only — a waitlisted original never held a
+   * confirmed seat, so there's nothing to free on that class).
+   *
    * Behavior notes (see known-issues.md, not fixed here):
-   * - RESCH-003: never promotes anyone waitlisted for the class being
-   *   left, even though this cancels a confirmed booking there.
    * - RESCH-004: doesn't validate or reconcile the target class's own
    *   creditCost against what was actually charged originally (except
-   *   now for the two transitions above, where the target's/original's
-   *   creditCost is unavoidably the number actually charged/refunded).
+   *   now for the two credit transitions above, where the
+   *   target's/original's creditCost is unavoidably the number actually
+   *   charged/refunded).
    *
    * @throws NOT_FOUND if the source booking or target class doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the source booking, or
@@ -322,6 +333,14 @@ export const reschedulesRouter = router({
           cancelledAt: new Date().toISOString(),
         })
         .where(eq(bookings.id, originalBooking.id));
+
+      // RESCH-003: cancelling a *confirmed* original booking frees a seat
+      // on that class just like bookings.ts's/corporate-bookings.ts's own
+      // cancel does — so promote its waitlist the same way. A waitlisted
+      // original never held a confirmed seat, so there's nothing to free.
+      if (originalBooking.status === "booked") {
+        await promoteNextWaitlisted(ctx.db, originalClass);
+      }
 
       // Record the reschedule
       await ctx.db.insert(reschedules).values({
