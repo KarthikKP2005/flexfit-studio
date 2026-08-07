@@ -55,6 +55,7 @@ export function NavBar() {
 
         {user?.role === "trainer" && (
           <>
+            {/* FIX(trainer): Added Availability link for trainers to manage their hours */}
             <Link href="/trainer/schedule" className="text-sm muted hover:text-white">
               My schedule
             </Link>

@@ -1,4 +1,5 @@
 "use client";
+// FIX(trainer): New dedicated availability management page for trainers
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
