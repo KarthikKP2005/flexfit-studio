@@ -1016,27 +1016,53 @@ booking is not supported (`reschedules.ts` only operates on the personal
 ### RESCH-001 — Rescheduling a waitlisted booking to an available class produces an unpaid confirmed booking
 
 **Severity:** High
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 5)
+**Status:** Fixed on branch `reschedule-credit-member` (also flagged in
+plan.md's critical list, item 5, and plan.md's member-flow item #10)
 **Area:** Rescheduling
-**File:** `src/server/routers/reschedules.ts` — `reschedule`
+**File:** `src/server/routers/reschedules.ts` — `reschedule` and
+`validateReschedule`
 
-**Current behavior:** the new booking's `creditsUsed` is copied directly
-from the original (`creditsUsed: originalBooking.creditsUsed`). A
-waitlisted original has `creditsUsed: 0`; if the target class isn't full,
-the new booking is created with `status: "booked"` and `creditsUsed: 0`
-— a confirmed seat the member never paid for.
+**Original behavior:** the new booking's `creditsUsed` was copied
+directly from the original (`creditsUsed: originalBooking.creditsUsed`).
+A waitlisted original has `creditsUsed: 0`; if the target class wasn't
+full, the new booking was created with `status: "booked"` and
+`creditsUsed: 0` — a confirmed seat the member never paid for.
 
-**Reproduction:** `src/server/routers/reschedules.test.ts`'s
-`reschedules.reschedule > RESCH-001: rescheduling a waitlisted (0-credit)
-booking to an available class produces a confirmed booking that was
-never actually charged`.
+**Fix:** only the `waitlisted → booked` transition was ever missing a
+credit check (every other transition already carried the right, already-
+paid `creditsUsed` forward). That transition now works exactly like a
+fresh `bookings.book` call: the membership behind the original booking
+(`originalBooking.membershipId`, not a fresh re-resolve — same approach
+as BOOK-004's `tryPromotePersonalCandidate`) is checked against the
+*target* class's `creditCost` before confirming. If it can't afford it,
+the reschedule is rejected — `FORBIDDEN`, `"Not enough class credits
+remaining."` (the exact existing error `bookings.book` already uses for
+the same condition, reused rather than inventing new wording). If it
+can, the target's `creditCost` is charged and deducted, replacing the
+stale copied `0`. `validateReschedule` (the preview used by the
+reschedule modal) got the identical check, so it no longer previews a
+reschedule as valid that the mutation would then reject.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md —
-reschedule needs an explicit credit policy per transition (confirmed→
-confirmed, confirmed→waitlisted, waitlisted→confirmed, waitlisted→
-waitlisted); waitlisted→confirmed should charge the class's cost, not
-copy a zero.
+**Not changed / still open:** RESCH-002 (a *paid* booking rescheduled
+into a full class keeps its nonzero `creditsUsed` while waitlisted, and
+can be double-charged if later promoted), RESCH-003 (reschedule never
+promotes the class being left), and RESCH-004 (no reconciliation against
+the target class's own `creditCost` for transitions other than the one
+above) are all untouched — separate defect IDs, separate commits.
+
+**Verified live:** manual E2E against the running dev server with a
+real seeded membership (no automated test harness exists on this
+branch). Case A (enough credits): joined a capacity-1 class's waitlist
+(0 credits used), rescheduled to a same-named, non-full class costing 5
+— confirmed the new booking came back `status: "booked"`,
+`creditsUsed: 5` (not the stale 0), and the membership was correctly
+decremented by 5. Case B (insufficient credits): repeated the same setup
+but drained the membership to 0 credits first via a second real booking
+— confirmed both `validateReschedule` (`valid: false`) and `reschedule`
+(`FORBIDDEN`/"Not enough class credits remaining.") correctly rejected
+it, the original waitlisted booking was untouched, no new booking was
+created, and the membership balance stayed at 0 (not further deducted).
+`tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
