@@ -1,4 +1,5 @@
 "use client";
+// FIX(trainer): Redesigned schedule page to include unified roster view for upcoming classes
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
