@@ -186,17 +186,16 @@ export const bookingsRouter = router({
 
   /**
    * Cancels a member's booking and, if eligible, refunds the credit.
-   * Also promotes the longest-waiting waitlisted candidate into the
-   * freed seat, if the cancelled booking was a confirmed one — checking
-   * BOTH the personal and corporate waitlists together (CORP-003, fixed
-   * — see features/bookings/waitlist-service.ts), not just this table.
+   * Also promotes the longest-waiting ELIGIBLE candidate into the freed
+   * seat, if the cancelled booking was a confirmed one — checking BOTH
+   * the personal and corporate waitlists together (CORP-003, fixed), and
+   * verifying a personal candidate's own membership credit before
+   * promoting them, skipping to the next-oldest candidate if they can't
+   * afford it (BOOK-004, fixed) — see features/bookings/waitlist-service.ts.
    *
-   * Behavior notes (do not "fix" silently — see BOOK-004 in
-   * known-issues.md):
-   * - Refund only applies if cancelled >= FREE_CANCELLATION_HOURS before
-   *   class start, and only if the booking had actually spent a credit.
-   * - Promotion does not currently re-check the promoted member's
-   *   credit balance — see BOOK-004.
+   * Behavior note: refund only applies if cancelled
+   * >= FREE_CANCELLATION_HOURS before class start, and only if the
+   * booking had actually spent a credit.
    *
    * @throws NOT_FOUND if the booking doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
@@ -256,11 +255,9 @@ export const bookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes whoever has waited longest
-      // across BOTH waitlists (CORP-003, fixed), skipping an ineligible
-      // corporate candidate in favor of the next-oldest one (CORP-001,
-      // fixed) — see features/bookings/waitlist-service.ts. BOOK-004
-      // (personal promotion's own missing credit check) is unchanged.
+      // Freeing a confirmed spot promotes whoever has waited longest and
+      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
+      // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
       if (row.booking.status === "booked") {
         await promoteNextWaitlisted(ctx.db, row.cls);
       }
