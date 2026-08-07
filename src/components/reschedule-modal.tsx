@@ -1,19 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
 /**
  * Modal for picking a same-named class to reschedule an existing
- * booking into. Not responsible for: excluding the original class from
- * the picker — see the behavior note on `sameNameClasses` below, this
- * component doesn't receive the original class's id at all.
+ * booking into. Excludes the original class itself from the picker (see
+ * RESCH-005 in known-issues.md) — not responsible for resetting `error`
+ * on reopen/reselect/overlay-close, a separate, still-open gap (plan.md
+ * item #38).
  */
 interface RescheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
   fromBookingId: number;
+  fromClassId: number;
   fromClassName: string;
   fromClassTime: string;
   onSuccess: () => void;
@@ -23,6 +25,7 @@ export function RescheduleModal({
   isOpen,
   onClose,
   fromBookingId,
+  fromClassId,
   fromClassName,
   fromClassTime,
   onSuccess,
@@ -32,24 +35,32 @@ export function RescheduleModal({
 
   const utils = trpc.useUtils();
 
-  // Get available classes with the same name
+  // Get available classes with the same name. `from` is memoized on
+  // `isOpen` (RESCH-006 — it used to be computed inline as `new
+  // Date().toISOString()` on every render, which made every render pass
+  // a new query input, so react-query treated each render as a brand
+  // new query: fetch → resolves → state update → re-render → new `from`
+  // → new query, forever. Reproduced live: 200+ requests in 6 seconds
+  // with the picker permanently stuck on "No other classes available."
+  // Memoizing keeps the query key stable while the modal stays open, and
+  // still refreshes to "now" each time it's reopened.
+  const fromTimestamp = useMemo(() => new Date().toISOString(), [isOpen]);
+
   const { data: availableClasses } = trpc.classes.list.useQuery(
     {
-      from: new Date().toISOString(),
+      from: fromTimestamp,
     },
     {
       enabled: isOpen,
     }
   );
 
-  // Behavior note: despite the comment above, this does NOT exclude the
-  // original class — it only checks the name, and the component is
-  // never given the original class's id to compare against. The
-  // original class stays selectable; picking it fails server-side with
-  // "You already have an active booking for this class." See plan.md
-  // item #37.
+  // Same-named future classes, excluding the original one being moved
+  // from (RESCH-005 — previously only checked the name, so the original
+  // class stayed selectable and picking it failed server-side with
+  // "You already have an active booking for this class").
   const sameNameClasses = (availableClasses || []).filter(
-    (cls) => cls.name === fromClassName
+    (cls) => cls.name === fromClassName && cls.id !== fromClassId
   );
 
   const reschedule = trpc.reschedules.reschedule.useMutation({

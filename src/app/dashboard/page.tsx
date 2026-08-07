@@ -18,11 +18,13 @@ export default function DashboardPage() {
   const [rescheduleModal, setRescheduleModal] = useState<{
     isOpen: boolean;
     bookingId: number;
+    classId: number;
     className: string;
     classTime: string;
   }>({
     isOpen: false,
     bookingId: 0,
+    classId: 0,
     className: "",
     classTime: "",
   });
@@ -137,6 +139,7 @@ export default function DashboardPage() {
                           setRescheduleModal({
                             isOpen: true,
                             bookingId: b.id,
+                            classId: b.classId,
                             className: b.className,
                             classTime: b.startsAt,
                           });
@@ -234,6 +237,7 @@ export default function DashboardPage() {
           setRescheduleModal({ ...rescheduleModal, isOpen: false })
         }
         fromBookingId={rescheduleModal.bookingId}
+        fromClassId={rescheduleModal.classId}
         fromClassName={rescheduleModal.className}
         fromClassTime={rescheduleModal.classTime}
         onSuccess={() => {
