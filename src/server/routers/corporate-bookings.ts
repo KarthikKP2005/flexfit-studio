@@ -191,15 +191,12 @@ export const corporateBookingsRouter = router({
 
   /**
    * Cancels a corporate booking and, if eligible, refunds the credit
-   * pool. Also promotes the longest-waiting waitlisted candidate into
-   * the freed seat, if the cancelled booking was confirmed — checking
-   * BOTH the corporate and personal waitlists together (CORP-003, fixed
-   * — see features/bookings/waitlist-service.ts), not just this table.
-   *
-   * Behavior note (see known-issues.md, not fixed here):
-   * - CORP-001: promotion confirms the booking before checking whether
-   *   the company can afford it — insufficient credits skip the
-   *   deduction but not the confirmation, producing a free booking.
+   * pool. Also promotes the longest-waiting ELIGIBLE candidate into the
+   * freed seat, if the cancelled booking was confirmed — checking BOTH
+   * the corporate and personal waitlists together (CORP-003, fixed), and
+   * verifying a corporate candidate's company credit before promoting
+   * them, skipping to the next-oldest candidate if they can't afford it
+   * (CORP-001, fixed) — see features/bookings/waitlist-service.ts.
    *
    * @throws NOT_FOUND if the booking doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
@@ -262,10 +259,9 @@ export const corporateBookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes whoever has waited longest
-      // across BOTH waitlists (CORP-003, fixed) — see
-      // features/bookings/waitlist-service.ts for the selection and
-      // promotion mechanics (CORP-001 preserved, unfixed).
+      // Freeing a confirmed spot promotes whoever has waited longest and
+      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001,
+      // both fixed) — see features/bookings/waitlist-service.ts.
       if (row.booking.status === "booked") {
         await promoteNextWaitlisted(ctx.db, row.cls);
       }

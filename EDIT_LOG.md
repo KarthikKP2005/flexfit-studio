@@ -10,6 +10,55 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(bookings): verify company credit before promoting a corporate waitlist candidate
+
+**Type:** FIX
+**Defect:** CORP-001
+**Behavior change:** yes — a corporate waitlist candidate whose company
+can no longer afford the class is now correctly skipped (stays
+waitlisted, no charge, no confirmation) instead of being wrongly
+confirmed as `booked` with the deduction silently omitted. The next-
+oldest eligible candidate (personal or corporate) is promoted instead of
+nobody. No tRPC procedure's input, output shape, or error codes/messages
+changed. BOOK-004 (personal promotion's own missing credit check) is
+untouched — a personal candidate is still promoted unconditionally.
+**Files:** `src/features/bookings/waitlist-service.ts`
+(`promoteNextWaitlisted` rewritten from "peek one candidate per table,
+pick the older" to "merge all waitlisted candidates from both tables
+into one chronological queue, walk it, skip an ineligible corporate
+candidate and continue" — split into two new helpers,
+`promotePersonalCandidate`/`tryPromoteCorporateCandidate`, for
+readability), `src/server/routers/bookings.ts` and
+`src/server/routers/corporate-bookings.ts` (comments only, describing
+the new behavior)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded, company-linked accounts:
+1. Capacity-1 class (cost 10). Filled personally. A corporate candidate
+   (meera, TechCorp) joined the waitlist while TechCorp could afford it
+   (balance 98).
+2. TechCorp's balance was then spent down to 8 via a second, real
+   corporate booking on an unrelated class — so by promotion time,
+   meera's company could no longer afford the 10-credit class.
+3. A personal candidate (vikram) joined the same waitlist afterward
+   (newer than meera).
+4. Cancelled the confirmed booking → meera was correctly **skipped**
+   (`corporateBookings.mine` still showed `status: "waitlisted"`, no
+   notification sent to her, TechCorp's balance stayed at 8 — not
+   further deducted for a booking that didn't happen), and vikram was
+   correctly promoted instead (`status: "booked"`, got the
+   `waitlist_promotion` notification).
+5. All test classes/bookings/notifications deleted afterward; TechCorp's
+   balance restored to its exact pre-test value (98).
+6. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #8 ("Corporate waitlist promotion can
+create a free booking") and known-issues.md's CORP-001 — see that entry
+for the Rule 8 policy decision (skip-and-try-next, chosen explicitly
+over stop-and-leave-waitlisted, and why) and for what's still explicitly
+out of scope (BOOK-004, the transactional/atomicity gap).
+
+---
+
 ## 2026-08-07 — FIX(bookings): unify normal and corporate waitlist promotion
 
 **Type:** FIX
