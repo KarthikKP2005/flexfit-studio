@@ -257,9 +257,10 @@ export const bookingsRouter = router({
       }
 
       // Freeing a confirmed spot promotes whoever has waited longest
-      // across BOTH waitlists (CORP-003, fixed) — see
-      // features/bookings/waitlist-service.ts for the selection and
-      // promotion mechanics (BOOK-004/CORP-001 preserved, unfixed).
+      // across BOTH waitlists (CORP-003, fixed), skipping an ineligible
+      // corporate candidate in favor of the next-oldest one (CORP-001,
+      // fixed) — see features/bookings/waitlist-service.ts. BOOK-004
+      // (personal promotion's own missing credit check) is unchanged.
       if (row.booking.status === "booked") {
         await promoteNextWaitlisted(ctx.db, row.cls);
       }

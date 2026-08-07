@@ -765,39 +765,53 @@ candidate or leave this one waitlisted (policy TBD, see above).
 
 ### CORP-001 — Corporate waitlist promotion confirms the booking before checking whether the company can afford it
 
-**Severity:** High (a company can end up with a confirmed, unpaid
+**Severity:** High (a company could end up with a confirmed, unpaid
 corporate booking)
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 3)
+**Status:** Fixed on branch `corporate-waitlist-credit-member` (also
+flagged in plan.md's critical list, item 3)
 **Area:** Corporate bookings / Waitlist
-**File:** `src/features/bookings/waitlist-service.ts` — the promotion
-logic this describes moved here as part of CORP-003's fix (unified
-waitlist promotion), but is otherwise byte-for-byte unchanged; it was
-previously inline in `corporate-bookings.ts`'s `cancel`.
+**File:** `src/features/bookings/waitlist-service.ts` —
+`tryPromoteCorporateCandidate`
 
-**Current behavior:** the promotion block sets the waitlisted booking's
+**Original behavior:** the promotion block set the waitlisted booking's
 `status` to `"booked"` (and `creditsUsed` to the class's cost)
-unconditionally. Only *after* that does it check
-`company.creditPoolBalance >= row.cls.creditCost` before deducting — if
-the check fails, the deduction is simply skipped, but the booking stays
-confirmed. The company never pays for a class it couldn't afford.
+unconditionally. Only *after* that did it check
+`company.creditPoolBalance >= creditCost` before deducting — if the
+check failed, the deduction was simply skipped, but the booking stayed
+confirmed. The company never paid for a class it couldn't afford.
 
-**Expected invariant:** order must be verify credits → deduct → promote,
-not promote → maybe-deduct. All three steps should be one atomic
-operation.
+**Fix — chosen policy stated explicitly (Rule 8, per plan.md's own
+framing that this "must be documented because the current expected
+behaviour is not defined"):** order is now load company → verify credits
+→ deduct → promote. On insufficient credits, plan.md offered two
+options — skip to the next candidate, or leave this one waitlisted and
+stop. **Chose "skip to the next candidate."** Reasoning: the alternative
+(stop entirely) would let one under-funded company permanently block
+every *eligible* candidate behind them in the queue, personal or
+corporate — a new fairness problem, and arguably worse than the original
+bug. `promoteNextWaitlisted` (CORP-003's shared queue) now walks the full
+merged personal+corporate waitlist oldest-first; an ineligible corporate
+candidate is left waitlisted and the walk continues to the next-oldest
+entry instead of stopping.
 
-**Why not fixed here:** plan.md leaves the failure policy (skip this
-candidate vs. leave waitlisted) as an open decision — not something to
-guess silently (Rule 8).
+**Not wrapped in a transaction** — plan.md also asks for that, but it's
+the same broader, already-documented "no transactions" finding this
+fix doesn't attempt to close (plan.md item 44); this commit fixes the
+*ordering* bug (verify-then-promote instead of promote-then-verify), not
+the check-then-write race, which is unchanged from before.
 
-**Reproduction:** `src/server/routers/corporate-bookings.test.ts`'s
-`corporateBookings.cancel > CORP-001: promotes a waitlisted booking to
-confirmed even when the company can't afford it...`.
+**BOOK-004 unaffected:** a personal candidate is still promoted
+unconditionally with no credit recheck — this fix only changes the
+corporate branch's eligibility check.
 
-**What "fixed" would look like:** load company → verify credits → deduct
-→ promote, wrapped in one transaction; on insufficient credits, either
-skip to the next waitlisted candidate or leave this one waitlisted with a
-recorded reason.
+**Verified live:** a corporate candidate joined a waitlist while their
+company could afford the class; the company's balance was then spent
+down elsewhere (a second, real corporate booking) so they could no
+longer afford it by promotion time. A newer personal candidate also
+joined the same waitlist. Cancelling the confirmed booking correctly
+**skipped** the now-ineligible corporate candidate (still waitlisted, no
+free booking, company balance unchanged) and promoted the personal
+candidate instead. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
