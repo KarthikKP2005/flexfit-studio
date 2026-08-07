@@ -10,6 +10,51 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(reschedules): charge credits when a waitlisted reschedule becomes confirmed
+
+**Type:** FIX
+**Defect:** RESCH-001
+**Behavior change:** yes — rescheduling a waitlisted (0-credit) booking
+into a class that isn't full now charges the target class's `creditCost`
+against the member's membership (rejecting with `FORBIDDEN`/"Not enough
+class credits remaining." if they can't afford it) instead of silently
+creating a confirmed, unpaid booking. Every other reschedule transition
+(booked→booked, booked→waitlisted, waitlisted→waitlisted) is byte-for-
+byte unchanged — none of them had this bug. No tRPC procedure's input,
+output shape, or other error codes/messages changed.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: added a
+credit check + real charge for the waitlisted→confirmed transition only,
+using the booking's existing `membershipId` and the target class's
+`creditCost`; `validateReschedule`: mirrored the same check so the
+preview and the mutation agree; file header and both procedures'
+comments updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with a real seeded membership:
+1. Case A (enough credits): rahul (10 credits) joined a capacity-1
+   class's waitlist (booking created with `creditsUsed: 0`, as always).
+   Rescheduled to a same-named, non-full class costing 5 credits →
+   `validateReschedule` previewed valid, the mutation returned the new
+   booking as `status: "booked"`, `creditsUsed: 5` (not the old stale
+   0), and rahul's membership correctly dropped to 5.
+2. Case B (insufficient credits): same setup, but rahul's membership was
+   drained to 0 credits first via a second real booking. Rescheduling
+   into a class costing 8 → `validateReschedule` returned
+   `valid: false`/"Not enough class credits remaining.", and the mutation
+   threw the identical `FORBIDDEN` error. The original waitlisted
+   booking was untouched, no new booking was created, and the membership
+   balance stayed at 0.
+3. All test classes/bookings/reschedule records deleted afterward;
+   rahul's membership restored to its exact pre-test value (10 credits).
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #10 ("Reschedule from a waitlisted
+booking creates a free confirmed booking") and known-issues.md's
+RESCH-001 — see that entry for what's still explicitly out of scope
+(RESCH-002/003/004, all separate defect IDs, all untouched by this
+commit).
+
+---
+
 ## 2026-08-07 — FIX(bookings): verify membership credit before promoting a personal waitlist candidate
 
 **Type:** FIX

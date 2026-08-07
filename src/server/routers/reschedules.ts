@@ -9,16 +9,23 @@ import {
 } from "@/db/schema";
 import { router, protectedProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
+import { UNLIMITED_CREDITS } from "./bookings";
 
 /**
  * Moving a personal booking from one class instance to another
- * same-named one. Not responsible for: credit correctness across the
- * move (see RESCH-001/002/004 in known-issues.md — this router does not
- * charge, refund, or validate credits against what the target class
- * actually costs) or promoting the original class's waitlist after the
- * move (see RESCH-003). Target-class capacity *is* shared with
+ * same-named one. Not responsible for: credit correctness across every
+ * transition (see RESCH-002/004 in known-issues.md — a `booked` original
+ * rescheduled into a full target class still keeps its nonzero
+ * `creditsUsed` and can be double-charged on later promotion; the target
+ * class's own `creditCost` is otherwise never reconciled against what
+ * was originally charged) or promoting the original class's waitlist
+ * after the move (see RESCH-003). Target-class capacity *is* shared with
  * bookings.ts/corporate-bookings.ts (CORP-002, fixed) — both `reschedule`
- * and `validateReschedule` below now call the same `isClassFull`.
+ * and `validateReschedule` below now call the same `isClassFull`. The
+ * one transition that previously had no credit check at all —
+ * waitlisted (0 credits) rescheduling into a class that isn't full,
+ * becoming a free confirmed booking — is fixed (RESCH-001); see
+ * `reschedule` below.
  *
  * `reschedule` (mutation) and `validateReschedule` (query) intentionally
  * duplicate the same validation steps rather than sharing one function —
@@ -71,18 +78,34 @@ export const reschedulesRouter = router({
    * `toClassId` (must share the same class name) — creates a new
    * booking, cancels the old one, and records the move.
    *
+   * Credit handling (RESCH-001, fixed): a waitlisted original has
+   * creditsUsed: 0 by definition (see bookings.ts's `book`). If the
+   * target class isn't full, this reschedule confirms a brand-new seat —
+   * the same thing `bookings.book` does — so it's now charged the same
+   * way: verified against the membership's remaining credits *before*
+   * confirming, using `originalBooking.membershipId` (the booking's own
+   * pointer, not a fresh lookup — same approach as BOOK-004's
+   * `tryPromotePersonalCandidate`), and `targetClass.creditCost` is what
+   * gets charged and deducted, not the stale original creditsUsed. Every
+   * other transition (booked -> booked, booked -> waitlisted,
+   * waitlisted -> waitlisted) still just carries `creditsUsed` forward
+   * unchanged, as before.
+   *
    * Behavior notes (see known-issues.md, not fixed here):
-   * - RESCH-001/RESCH-002: the new booking's creditsUsed is copied from
-   *   the original rather than recalculated, which can produce an
-   *   unpaid confirmed booking (waitlisted -> confirmed) or a double
-   *   charge later (confirmed -> waitlisted -> promoted).
+   * - RESCH-002: a *paid* (booked) original rescheduled into a full
+   *   target class keeps its nonzero creditsUsed while waitlisted, and
+   *   can be charged again if later promoted.
    * - RESCH-003: never promotes anyone waitlisted for the class being
    *   left, even though this cancels a confirmed booking there.
    * - RESCH-004: doesn't validate or reconcile the target class's own
-   *   creditCost against what was actually charged originally.
+   *   creditCost against what was actually charged originally (except
+   *   now for the one waitlisted -> confirmed transition above, where
+   *   the target's creditCost is unavoidably the number actually charged).
    *
    * @throws NOT_FOUND if the source booking or target class doesn't exist
-   * @throws FORBIDDEN if the caller doesn't own the source booking
+   * @throws FORBIDDEN if the caller doesn't own the source booking, or
+   *   (new, RESCH-001) the reschedule would confirm a waitlisted booking
+   *   into a class the caller's membership can no longer afford
    * @throws BAD_REQUEST if the source booking is inactive, the reschedule
    *   window (>= FREE_RESCHEDULE_HOURS before the original class) has
    *   passed, the target class has a different name / is the same class /
@@ -213,12 +236,11 @@ export const reschedulesRouter = router({
       // personal + corporate occupancy, not personal bookings alone).
       const targetIsFull = await isClassFull(ctx.db, targetClass.id, targetClass.capacity);
 
-      // Looked up but never read below — the new booking's membershipId
-      // and creditsUsed both come from `originalBooking` directly, not
-      // from this query. Dead as of this reading; left in place since
-      // this pass doesn't remove code, only comments it (see RESCH-001/
-      // RESCH-002/RESCH-004 for the actual credit-handling issues this
-      // masks).
+      // Only a waitlisted -> confirmed transition needs a credit check
+      // (RESCH-001) — every other transition just carries the original
+      // creditsUsed forward unchanged, as before.
+      const becomingConfirmed = originalBooking.status === "waitlisted" && !targetIsFull;
+
       const membership = originalBooking.membershipId
         ? await ctx.db
             .select()
@@ -227,7 +249,21 @@ export const reschedulesRouter = router({
             .get()
         : null;
 
-      // Create the new booking (don't charge credits, they keep what they spent)
+      if (becomingConfirmed && membership) {
+        const unlimited = membership.creditsRemaining >= UNLIMITED_CREDITS;
+        if (!unlimited && membership.creditsRemaining < targetClass.creditCost) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Not enough class credits remaining.",
+          });
+        }
+      }
+
+      const newCreditsUsed = becomingConfirmed
+        ? targetClass.creditCost
+        : originalBooking.creditsUsed; // Keep the same credits used
+
+      // Create the new booking
       const newBooking = await ctx.db
         .insert(bookings)
         .values({
@@ -235,10 +271,17 @@ export const reschedulesRouter = router({
           userId: ctx.user.id,
           membershipId: originalBooking.membershipId,
           status: targetIsFull ? "waitlisted" : "booked",
-          creditsUsed: originalBooking.creditsUsed, // Keep the same credits used
+          creditsUsed: newCreditsUsed,
         })
         .returning()
         .get();
+
+      if (becomingConfirmed && membership && membership.creditsRemaining < UNLIMITED_CREDITS) {
+        await ctx.db
+          .update(memberships)
+          .set({ creditsRemaining: membership.creditsRemaining - targetClass.creditCost })
+          .where(eq(memberships.id, membership.id));
+      }
 
       // Cancel the original booking
       await ctx.db
@@ -307,6 +350,12 @@ export const reschedulesRouter = router({
    * re-runs its own checks rather than trusting this preview, the two
    * paths can only drift apart silently if one is edited without the
    * other — there's no shared source of truth to keep them in sync.
+   *
+   * Includes the same RESCH-001 credit check as the mutation: a
+   * waitlisted original reschedule into a non-full target now previews
+   * as invalid (with the same "Not enough class credits remaining."
+   * reason) if the membership can't afford the target class's cost,
+   * instead of always previewing as valid.
    */
   validateReschedule: protectedProcedure
     .input(
@@ -425,6 +474,25 @@ export const reschedulesRouter = router({
       // Check if target class is full (CORP-002, fixed — combined
       // personal + corporate occupancy, not personal bookings alone).
       const targetIsFull = await isClassFull(ctx.db, targetClass.id, targetClass.capacity);
+
+      // Mirrors the mutation's RESCH-001 check: only a waitlisted ->
+      // confirmed transition needs credits verified up front.
+      const becomingConfirmed = originalBooking.status === "waitlisted" && !targetIsFull;
+      if (becomingConfirmed && originalBooking.membershipId) {
+        const membership = await ctx.db
+          .select()
+          .from(memberships)
+          .where(eq(memberships.id, originalBooking.membershipId))
+          .get();
+
+        const unlimited = membership && membership.creditsRemaining >= UNLIMITED_CREDITS;
+        if (membership && !unlimited && membership.creditsRemaining < targetClass.creditCost) {
+          return {
+            valid: false,
+            reason: "Not enough class credits remaining.",
+          };
+        }
+      }
 
       return {
         valid: true,
