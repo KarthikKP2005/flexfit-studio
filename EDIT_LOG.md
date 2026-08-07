@@ -10,6 +10,19 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(trainer): create trainer schedule and availability UI
+
+**Type:** FIX
+**Defect:** TRAINER UI (Problems 1, 2, 3 partially)
+**Behavior change:** yes — Trainers now have access to `/trainer/availability` to manage their working hours. The `/trainer/schedule` page has been redesigned to include a unified roster view for both personal and corporate attendees, expanding on-demand when clicked. The `NavBar` was updated to include the Availability link. Kiosk was confirmed to be accessible by trainers.
+**Files touched:**
+- `src/components/NavBar.tsx` — added `/trainer/availability` link.
+- `src/app/trainer/schedule/page.tsx` — separated availability UI out, added roster view toggle.
+- `src/app/trainer/availability/page.tsx` — new page for managing availability.
+**Tests:** none (test infrastructure removed)
+
+---
+
 ## 2026-08-07 — FIX(admin): fix broadcast deactivated members and plan setActive errors
 
 **Type:** FIX

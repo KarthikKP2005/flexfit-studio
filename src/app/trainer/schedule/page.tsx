@@ -4,132 +4,90 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
-/** Booked/checked-in counts for one class card — two separate queries per card, no roster names shown, just totals. */
 function ClassCard({ classId, className, startsAt, room, durationMin, cancelled }: { classId: number; className: string; startsAt: string; room: string; durationMin: number; cancelled: boolean }) {
-  const { data: roster, isLoading: rosterLoading } = trpc.bookings.rosterFor.useQuery({ classId });
+  const [showRoster, setShowRoster] = useState(false);
+  const { data: roster, isLoading: rosterLoading } = trpc.trainers.rosterFor.useQuery({ classId }, { enabled: showRoster });
   const { data: checkinData, isLoading: checkinLoading } = trpc.bookings.checkinCountFor.useQuery({ classId });
 
-  const bookedCount = roster?.filter((r) => r.status === "booked" || r.status === "attended").length || 0;
+  // Note: we can't calculate exact booked count until we load the roster, 
+  // or we could add a bookedCount to upcomingClasses.
+  // For now, we'll fetch roster on demand to show it.
   const checkins = checkinData?.count || 0;
 
   return (
-    <div className="p-3 text-sm">
+    <div className="p-4 text-sm">
       <div className="flex items-center justify-between">
         <div>
-          <div className="font-medium">{className}</div>
-          <div className="muted mt-1 text-xs">
+          <div className="font-medium text-lg">{className}</div>
+          <div className="muted mt-1 text-sm">
             {formatDateTime(startsAt)} · {room} · {durationMin} min
           </div>
-          {!rosterLoading && !checkinLoading && (
-            <div className="muted mt-2 text-xs">
-              📊 {bookedCount} booked · ✓ {checkins} checked in
+          {!checkinLoading && (
+            <div className="muted mt-2 text-xs font-semibold" style={{ color: "var(--accent)" }}>
+              ✓ {checkins} checked in
             </div>
           )}
           {cancelled && (
-            <div className="mt-1 rounded px-2 py-1 text-xs" style={{ background: "#7f1d1d", color: "#fca5a5" }}>
+            <div className="mt-2 inline-block rounded px-2 py-1 text-xs font-semibold" style={{ background: "#7f1d1d", color: "#fca5a5" }}>
               Cancelled
             </div>
           )}
         </div>
+        <button 
+          className="btn btn-sm" 
+          onClick={() => setShowRoster(!showRoster)}
+          style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
+        >
+          {showRoster ? "Hide Roster" : "View Roster"}
+        </button>
       </div>
+
+      {showRoster && (
+        <div className="mt-4 border-t pt-4" style={{ borderColor: "var(--border)" }}>
+          {rosterLoading ? (
+            <p className="muted text-xs">Loading roster...</p>
+          ) : roster && roster.length > 0 ? (
+            <ul className="space-y-2">
+              {roster.map((r, i) => (
+                <li key={i} className="flex justify-between items-center text-xs">
+                  <span className={r.status === "cancelled" ? "line-through opacity-50" : ""}>
+                    {r.memberName}
+                    {r.type === "corporate" && <span className="ml-2 rounded bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">Corporate</span>}
+                  </span>
+                  <span className="muted capitalize">{r.status}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted text-xs">No one has booked this class yet.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-const DAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
-
-/**
- * Trainer's own upcoming classes and weekly availability editor. Not
- * responsible for: editing/cancelling a trainer's own classes (no UI
- * calls classes.update/classes.cancel from here — those are admin-only
- * flows) or validating the time inputs client-side (trainers.ts's
- * setAvailability has no format/range validation either — see
- * TRAINER-001 in known-issues.md).
- *
- * Behavior note: role gating here is client-side only ("Access denied"
- * after the page has already loaded) — trpc's staff-only procedures are
- * the real security boundary underneath, this check is just UX.
- */
 export default function TrainerSchedulePage() {
-  const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();
   const { data: classes, isLoading: classesLoading } =
     trpc.trainers.upcomingClasses.useQuery(undefined, {
       enabled: user?.role === "trainer",
     });
-  const { data: availability, isLoading: availLoading } =
-    trpc.trainers.availability.useQuery(undefined, {
-      enabled: user?.role === "trainer",
-    });
-
-  const [editingDay, setEditingDay] = useState<number | null>(null);
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
-
-  const setAvailability = trpc.trainers.setAvailability.useMutation({
-    onSuccess: async () => {
-      await utils.trainers.availability.invalidate();
-      setEditingDay(null);
-      setStartTime("");
-      setEndTime("");
-    },
-  });
-
-  const removeAvailability = trpc.trainers.removeAvailability.useMutation({
-    onSuccess: async () => {
-      await utils.trainers.availability.invalidate();
-    },
-  });
 
   if (user?.role !== "trainer") {
     return <p className="muted">Access denied. Trainers only.</p>;
   }
 
-  const isLoading = classesLoading || availLoading;
-
-  const handleEditDay = (day: number) => {
-    const existing = availability?.find((a) => a.dayOfWeek === day);
-    setEditingDay(day);
-    setStartTime(existing?.startTime || "");
-    setEndTime(existing?.endTime || "");
-  };
-
-  const handleSave = () => {
-    if (editingDay === null || !startTime || !endTime) return;
-    setAvailability.mutate({
-      dayOfWeek: editingDay,
-      startTime,
-      endTime,
-    });
-  };
-
-  const handleRemove = (day: number) => {
-    removeAvailability.mutate({ dayOfWeek: day });
-  };
-
-  if (isLoading) return <p className="muted">Loading...</p>;
-
-  const availabilityMap = new Map(
-    availability?.map((a) => [a.dayOfWeek, a]) || [],
-  );
+  if (classesLoading) return <p className="muted">Loading schedule...</p>;
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Trainer Schedule</h1>
-        <p className="muted mt-1 text-sm">Manage your availability and upcoming classes</p>
+        <p className="muted mt-1 text-sm">View your upcoming classes and attendee rosters</p>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="font-medium">Upcoming Classes</h2>
+      <section className="space-y-4">
         {classes && classes.length > 0 ? (
           <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
             {classes.map((cls) => (
@@ -137,106 +95,10 @@ export default function TrainerSchedulePage() {
             ))}
           </div>
         ) : (
-          <p className="muted text-sm">No upcoming classes.</p>
+          <div className="panel p-8 text-center text-sm muted">
+            You have no upcoming classes scheduled.
+          </div>
         )}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="font-medium">Weekly Availability</h2>
-        <div className="space-y-2">
-          {DAYS.map((day, idx) => {
-            const avail = availabilityMap.get(idx);
-            const isEditing = editingDay === idx;
-
-            return (
-              <div key={idx} className="panel p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="font-medium">{day}</div>
-                    {avail && !isEditing && (
-                      <div className="muted mt-1 text-sm">
-                        {avail.startTime} - {avail.endTime}
-                      </div>
-                    )}
-                  </div>
-
-                  {isEditing ? (
-                    <div className="ml-4 flex gap-2">
-                      <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="rounded border px-2 py-1 text-sm"
-                        style={{
-                          borderColor: "var(--border)",
-                          background: "var(--bg-secondary)",
-                          color: "var(--fg)",
-                        }}
-                      />
-                      <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="rounded border px-2 py-1 text-sm"
-                        style={{
-                          borderColor: "var(--border)",
-                          background: "var(--bg-secondary)",
-                          color: "var(--fg)",
-                        }}
-                      />
-                      <button
-                        onClick={handleSave}
-                        disabled={setAvailability.isPending || !startTime || !endTime}
-                        className="btn btn-primary btn-sm"
-                      >
-                        Save
-                      </button>
-                      <button
-                        onClick={() => setEditingDay(null)}
-                        className="btn btn-sm"
-                        style={{
-                          background: "var(--bg-secondary)",
-                          color: "var(--fg)",
-                          borderColor: "var(--border)",
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="ml-4 flex gap-2">
-                      <button
-                        onClick={() => handleEditDay(idx)}
-                        className="btn btn-sm"
-                        style={{
-                          background: "var(--bg-secondary)",
-                          color: "var(--fg)",
-                          borderColor: "var(--border)",
-                        }}
-                      >
-                        {avail ? "Edit" : "Add"}
-                      </button>
-                      {avail && (
-                        <button
-                          onClick={() => handleRemove(idx)}
-                          disabled={removeAvailability.isPending}
-                          className="btn btn-sm"
-                          style={{
-                            background: "var(--bg-secondary)",
-                            color: "#ef4444",
-                            borderColor: "var(--border)",
-                          }}
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </section>
     </div>
   );
