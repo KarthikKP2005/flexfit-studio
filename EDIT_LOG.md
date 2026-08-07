@@ -10,6 +10,53 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(reschedules): refund credits when a confirmed reschedule becomes waitlisted
+
+**Type:** FIX
+**Defect:** RESCH-002
+**Behavior change:** yes — rescheduling a paid (confirmed) booking into
+a class that's full now creates the new waitlisted booking with
+`creditsUsed: 0` (matching every other waitlisted booking in the app)
+and refunds the original's already-deducted credits back to the
+membership, instead of silently carrying the nonzero charge forward. A
+later promotion of that booking (via the already-fixed BOOK-004 path)
+now charges exactly once instead of twice. No tRPC procedure's input,
+output shape, or error codes/messages changed. The `booked→booked` and
+`waitlisted→waitlisted` transitions are byte-for-byte unchanged — this
+is the mirror-image fix to RESCH-001's `waitlisted→confirmed` case,
+same file, same invariant, opposite direction.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: added a
+`becomingWaitlisted` branch that zeroes the new booking's `creditsUsed`
+and refunds the original's `creditsUsed` to the membership, using the
+same `membership`/`UNLIMITED_CREDITS` handling already in place for
+RESCH-001; file header and the mutation's JSDoc updated; no change to
+`validateReschedule` — this transition was never rejected, only
+mis-accounted, so the preview needed no new check)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with a real seeded membership:
+1. Booked a class for real (rahul's membership: 10 → 4, a genuine
+   6-credit charge).
+2. Rescheduled that confirmed booking into a same-named, capacity-1
+   class that was already full → the new booking came back
+   `status: "waitlisted"`, `creditsUsed: 0` (not the stale 6), and the
+   membership was correctly refunded back to 10.
+3. Cancelled the booking occupying that full class, triggering
+   promotion (BOOK-004's shared `tryPromotePersonalCandidate`) → the
+   waitlisted booking was promoted to `status: "booked"`,
+   `creditsUsed: 6`, and the membership ended at exactly 4 — charged
+   once for the one continuous booking, not twice.
+4. All test classes/bookings/reschedule records deleted afterward;
+   rahul's membership restored to its exact pre-test value (10
+   credits); vikram's unlimited membership (999) confirmed untouched.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #11 ("Reschedule to a full class can
+double-charge") and known-issues.md's RESCH-002 — see that entry for
+what's still explicitly out of scope (RESCH-003/RESCH-004, both separate
+defect IDs, both untouched by this commit).
+
+---
+
 ## 2026-08-07 — FIX(reschedules): charge credits when a waitlisted reschedule becomes confirmed
 
 **Type:** FIX
