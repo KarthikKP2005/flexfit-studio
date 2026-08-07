@@ -10,6 +10,37 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(reschedule-modal): stop the infinite refetch loop in the class picker
+
+**Type:** FIX
+**Defect:** RESCH-006
+**Behavior change:** yes — the reschedule picker now actually loads and
+displays classes; before this fix it never resolved data in the browser
+at all (permanently stuck on "No other classes available"). No tRPC
+procedure changed — `classes.list` is called exactly as before, just
+with a stable `from` value instead of a fresh one every render.
+**Files:** `src/components/reschedule-modal.tsx` (`from` computed via
+`useMemo(() => new Date().toISOString(), [isOpen])` instead of inline
+`new Date().toISOString()` on every render)
+**Tests:** no automated test harness in this branch — verified live via
+Playwright/Chromium (the same session that discovered the bug):
+1. Reopened the "Sunrise Yoga" reschedule modal for the same real
+   booking used to discover RESCH-006.
+2. Polled the `classes.list` request count every 300ms for 6 seconds:
+   steady at 1, not climbing (was 200+ and still climbing).
+3. Picker rendered all 8 other real "Sunrise Yoga" instances and
+   correctly excluded the original (Sat 8 Aug) — confirming RESCH-005
+   alongside this fix, screenshotted as evidence.
+4. Zero browser console errors.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Requested explicitly as an immediate follow-up to the previous entry's
+discovery, fixed in this separate commit (not amended into RESCH-005's
+commit) per Rule 4 — one defect, one commit — even though both landed on
+the same branch back to back.
+
+---
+
 ## 2026-08-07 — DOCUMENT(reschedule-modal): log a newly-discovered infinite-refetch-loop bug
 
 **Type:** DOCUMENT

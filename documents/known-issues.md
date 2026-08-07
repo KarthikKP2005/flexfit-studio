@@ -1056,19 +1056,21 @@ is excluded from the result and the other 8 instances are not.
 
 ### RESCH-006 — Reschedule modal's class picker never actually renders data (infinite refetch loop)
 
-**Severity:** High (the picker is effectively non-functional for every
-user, always — this is not an edge case)
-**Status:** Confirmed from source **and reproduced live** in a headless
-Chromium session (Playwright) while verifying RESCH-005 — not something
-plan.md's audit or any prior pass caught.
+**Severity:** High (the picker was effectively non-functional for every
+user, always — not an edge case)
+**Status:** Fixed on branch `reschedule-modal-member`, in a separate
+commit from RESCH-005 per Rule 4. Originally discovered and documented
+as unfixed while verifying RESCH-005 live in a headless Chromium session
+(Playwright) — not something plan.md's audit or any prior pass caught —
+then fixed immediately after at explicit request.
 **Area:** Rescheduling / Frontend
 **File:** `src/components/reschedule-modal.tsx` — the `classes.list`
 `useQuery` call
 
-**Current behavior:** `trpc.classes.list.useQuery({ from: new
-Date().toISOString() }, { enabled: isOpen })` computes `from` inline on
-every render. Because the input object is a new value every render,
-tRPC/react-query treats each render as a *different* query — the fetch
+**Original behavior:** `trpc.classes.list.useQuery({ from: new
+Date().toISOString() }, { enabled: isOpen })` computed `from` inline on
+every render. Because the input object was a new value every render,
+tRPC/react-query treated each render as a *different* query — the fetch
 that resolves triggers a state update, which causes a re-render, which
 computes a new `from`, which starts a *new* query, forever. Reproduced
 live: opening the modal fired **over 200 `classes.list` requests in 6
@@ -1076,25 +1078,23 @@ seconds**, climbing steadily with no sign of stopping, and the picker
 showed "No other &lt;X&gt; classes available" for the entire 6-second
 observation window even though the underlying data (confirmed via a
 direct `classes.list` call) contained 9 matching classes. Confirmed via
-`git stash` that this reproduces identically against the code exactly as
+`git stash` that this reproduced identically against the code exactly as
 it existed before RESCH-005's fix — pre-existing, not introduced by that
 change.
 
-**Expected invariant:** the query should fire once when the modal opens
-and once more only if `isOpen`/the target actually changes — not on
-every render.
+**Fix:** `from` is now computed via `useMemo(() => new
+Date().toISOString(), [isOpen])` — stable across re-renders while the
+modal stays open (only recomputed when `isOpen` itself changes), so the
+query key stops changing and react-query stops treating every render as
+a new query.
 
-**Why not fixed here:** RESCH-005 was the requested, scoped fix (Rule 4
-— one defect per commit); this is a distinct, separately-discovered
-defect. Given its severity (the picker is unusable today, for everyone),
-it's flagged prominently rather than folded in silently or left for
-someone to rediscover later.
-
-**What "fixed" would look like:** compute `from` once (e.g.
-`useState(() => new Date().toISOString())` or a `useMemo` with an empty
-dependency array, or simply move it outside the render/hook entirely) so
-the query key stays stable across re-renders and only refetches when
-`isOpen` toggles.
+**Verification (live, Playwright/Chromium):** reopened the same
+"Sunrise Yoga" reschedule modal used to discover the bug. Request count
+polled every 300ms over 6 seconds stayed at exactly **1** (was 200+ and
+climbing). The picker rendered all 8 other real "Sunrise Yoga" instances
+(10, 11, 13, 14, 16, 17, 19, 20 Aug) and correctly excluded the original
+(Sat 8 Aug, per RESCH-005) — screenshotted as visual proof. Zero browser
+console errors. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 

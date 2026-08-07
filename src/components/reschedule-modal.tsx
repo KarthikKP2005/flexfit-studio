@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
@@ -35,10 +35,20 @@ export function RescheduleModal({
 
   const utils = trpc.useUtils();
 
-  // Get available classes with the same name
+  // Get available classes with the same name. `from` is memoized on
+  // `isOpen` (RESCH-006 — it used to be computed inline as `new
+  // Date().toISOString()` on every render, which made every render pass
+  // a new query input, so react-query treated each render as a brand
+  // new query: fetch → resolves → state update → re-render → new `from`
+  // → new query, forever. Reproduced live: 200+ requests in 6 seconds
+  // with the picker permanently stuck on "No other classes available."
+  // Memoizing keeps the query key stable while the modal stays open, and
+  // still refreshes to "now" each time it's reopened.
+  const fromTimestamp = useMemo(() => new Date().toISOString(), [isOpen]);
+
   const { data: availableClasses } = trpc.classes.list.useQuery(
     {
-      from: new Date().toISOString(),
+      from: fromTimestamp,
     },
     {
       enabled: isOpen,
