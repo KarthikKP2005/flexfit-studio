@@ -10,6 +10,51 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(bookings): count both personal and corporate bookings toward class capacity
+
+**Type:** FIX
+**Defect:** CORP-002
+**Behavior change:** yes — a class already at capacity from one booking
+source (personal or corporate) now correctly waitlists a booking or
+reschedule attempted from the *other* source, instead of wrongly
+confirming it and exceeding capacity. No tRPC procedure's input, output
+shape, or error codes/messages changed — only the truth value feeding
+the existing booked-vs-waitlisted branching.
+**Files:** `src/features/bookings/capacity-service.ts` (new —
+`getConfirmedOccupancy`/`isClassFull`, shared by all four call sites
+below), `src/server/routers/bookings.ts` (`book`'s `isFull` check),
+`src/server/routers/corporate-bookings.ts` (`book`'s `isFull` check, and
+the now-unused `sql` import removed), `src/server/routers/reschedules.ts`
+(`reschedule` and `validateReschedule`'s `targetIsFull` checks)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded, company-linked accounts
+(TechCorp Inc / rahul.k, meera.n, vikram.s):
+1. Capacity-1 class, personal booking fills it → corporate booking on
+   the same class → `status: "waitlisted"`, `creditsUsed: 0` (previously
+   would have wrongly confirmed with `creditsUsed: 1`).
+2. Same test, reversed: corporate fills → personal booking → correctly
+   waitlisted.
+3. Reschedule: booked a source class personally, filled a same-named
+   target class (capacity 1) via a corporate booking, then rescheduled
+   into it → `validateReschedule` preview correctly showed
+   `targetIsFull: true`, and the actual `reschedule` mutation correctly
+   returned `newStatus: "waitlisted"`, matching the preview.
+4. All test classes/bookings deleted afterward; membership credit
+   balances and the TechCorp credit pool restored to their pre-test
+   values.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's critical-problems item #1 ("Class capacity can be
+exceeded") and known-issues.md's CORP-002 — see that entry for exactly
+which related gaps (schedule display's spotsLeft, ADMIN-001, trainer
+roster, the check-then-insert race) are explicitly still open and why.
+New file `src/features/bookings/capacity-service.ts` follows
+AGENT_RULES.md Rule 7's own literal filename example; reasoning for
+introducing `src/features/` now (scoped to just this one extraction, not
+a general router rewrite) recorded in `architecture-decisions.md`.
+
+---
+
 ## 2026-08-07 — FIX(reschedule-modal): stop the infinite refetch loop in the class picker
 
 **Type:** FIX

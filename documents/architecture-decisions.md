@@ -196,3 +196,40 @@ layout from the original plan is still the target — it just needs either
 a session with browser/screenshot access, or the app owner manually
 verifying each extracted page against its current behavior before that
 commit lands.
+
+---
+
+## 2026-08-07 — `src/features/bookings/capacity-service.ts`: first file under `src/features/`
+
+**Decision:** introduced `src/features/bookings/capacity-service.ts`
+(the CORP-002 fix — see EDIT_LOG.md/known-issues.md) as the very first
+file under `src/features/`, ahead of the broader frontend/backend
+restructuring this branch's earlier entries deferred. Only the one piece
+of logic needed for this fix (confirmed-occupancy counting) was
+extracted — `bookings.ts`, `corporate-bookings.ts`, and `reschedules.ts`
+were **not** otherwise restructured into thin routers; they still
+contain all their other business logic in place.
+
+**Why:** AGENT_RULES.md Rule 7 gives `src/features/bookings/
+capacity-service.ts` as its own literal worked example for exactly this
+kind of shared, cross-router concern — following it directly rather than
+inventing a different location (e.g. `src/server/services/`) for what
+the constitution already named. Scoping the extraction to only the
+capacity check (not a full router rewrite) matches Rule 4: this commit
+fixes one defect (CORP-002), not "start the general refactor."
+
+**What this means for next steps:** `src/features/bookings/` now exists
+as a real directory with one file in it. Future extractions
+(`booking-service.ts`, `waitlist-service.ts`, etc., per Rule 7's
+example) have a home to land in without a fresh structural decision —
+though each should still get its own entry here when it happens, per
+Rule 7's "no single correct layout, only one you can defend."
+
+**Note on the earlier "no browser/screenshot tool" entries above:** that
+constraint no longer holds — a later session in this repo (the
+`reschedule-modal-member` branch) got Playwright/Chromium working via
+`npx playwright install chromium`, and used it for live browser
+verification. Recorded here so this file doesn't quietly contradict
+itself for a future reader; the deferred `src/features/**` frontend
+extraction from the entry above could now be done with real
+before/after screenshot verification if picked back up.

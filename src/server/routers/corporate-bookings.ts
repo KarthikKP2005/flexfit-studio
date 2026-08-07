@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   corporateBookings,
   classes,
@@ -11,12 +11,15 @@ import {
   notifications,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { isClassFull } from "@/features/bookings/capacity-service";
 
 /**
  * Corporate (company-credit-pool-funded) class bookings — structurally
- * parallel to bookings.ts's personal bookings, but a separate table with
- * its own capacity/waitlist/credit handling that is never reconciled
- * against the personal side (see CORP-002/CORP-003 in known-issues.md).
+ * parallel to bookings.ts's personal bookings, a separate table with its
+ * own waitlist/credit handling never reconciled against the personal
+ * side (see CORP-003 in known-issues.md). Capacity *is* now reconciled —
+ * `book` below shares `isClassFull` with bookings.ts's `book` and
+ * reschedules.ts (CORP-002, fixed).
  * Not responsible for: which company a member belongs to when they
  * belong to more than one (see COMPANY-001 — getCompanyForMember below
  * just takes whichever active-company link `.get()` happens to return).
@@ -89,12 +92,10 @@ export const corporateBookingsRouter = router({
 
   /**
    * Books the caller into a class against their linked company's credit
-   * pool, or waitlists them if full.
-   *
-   * Behavior note (see CORP-002 in known-issues.md — not fixed here):
-   * "full" is judged from `corporateBookings` alone — a class already
-   * at capacity from personal bookings (see bookings.ts) can still
-   * accept a confirmed corporate booking here.
+   * pool, or waitlists them if full. "Full" is judged from combined
+   * personal + corporate confirmed bookings (CORP-002, fixed — see
+   * features/bookings/capacity-service.ts) — a class already filled by
+   * personal bookings now correctly waitlists a corporate booking too.
    *
    * @throws NOT_FOUND if the class doesn't exist
    * @throws BAD_REQUEST if the class is cancelled or has already started
@@ -162,17 +163,7 @@ export const corporateBookingsRouter = router({
         });
       }
 
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(corporateBookings)
-        .where(
-          and(
-            eq(corporateBookings.classId, cls.id),
-            eq(corporateBookings.status, "booked"),
-          ),
-        );
-
-      const isFull = Number(count) >= cls.capacity;
+      const isFull = await isClassFull(ctx.db, cls.id, cls.capacity);
 
       const created = await ctx.db
         .insert(corporateBookings)
