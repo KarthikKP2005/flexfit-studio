@@ -10,6 +10,47 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(reschedules): reject rescheduling to a class with a different credit cost
+
+**Type:** FIX
+**Defect:** RESCH-004
+**Behavior change:** yes — rescheduling to a same-named class whose
+`creditCost` differs from the original's is now rejected outright
+(`BAD_REQUEST`, "You can only reschedule to a class with the same
+credit cost.") instead of silently carrying the original's stale
+`creditsUsed` forward. Rescheduling between same-named classes with
+*equal* cost is completely unaffected — same behavior as before, for all
+four transitions. No other tRPC procedure's input, output shape, or
+error codes/messages changed.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: one new
+check, placed right after the existing "same name" check, before any
+transition-specific logic runs; `validateReschedule`: identical check,
+so the preview agrees with the mutation; file header and both
+procedures' JSDoc updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with a real seeded membership:
+1. Case A (mismatched cost): booked a 5-credit class, attempted to
+   reschedule to a same-named 8-credit class → both
+   `validateReschedule` (`valid: false`) and `reschedule`
+   (`BAD_REQUEST`) correctly rejected it, with the original booking
+   completely untouched.
+2. Case B (matching cost): booked a 5-credit class, rescheduled to a
+   same-named 5-credit class → succeeded exactly as before
+   (`booked → booked`, `creditsUsed: 5` carried forward) — confirms the
+   new check doesn't regress the common case.
+3. All test classes/bookings/reschedule records deleted afterward; the
+   member's membership restored to its exact pre-test value (10
+   credits).
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #13 ("Reschedule preserves the wrong
+credit cost") and known-issues.md's RESCH-004 — the last of the four
+RESCH defects in `reschedules.ts` (RESCH-001/002/003 fixed in prior
+commits on this branch lineage); that file is now fully closed out
+against known-issues.md.
+
+---
+
 ## 2026-08-07 — FIX(reschedules): promote the original class's waitlist after a confirmed reschedule
 
 **Type:** FIX

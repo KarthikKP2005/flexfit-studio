@@ -14,21 +14,22 @@ import { UNLIMITED_CREDITS } from "./bookings";
 
 /**
  * Moving a personal booking from one class instance to another
- * same-named one. Not responsible for: reconciling the target class's
- * own `creditCost` against what was originally charged for transitions
- * that don't change status (see RESCH-004 in known-issues.md).
- * Target-class capacity *is* shared with bookings.ts/corporate-bookings.ts
- * (CORP-002, fixed) — both `reschedule` and `validateReschedule` below
- * now call the same `isClassFull`. The two transitions that change
- * confirmation status now both keep the `creditsUsed: 0` <=> "unspent,
- * waitlisted" invariant the rest of the app already relies on: waitlisted
- * -> confirmed charges the target's cost up front (RESCH-001, fixed) and
- * confirmed -> waitlisted refunds what was already charged (RESCH-002,
- * fixed) — see `reschedule` below for both. Cancelling a confirmed
- * original booking also now promotes that class's own waitlist
- * (RESCH-003, fixed), the same way `bookings.ts`'s/
- * `corporate-bookings.ts`'s own `cancel` already do, via the shared
- * `promoteNextWaitlisted`.
+ * same-named one. Same-named classes are not required to share a
+ * `creditCost` (see the header comment on `classes` in `schema.ts`) —
+ * `reschedule`/`validateReschedule` now reject a target whose cost
+ * doesn't match the original's (RESCH-004, fixed; see `reschedule`
+ * below for the Rule 8 policy chosen). Target-class capacity *is*
+ * shared with bookings.ts/corporate-bookings.ts (CORP-002, fixed) —
+ * both `reschedule` and `validateReschedule` below now call the same
+ * `isClassFull`. The two transitions that change confirmation status
+ * keep the `creditsUsed: 0` <=> "unspent, waitlisted" invariant the
+ * rest of the app already relies on: waitlisted -> confirmed charges
+ * the target's cost up front (RESCH-001, fixed) and confirmed ->
+ * waitlisted refunds what was already charged (RESCH-002, fixed) — see
+ * `reschedule` below for both. Cancelling a confirmed original booking
+ * also now promotes that class's own waitlist (RESCH-003, fixed), the
+ * same way `bookings.ts`'s/`corporate-bookings.ts`'s own `cancel` already
+ * do, via the shared `promoteNextWaitlisted`.
  *
  * `reschedule` (mutation) and `validateReschedule` (query) intentionally
  * duplicate the same validation steps rather than sharing one function —
@@ -117,12 +118,18 @@ export const reschedulesRouter = router({
    * (`status === "booked"` only — a waitlisted original never held a
    * confirmed seat, so there's nothing to free on that class).
    *
-   * Behavior notes (see known-issues.md, not fixed here):
-   * - RESCH-004: doesn't validate or reconcile the target class's own
-   *   creditCost against what was actually charged originally (except
-   *   now for the two credit transitions above, where the
-   *   target's/original's creditCost is unavoidably the number actually
-   *   charged/refunded).
+   * Credit cost match (RESCH-004, fixed): plan.md names three possible
+   * policies for same-named classes with different `creditCost`s —
+   * reject the reschedule, charge/refund the difference, or scope
+   * reschedules to a class-series entity that guarantees equal cost —
+   * and states its own recommendation directly: "the safest
+   * behaviour-preserving option is initially to validate equal credit
+   * cost." That's the one implemented here: the target's `creditCost`
+   * must equal the original's, or the reschedule is rejected outright,
+   * for all four status transitions uniformly (not just the two RESCH-001/
+   * RESCH-002 already handle). Charging/refunding the difference stays
+   * documented in known-issues.md as the deliberately-not-taken, more
+   * invasive alternative.
    *
    * @throws NOT_FOUND if the source booking or target class doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the source booking, or
@@ -130,8 +137,9 @@ export const reschedulesRouter = router({
    *   a class the caller's membership can no longer afford
    * @throws BAD_REQUEST if the source booking is inactive, the reschedule
    *   window (>= FREE_RESCHEDULE_HOURS before the original class) has
-   *   passed, the target class has a different name / is the same class /
-   *   has already started / is cancelled
+   *   passed, the target class has a different name / a different
+   *   creditCost (RESCH-004) / is the same class / has already started /
+   *   is cancelled
    * @throws CONFLICT if the caller already has an active booking for the target class
    */
   reschedule: protectedProcedure
@@ -207,6 +215,16 @@ export const reschedulesRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "You can only reschedule to a class with the same name.",
+        });
+      }
+
+      // RESCH-004, fixed: same-named classes aren't required to share a
+      // creditCost — reject the reschedule outright on a mismatch rather
+      // than silently over/under-charging on any of the four transitions.
+      if (targetClass.creditCost !== originalClass.creditCost) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "You can only reschedule to a class with the same credit cost.",
         });
       }
 
@@ -405,7 +423,9 @@ export const reschedulesRouter = router({
    * waitlisted original reschedule into a non-full target now previews
    * as invalid (with the same "Not enough class credits remaining."
    * reason) if the membership can't afford the target class's cost,
-   * instead of always previewing as valid.
+   * instead of always previewing as valid. Also includes the same
+   * RESCH-004 creditCost-match check, so a same-named target with a
+   * different cost previews as invalid rather than reschedulable.
    */
   validateReschedule: protectedProcedure
     .input(
@@ -474,6 +494,14 @@ export const reschedulesRouter = router({
         return {
           valid: false,
           reason: "You can only reschedule to a class with the same name.",
+        };
+      }
+
+      // Mirrors the mutation's RESCH-004 check.
+      if (targetClass.creditCost !== originalClass.creditCost) {
+        return {
+          valid: false,
+          reason: "You can only reschedule to a class with the same credit cost.",
         };
       }
 

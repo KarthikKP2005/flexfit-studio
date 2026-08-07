@@ -1145,9 +1145,10 @@ fixed). No new policy decision was needed — this reuses the existing,
 already-fixed promotion logic unchanged, on the class being left instead
 of the class being joined.
 
-**Not changed / still open:** RESCH-004 (no reconciliation of same-named
-classes with different `creditCost`) remains untouched — separate
-defect ID, separate commit.
+**Not changed here:** RESCH-004 (no reconciliation of same-named classes
+with different `creditCost`) was also open at the time this fix landed,
+and has since been fixed too — see that entry below. All four RESCH
+defects on this file are now closed.
 
 **Verified live:** manual E2E against the running dev server with real
 seeded accounts (no automated test harness exists on this branch).
@@ -1165,25 +1166,50 @@ this fix, when they'd have stayed stuck waitlisted). `tsc --noEmit` and
 ### RESCH-004 — Reschedule copies the original credit cost, ignoring the target class's actual cost
 
 **Severity:** Medium
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 8)
+**Status:** Fixed on branch `reschedule-cost-mismatch-member` (also
+flagged in plan.md's critical list, item 8, and plan.md's member-flow
+item #13)
 **Area:** Rescheduling
-**File:** `src/server/routers/reschedules.ts` — `reschedule`
+**File:** `src/server/routers/reschedules.ts` — `reschedule` and
+`validateReschedule`
 
-**Current behavior:** same-named classes are not required to share a
+**Original behavior:** same-named classes are not required to share a
 `creditCost` (see the header comment on `classes` in `schema.ts`), but
-`reschedule` copies the *original* booking's `creditsUsed` onto the new
-booking regardless of what the target class actually costs.
+`reschedule` copied the *original* booking's `creditsUsed` onto the new
+booking regardless of what the target class actually cost — for the two
+transitions that don't change confirmation status (`booked→booked`,
+`waitlisted→waitlisted`); RESCH-001/RESCH-002 already handled the other
+two correctly using the target's real cost.
 
-**Reproduction:** `src/server/routers/reschedules.test.ts`'s
-`reschedules.reschedule > RESCH-004: preserves the original creditsUsed
-even when the target class has a different creditCost`.
+**Fix — plan.md names three possible policies and states its own
+recommendation directly:** *"the safest behaviour-preserving option is
+initially to validate equal credit cost and document mismatches as a
+known issue."* That's the option implemented: `reschedule` now rejects
+outright (`BAD_REQUEST`, "You can only reschedule to a class with the
+same credit cost.") if the target's `creditCost` doesn't match the
+original's — checked once, up front, so it applies uniformly across all
+four transitions rather than needing separate handling per transition.
+`validateReschedule` got the identical check, so the preview doesn't
+show a same-named, different-cost class as reschedulable.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md —
-define one policy: require equal cost between source and target
-(simplest, behavior-preserving to validate and document mismatches as a
-known issue), charge/refund the difference, or scope reschedules to a
-class-series entity that guarantees equal cost.
+**Deliberately not chosen:** charging/refunding the difference (plan.md's
+second option) — more invasive, would need its own new credit-adjustment
+logic layered on top of what RESCH-001/RESCH-002 already established,
+and plan.md itself calls the reject-on-mismatch option the safer one for
+this pass. Scoping reschedules to a class-series entity (plan.md's third
+option) would be a schema change, out of scope here.
+
+**Verified live:** manual E2E against the running dev server with a real
+seeded membership (no automated test harness exists on this branch).
+Case A (mismatched cost): booked a 5-credit class, attempted to
+reschedule to a same-named 8-credit class → both `validateReschedule`
+(`valid: false`) and `reschedule` (`BAD_REQUEST`/"You can only
+reschedule to a class with the same credit cost.") correctly rejected
+it, with the original booking completely untouched. Case B (matching
+cost): booked a 5-credit class, rescheduled to a same-named 5-credit
+class → succeeded exactly as before (`booked → booked`,
+`creditsUsed: 5` carried forward). `tsc --noEmit` and `pnpm build` both
+clean.
 
 ---
 
