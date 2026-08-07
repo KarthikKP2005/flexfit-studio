@@ -1043,12 +1043,13 @@ stale copied `0`. `validateReschedule` (the preview used by the
 reschedule modal) got the identical check, so it no longer previews a
 reschedule as valid that the mutation would then reject.
 
-**Not changed / still open:** RESCH-002 (a *paid* booking rescheduled
-into a full class keeps its nonzero `creditsUsed` while waitlisted, and
-can be double-charged if later promoted), RESCH-003 (reschedule never
-promotes the class being left), and RESCH-004 (no reconciliation against
-the target class's own `creditCost` for transitions other than the one
-above) are all untouched — separate defect IDs, separate commits.
+**Not changed here / still open:** RESCH-003 (reschedule never promotes
+the class being left) and RESCH-004 (no reconciliation against the
+target class's own `creditCost` for transitions other than the one
+above) are untouched — separate defect IDs, separate commits. RESCH-002
+(the mirror-image `confirmed → waitlisted` transition) was also open at
+the time this fix landed, and has since been fixed too — see that entry
+below.
 
 **Verified live:** manual E2E against the running dev server with a
 real seeded membership (no automated test harness exists on this
@@ -1069,32 +1070,50 @@ created, and the membership balance stayed at 0 (not further deducted).
 ### RESCH-002 — Rescheduling into a full class, then being promoted later, can charge credits twice for one booking
 
 **Severity:** High
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 6)
+**Status:** Fixed on branch `reschedule-double-charge-member` (also
+flagged in plan.md's critical list, item 6, and plan.md's member-flow
+item #11)
 **Area:** Rescheduling / Waitlist
 **File:** `src/server/routers/reschedules.ts` — `reschedule` (interacts
-with `bookings.ts`'s `cancel` promotion logic)
+with `bookings.ts`'s `cancel` promotion logic and BOOK-004's shared
+`tryPromotePersonalCandidate`)
 
-**Current behavior:** rescheduling a paid (`creditsUsed > 0`) booking
-into a full target class creates a waitlisted booking that keeps the
-original's nonzero `creditsUsed`. When that booking is later promoted
-(via `bookings.ts`'s `cancel`, see BOOK-004's promotion block),
-`creditsUsed` is overwritten to the target class's cost and the
-membership is charged again — a second charge for what was originally one
-booking.
+**Original behavior:** rescheduling a paid (`creditsUsed > 0`) booking
+into a full target class created a waitlisted booking that kept the
+original's nonzero `creditsUsed`. When that booking was later promoted
+(via `bookings.ts`'s `cancel`), `creditsUsed` was overwritten to the
+target class's cost and the membership was charged again — a second
+charge for what was originally one booking.
 
-**Reproduction:** `src/server/routers/reschedules.test.ts`'s
-`reschedules.reschedule > RESCH-002: rescheduling a paid booking into a
-full class, then having it promoted later, charges credits a second time
-for one logical booking` — books a class for real (first charge), then
-reschedules into a full class and triggers a promotion (second charge),
-and shows the membership loses two credits for one continuous booking.
+**Fix — same "waitlisted means unspent" invariant RESCH-001 already
+established for the opposite transition, applied here too (per plan.md's
+own framing that this needs to be "implemented consistently
+everywhere"):** a `booked` original rescheduled into a full target class
+is now created `waitlisted` with `creditsUsed: 0` — matching every other
+waitlisted booking in the app — and the credits already deducted for the
+original booking are refunded back to the membership at reschedule time
+(same `UNLIMITED_CREDITS` guard used everywhere else; skipped if the
+original had 0 credits used, or its membership can't be resolved). A
+later promotion (BOOK-004, fixed) then charges exactly once, correctly,
+with no code changes needed there — the fix is entirely in getting
+`reschedule`'s own bookkeeping right at the point of transition.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md — a
-waitlisted booking should consistently represent *unspent* credits
-(`creditsUsed: 0`) across booking, rescheduling, cancellation, and
-promotion; if credits are meant to be reserved while waitlisted instead,
-that rule needs to be applied consistently everywhere, not just here.
+**Not changed / still open:** RESCH-003 (reschedule never promotes the
+class being left) and RESCH-004 (no reconciliation of same-named classes
+with different `creditCost`, for the two transitions that don't change
+status) remain untouched — separate defect IDs, separate commits.
+
+**Verified live:** manual E2E against the running dev server with real
+seeded memberships (no automated test harness exists on this branch).
+Booked a class for real (10 credits → 4, a genuine charge). Rescheduled
+into a same-named, capacity-1 class that was already full → confirmed
+the new booking came back `status: "waitlisted"`, `creditsUsed: 0` (not
+the stale 6), and the membership was correctly refunded back to 10.
+Then cancelled the booking occupying that full class, triggering
+promotion → confirmed the waitlisted booking was promoted to
+`status: "booked"`, `creditsUsed: 6`, and the membership ended at
+exactly 4 — charged once for the one continuous booking, not twice.
+`tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
