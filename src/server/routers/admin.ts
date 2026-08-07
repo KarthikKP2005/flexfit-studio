@@ -10,6 +10,7 @@ import {
   membershipPlans,
 } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
+import { notifyExpiringMemberships } from "../jobs/membership-expiry";
 
 /**
  * Read-only admin dashboard/report queries. Not responsible for: any
@@ -148,6 +149,19 @@ export const adminRouter = router({
       totalCents: Number(r.totalCents),
       count: Number(r.count),
     }));
+  }),
+
+  /**
+   * Manually runs the same membership-expiry notification job the
+   * standalone daily cron process runs (see server/cron.ts /
+   * jobs/membership-expiry.ts, both NOTIF-004) — lets an admin send
+   * reminders on demand without needing `pnpm cron` running, and is how
+   * this feature gets tested. Running it twice in one day sends
+   * duplicate reminders — see membership-expiry.ts's header comment for
+   * why that's an accepted tradeoff rather than a bug.
+   */
+  runMembershipExpiryCheck: adminProcedure.mutation(async () => {
+    return notifyExpiringMemberships();
   }),
 
   /** Active memberships whose endDate falls within the next 14 days. */

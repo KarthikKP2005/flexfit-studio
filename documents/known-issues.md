@@ -112,6 +112,121 @@ query's `where` alongside the existing role filter.
 
 ---
 
+### NOTIF-002 — Waitlist promotions never sent a notification
+
+**Severity:** Medium (a promoted member has no in-app signal that they
+now hold a confirmed spot — they'd only find out by checking `/dashboard`
+or `/waitlist` themselves)
+**Status:** Fixed on branch `notifications-member`
+**Area:** Notifications / Booking / Corporate bookings
+**File:** `src/server/routers/bookings.ts` — `cancel`;
+`src/server/routers/corporate-bookings.ts` — `cancel`
+
+**Original behavior:** the schema defines a `waitlist_promotion`
+notification type, but neither promotion flow (personal cancel's
+waitlist promotion, corporate cancel's waitlist promotion) ever inserted
+one — see plan.md item #35.
+
+**Fix:** one `notifications.insert` added at the end of each existing
+`if (next) { ... }` promotion block, for `next.userId`. Nothing above the
+insert in either block was changed — the promotion logic (including its
+known bugs, BOOK-004 and CORP-001) fires exactly as it did before; the
+notification is purely an additive side effect of an already-successful
+promotion.
+
+**Not in scope for this fix:** BOOK-004 (promotion doesn't recheck
+credits) and CORP-001 (promotion confirms before checking company
+credits) are untouched — a member/company can still be promoted into a
+booking they can't really afford, and now also gets notified about it.
+
+---
+
+### NOTIF-003 — Class cancellation never sent a notification
+
+**Severity:** Medium (a member whose confirmed booking gets cancelled by
+staff has no in-app signal — same practical gap as NOTIF-002)
+**Status:** Fixed on branch `notifications-member`
+**Area:** Notifications / Classes
+**File:** `src/server/routers/classes.ts` — `cancel`
+
+**Original behavior:** the schema defines a `class_cancelled`
+notification type; `cancel` marks the class cancelled and cancels its
+`booked` bookings but never inserted one — see plan.md item #9/CLASS-004.
+
+**Fix:** the existing `bookings` update now uses `.returning()` (instead
+of a bare `.update()`) so the mutation knows which `userId`s were just
+affected, then bulk-inserts one `class_cancelled` notification per
+affected member. The set of bookings that get cancelled is unchanged —
+still `booked` personal bookings only.
+
+**Not in scope for this fix:** this does not expand CLASS-004's scope.
+Waitlisted personal bookings and all corporate bookings on the cancelled
+class are still left completely untouched (not cancelled, no credit
+restored, and consequently — since they're never touched — no
+notification either). Fixing that gap is CLASS-004's job, not this one.
+
+---
+
+### NOTIF-004 — Membership-expiring notifications never fired (no scheduler existed)
+
+**Severity:** Medium (members get no warning before a membership lapses;
+staff had to notice manually via `/admin/reports`)
+**Status:** Fixed on branch `notifications-member`
+**Area:** Notifications / Membership
+**File:** `src/server/jobs/membership-expiry.ts` (new), `src/server/cron.ts`
+(new), `src/server/routers/admin.ts` (new `runMembershipExpiryCheck`),
+`src/app/admin/reports/page.tsx`
+
+**Original behavior:** unlike NOTIF-002/003, there was no existing
+mutation call site to hook into — the only related code was
+`admin.expiringMemberships`, a read-only query powering the "Expiring in
+14 Days" list on `/admin/reports`. Nothing in the app ran on a schedule
+at all.
+
+**Fix (a genuine addition, not just wiring up dead plumbing — recorded
+here per Rule 8 since the policy had to be designed, not discovered):**
+- `server/jobs/membership-expiry.ts`'s `notifyExpiringMemberships()` reuses
+  the exact same "active, endDate within 14 days" window as
+  `admin.expiringMemberships`, and inserts one `membership_expiring`
+  notification per matching member.
+- `server/cron.ts` is a **standalone Node process** (`pnpm cron`, run
+  separately from `pnpm dev`/`pnpm start`) that schedules that function via
+  `node-cron` to run once daily at 08:00. This is a real, working cron —
+  it is intentionally *not* wired through Next's `instrumentation.ts`
+  server-startup hook. An earlier version of this fix did exactly that,
+  and it broke: Next's dev-mode webpack also compiles `instrumentation.ts`
+  for the edge runtime, and `node-cron`'s internal `node:crypto` import
+  isn't handled there — that failure wasn't cosmetic, it surfaced as a
+  500 on unrelated API routes (`auth.login` included), a direct Prime
+  Directive violation. Adding `node-cron` to `next.config.mjs`'s
+  `serverExternalPackages` (the fix that works for `@libsql/client`)
+  didn't help, since that only affects the nodejs bundle target, not the
+  edge one Next also builds for `instrumentation.ts`. Running as a plain
+  Node script via `tsx` sidesteps Next's bundler entirely, so the problem
+  doesn't exist there.
+- `admin.runMembershipExpiryCheck` (new admin-only mutation) calls the
+  same function on demand, wired to a "Send expiry reminders now" button
+  on `/admin/reports` — this is how the job gets tested/verified and used
+  without needing `pnpm cron` running, e.g. in this dev environment.
+
+**Chosen policy, stated explicitly (Rule 8):** deduplication is "once per
+run," not "once per membership ever" — `notifications` has no
+`membershipId` column to check against, and adding one is a schema
+change (Rule 1.2) out of scope here. A membership sitting in the 14-day
+window gets a fresh reminder every time the job runs — daily via
+`pnpm cron`, or immediately (possibly more than once a day) via the
+manual button. This is a real limitation, not hidden: documented here
+and in `membership-expiry.ts`'s header comment.
+
+**What would still need doing for a production version:** run `pnpm cron`
+as a managed background process (systemd/pm2/a platform's worker
+dyno — whatever the deployment target supports), move the fixed 08:00
+schedule to a config value, and add real dedup (a `membershipId` on
+`notifications`, or a separate "last notified" table) if daily re-sends
+turn out to be unwanted.
+
+---
+
 ### PLAN-001 — `subscribe` allows unlimited simultaneous active memberships
 
 **Severity:** Medium (no data corruption, but downstream code that

@@ -6,10 +6,12 @@ import { router, protectedProcedure, adminProcedure } from "../trpc";
 /**
  * In-app notifications: unread badge, list, mark-as-read, and admin
  * broadcast. Not responsible for: generating notifications from other
- * flows — `type` includes waitlist_promotion/class_cancelled/
- * membership_expiring in the schema, but this router (and the rest of
- * the app) never inserts those; only `broadcast`'s "announcement" type
- * is ever created.
+ * flows — this router only ever inserts `broadcast`'s "announcement"
+ * type. `waitlist_promotion` and `class_cancelled` are inserted directly
+ * by bookings.ts/corporate-bookings.ts/classes.ts (NOTIF-002/NOTIF-003)
+ * at their own trigger points, and `membership_expiring` by the
+ * scheduled job in server/jobs/membership-expiry.ts (NOTIF-004) — none
+ * of that logic lives here.
  */
 
 export const notificationsRouter = router({

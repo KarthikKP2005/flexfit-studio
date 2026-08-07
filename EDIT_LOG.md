@@ -10,6 +10,109 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(notifications): send membership-expiring reminders via a real daily cron
+
+**Type:** FIX
+**Defect:** NOTIF-004
+**Behavior change:** yes — a new standalone background process (`pnpm
+cron`) inserts `membership_expiring` notifications once daily; a new
+admin-only mutation and button let staff trigger the same job on demand.
+No existing procedure's input/output/error shape changed.
+**Files:** `src/server/jobs/membership-expiry.ts` (new — the shared job
+function), `src/server/cron.ts` (new — standalone process that schedules
+it via `node-cron` at 08:00 daily), `src/server/routers/admin.ts` (new
+`runMembershipExpiryCheck` mutation, reuses the same function),
+`src/app/admin/reports/page.tsx` (new "Send expiry reminders now"
+button), `src/server/routers/notifications.ts` and
+`src/app/notifications/page.tsx` (header comments corrected — no longer
+claim this type is never inserted), `package.json`/`pnpm-lock.yaml`
+(added `node-cron`, new `pnpm cron` script)
+
+**Discovered and reverted mid-fix:** the first version of this scheduled
+the job from `src/instrumentation.ts` (Next's server-startup hook), which
+seemed like the more idiomatic choice. It was wrong: Next's dev-mode
+webpack also compiles `instrumentation.ts` for the edge runtime, and
+`node-cron`'s internal `node:crypto` import isn't handled there — the
+failure wasn't a harmless log line, it 500'd unrelated API routes
+(`auth.login` included) during manual verification. Adding `node-cron` to
+`serverExternalPackages` in `next.config.mjs` (the standard fix for this
+class of problem, already used for `@libsql/client`) didn't resolve it,
+since that only covers the nodejs bundle target, not the edge one Next
+separately builds for `instrumentation.ts`. Deleted `instrumentation.ts`
+and moved the schedule into `server/cron.ts`, a plain script run via
+`tsx` outside Next's build entirely — confirmed clean afterward.
+
+**Tests:** no automated test harness in this branch — verified manually:
+1. Seeded a membership with `endDate` inside the 14-day window (already
+   present via seed data / `admin.expiringMemberships`).
+2. Called `admin.runMembershipExpiryCheck` directly against the running
+   dev server → returned `{notified: N}` matching
+   `expiringMemberships`'s count.
+3. Queried that member's `notifications.list` → new `membership_expiring`
+   row present with the correct plan name and expiry date.
+4. Ran `pnpm cron` standalone → confirmed the "job scheduled" log line
+   and no errors, independent of `pnpm dev`.
+5. `tsc --noEmit` and `pnpm build` both clean; `pnpm dev` no longer shows
+   the `node:crypto` error and ordinary requests (`auth.login` etc.) work
+   normally again.
+
+Closes plan.md's member-flow item #3 (the `membership_expiring` third of
+it) and known-issues.md's NOTIF-004. The dedup policy (once per run, not
+once per membership ever — see the "Chosen policy" paragraph in that
+known-issues.md entry) was made explicit rather than silently decided,
+per Rule 8.
+
+---
+
+## 2026-08-07 — FIX(classes): notify members when their booking is cancelled
+
+**Type:** FIX
+**Defect:** NOTIF-003
+**Behavior change:** yes — members whose `booked` personal booking gets
+cancelled by an admin now receive a `class_cancelled` notification.
+`classes.cancel`'s own return value/shape is unchanged.
+**Files:** `src/server/routers/classes.ts` (`cancel`'s bookings update
+now uses `.returning()` to know who to notify; one notification inserted
+per affected member)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server: booked a class as a member, cancelled
+the class as admin via `classes.cancel`, confirmed the booking flipped
+to `cancelled` (unchanged existing behavior) and the member's
+`notifications.list` gained a `class_cancelled` row referencing the
+right class name/time. Also confirmed a *waitlisted* booking on the same
+class received no notification (matches CLASS-004's untouched scope).
+
+Closes plan.md's member-flow item #3 (the `class_cancelled` third) and
+known-issues.md's NOTIF-003. Does not expand CLASS-004 — waitlisted and
+corporate bookings on a cancelled class are still not cancelled, still
+not refunded, and (since nothing touches them) still not notified.
+
+---
+
+## 2026-08-07 — FIX(bookings): notify members on waitlist promotion
+
+**Type:** FIX
+**Defect:** NOTIF-002
+**Behavior change:** yes — a member (personal or corporate) promoted off
+a waitlist now receives a `waitlist_promotion` notification. Both
+`cancel` mutations' return values/shapes are unchanged.
+**Files:** `src/server/routers/bookings.ts` (`cancel`'s promotion block),
+`src/server/routers/corporate-bookings.ts` (`cancel`'s promotion block)
+**Tests:** no automated test harness in this branch — verified manually:
+filled a class to capacity, added a second booking (waitlisted),
+cancelled the confirmed one, confirmed the waitlisted booking was
+promoted (unchanged existing behavior, credit deduction included) and
+the promoted member's `notifications.list` gained a `waitlist_promotion`
+row naming the right class. Repeated the same sequence for
+`corporateBookings.cancel`/`corporateBookings.book`.
+
+Closes plan.md's member-flow item #3 (the `waitlist_promotion` third)
+and known-issues.md's NOTIF-002. BOOK-004 and CORP-001 (the promotion
+logic's own pre-existing bugs) are untouched — the notification fires
+regardless of whether the promotion itself was actually eligible.
+
+---
+
 ## 2026-08-06 — FIX(bookings): add member-facing UI for corporate booking
 
 **Type:** FIX
