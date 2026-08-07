@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
-import { classes, bookings, users } from "@/db/schema";
+import { classes, bookings, users, notifications } from "@/db/schema";
 import { router, publicProcedure, staffProcedure, adminProcedure } from "../trpc";
 
 /**
@@ -175,8 +175,11 @@ export const classesRouter = router({
    *
    * Behavior note (see CLASS-004 in known-issues.md — not fixed here):
    * this is a partial cleanup only — waitlisted bookings, all corporate
-   * bookings (any status), membership/company credit restoration, and
-   * member notifications are all left untouched.
+   * bookings (any status), and membership/company credit restoration are
+   * still left untouched. As of NOTIF-003, the members whose `booked`
+   * bookings *are* cancelled here now get a `class_cancelled`
+   * notification — waitlisted/corporate members still get none, matching
+   * CLASS-004's existing (undilated) scope.
    *
    * @throws NOT_FOUND if the class doesn't exist
    */
@@ -194,12 +197,27 @@ export const classesRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
-      await ctx.db
+      const cancelledBookings = await ctx.db
         .update(bookings)
         .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
         .where(
           and(eq(bookings.classId, input.id), eq(bookings.status, "booked")),
+        )
+        .returning();
+
+      // NOTIF-003: notify each member whose booking was just cancelled
+      // above — added on top of the existing (still-incomplete, see
+      // CLASS-004) cleanup, not expanding what gets cancelled.
+      if (cancelledBookings.length > 0) {
+        await ctx.db.insert(notifications).values(
+          cancelledBookings.map((b) => ({
+            userId: b.userId,
+            type: "class_cancelled" as const,
+            title: "Class cancelled",
+            message: `${cls.name} on ${cls.startsAt} has been cancelled.`,
+          })),
         );
+      }
 
       return cls;
     }),
