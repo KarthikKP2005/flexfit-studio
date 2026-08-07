@@ -1,18 +1,19 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { bookings, classes, memberships, checkins, users, notifications } from "@/db/schema";
+import { bookings, classes, memberships, checkins, users } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
+import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
 
 /**
  * Personal (membership-credit-funded) class bookings: browse, book,
  * cancel, check-in, and waitlist. Not responsible for: corporate
  * bookings — corporate-bookings.ts is a structurally parallel but
- * entirely separate table/flow, not reconciled against this one for
- * waitlist order (see CORP-003 in known-issues.md). Capacity *is* now
- * reconciled — `book` below shares `isClassFull` with
- * corporate-bookings.ts's `book` and reschedules.ts (CORP-002, fixed).
+ * entirely separate table/flow. Capacity and waitlist order *are* now
+ * reconciled with it — `book` shares `isClassFull` (CORP-002, fixed) and
+ * `cancel` shares `promoteNextWaitlisted` (CORP-003, fixed), both in
+ * src/features/bookings/.
  */
 
 /**
@@ -185,8 +186,10 @@ export const bookingsRouter = router({
 
   /**
    * Cancels a member's booking and, if eligible, refunds the credit.
-   * Also promotes the longest-waiting waitlisted booking into the freed
-   * seat, if the cancelled booking was a confirmed one.
+   * Also promotes the longest-waiting waitlisted candidate into the
+   * freed seat, if the cancelled booking was a confirmed one — checking
+   * BOTH the personal and corporate waitlists together (CORP-003, fixed
+   * — see features/bookings/waitlist-service.ts), not just this table.
    *
    * Behavior notes (do not "fix" silently — see BOOK-004 in
    * known-issues.md):
@@ -194,9 +197,6 @@ export const bookingsRouter = router({
    *   class start, and only if the booking had actually spent a credit.
    * - Promotion does not currently re-check the promoted member's
    *   credit balance — see BOOK-004.
-   * A promoted member is sent a `waitlist_promotion` notification (see
-   * NOTIF-002 in known-issues.md) — added on top of the existing
-   * promotion logic above, which is otherwise unchanged.
    *
    * @throws NOT_FOUND if the booking doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
@@ -256,59 +256,12 @@ export const bookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes the member who has waited
-      // longest — find the single oldest waitlisted booking for this
-      // class (see BOOK-004: this does not check whether that member's
-      // membership still has enough credits before promoting them).
+      // Freeing a confirmed spot promotes whoever has waited longest
+      // across BOTH waitlists (CORP-003, fixed) — see
+      // features/bookings/waitlist-service.ts for the selection and
+      // promotion mechanics (BOOK-004/CORP-001 preserved, unfixed).
       if (row.booking.status === "booked") {
-        const next = await ctx.db
-          .select()
-          .from(bookings)
-          .where(
-            and(
-              eq(bookings.classId, row.cls.id),
-              eq(bookings.status, "waitlisted"),
-            ),
-          )
-          .orderBy(asc(bookings.bookedAt))
-          .get();
-
-        if (next) {
-          await ctx.db
-            .update(bookings)
-            .set({ status: "booked", creditsUsed: row.cls.creditCost })
-            .where(eq(bookings.id, next.id));
-
-          if (next.membershipId) {
-            const ms = await ctx.db
-              .select()
-              .from(memberships)
-              .where(eq(memberships.id, next.membershipId))
-              .get();
-
-            if (ms && ms.creditsRemaining < UNLIMITED_CREDITS) {
-              await ctx.db
-                .update(memberships)
-                .set({
-                  creditsRemaining: Math.max(
-                    0,
-                    ms.creditsRemaining - row.cls.creditCost,
-                  ),
-                })
-                .where(eq(memberships.id, ms.id));
-            }
-          }
-
-          // NOTIF-002: let the promoted member know they got a confirmed
-          // spot — this is new, everything above it in this `if (next)`
-          // block is unchanged.
-          await ctx.db.insert(notifications).values({
-            userId: next.userId,
-            type: "waitlist_promotion",
-            title: "You're off the waitlist!",
-            message: `You've been booked into ${row.cls.name} on ${row.cls.startsAt}.`,
-          });
-        }
+        await promoteNextWaitlisted(ctx.db, row.cls);
       }
 
       return { ok: true, refunded: refundable };
