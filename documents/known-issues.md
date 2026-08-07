@@ -730,7 +730,10 @@ instead of the promotion being rejected)
 and this is the exact scenario AGENT_RULES.md's Rule 5 uses as its own
 worked example for how to comment a known bug)
 **Area:** Booking / Waitlist
-**File:** `src/server/routers/bookings.ts` — `cancel`
+**File:** `src/features/bookings/waitlist-service.ts` — the promotion
+logic this describes moved here as part of CORP-003's fix (unified
+waitlist promotion), but is otherwise byte-for-byte unchanged; it was
+previously inline in `bookings.ts`'s `cancel`.
 
 **Current behavior:** when a confirmed (`booked`) booking is cancelled,
 the oldest waitlisted booking for that class is promoted to `booked`
@@ -767,7 +770,10 @@ corporate booking)
 **Status:** Confirmed from source (also flagged in plan.md's critical
 list, item 3)
 **Area:** Corporate bookings / Waitlist
-**File:** `src/server/routers/corporate-bookings.ts` — `cancel`
+**File:** `src/features/bookings/waitlist-service.ts` — the promotion
+logic this describes moved here as part of CORP-003's fix (unified
+waitlist promotion), but is otherwise byte-for-byte unchanged; it was
+previously inline in `corporate-bookings.ts`'s `cancel`.
 
 **Current behavior:** the promotion block sets the waitlisted booking's
 `status` to `"booked"` (and `creditsUsed` to the class's cost)
@@ -860,30 +866,61 @@ actual `reschedule` mutation correctly waitlisted, matching the preview.
 
 ### CORP-003 — Corporate and personal waitlists never coordinate
 
-**Severity:** Medium (a personal member can wait indefinitely behind a
-corporate booking's cancellation, or vice versa, regardless of who's
+**Severity:** Medium (a personal member could wait indefinitely behind a
+corporate booking's cancellation, or vice versa, regardless of who'd
 actually been waiting longer)
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 2)
-**Area:** Corporate bookings / Waitlist
-**File:** `src/server/routers/corporate-bookings.ts` — `cancel`
-(mirrored by `bookings.ts`'s `cancel`)
+**Status:** Fixed on branch `waitlist-coordination-member` (also
+flagged in plan.md's critical list, item 2)
+**Area:** Corporate bookings / Booking / Waitlist
+**File:** `src/features/bookings/waitlist-service.ts` (new),
+`src/server/routers/bookings.ts` — `cancel`,
+`src/server/routers/corporate-bookings.ts` — `cancel`
 
-**Current behavior:** cancelling a corporate booking only ever looks at
-`corporateBookings` for a waitlisted candidate to promote; cancelling a
-personal booking only ever looks at `bookings`. There is no single
-chronological queue across both.
+**Original behavior:** cancelling a corporate booking only ever looked
+at `corporateBookings` for a waitlisted candidate to promote; cancelling
+a personal booking only ever looked at `bookings`. There was no single
+chronological queue across both — an older candidate on one waitlist
+could be skipped in favor of a newer candidate on the other, purely
+because of which table the freed seat happened to come from.
 
-**Reproduction:** `src/server/routers/corporate-bookings.test.ts`'s
-`corporateBookings.cancel > CORP-003: does not promote a personal
-(non-corporate) waitlisted member when a corporate seat frees up, even if
-they've been waiting longer`.
+**Fix:** one shared `promoteNextWaitlisted(db, cls)` in the new
+`src/features/bookings/waitlist-service.ts` (the exact filename
+AGENT_RULES.md Rule 7 uses as its own worked example alongside
+`capacity-service.ts`, CORP-002's fix). It reads the oldest waiting row
+from *both* `bookings` and `corporateBookings`, compares their
+`bookedAt` timestamps, and promotes whichever is genuinely older — using
+that source's own existing promotion mechanics unchanged once selected.
+Both `bookings.ts`'s `cancel` and `corporate-bookings.ts`'s `cancel` now
+call this one function instead of each running their own table-only
+promotion query (this also happened to collapse ~50 near-duplicate lines
+in each file into one call, directly answering the brief's "pull
+repeated logic into one place instead of four").
 
-**Why not fixed here / what "fixed" would look like:** per plan.md — a
-unified promotion service reading the oldest candidate across both
-tables by `bookedAt`, checking eligibility, and promoting one — or,
-further out, consolidating both booking types into one table with a
-credit-source field (a much larger schema change).
+**Not in scope for this fix — explicitly untouched:**
+- **BOOK-004** (personal promotion never rechecks the candidate's
+  credits, floors at zero with `Math.max` instead of rejecting) —
+  same bug, can now happen to a promoted candidate from either source.
+- **CORP-001** (corporate promotion confirms the booking before checking
+  whether the company can afford it) — same bug, unchanged.
+- Atomic/transactional promotion (check + two writes + notification, not
+  wrapped in a transaction) — separate, already-documented, broader "no
+  transactions" finding (plan.md item 44).
+- RESCH-003 (reschedule frees a seat but never triggers *any* promotion)
+  and CLASS-004 (class cancellation doesn't either) — `promoteNextWaitlisted`
+  is now available for both as natural follow-up work, but wasn't wired
+  in here; only the two `cancel` mutations that already had promotion
+  logic were touched.
+
+**Verified live** (manual E2E, real seeded/company-linked accounts,
+both directions): filled a capacity-1 class personally, queued a
+*corporate* candidate, then — after a real time gap — queued a *newer
+personal* candidate; cancelling the personal booking correctly promoted
+the older corporate candidate, not the newer personal one (confirmed via
+`corporateBookings.mine`/`bookings.mine`, plus the promotion
+notification landing on the right account). Repeated with the sources
+reversed (corporate booking cancelled, older personal candidate queued
+first) — correctly promoted the older personal candidate over a newer
+corporate one. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 

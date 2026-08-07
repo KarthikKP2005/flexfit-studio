@@ -10,6 +10,52 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(bookings): unify normal and corporate waitlist promotion
+
+**Type:** FIX
+**Defect:** CORP-003
+**Behavior change:** yes — when a confirmed booking is cancelled (personal
+or corporate), the class's waitlist is now promoted from whichever
+candidate has *genuinely* waited longest across both `bookings` and
+`corporateBookings`, not just whichever table the cancellation happened
+to come from. No tRPC procedure's input, output shape, or error
+codes/messages changed. BOOK-004 and CORP-001 (the promotion mechanics'
+own separate, already-documented bugs) are preserved byte-for-byte —
+only candidate *selection* changed.
+**Files:** `src/features/bookings/waitlist-service.ts` (new —
+`promoteNextWaitlisted`, shared by both call sites below),
+`src/server/routers/bookings.ts` (`cancel`'s ~50-line inline promotion
+block replaced with one call), `src/server/routers/corporate-bookings.ts`
+(same, and the now-unused `notifications` import removed)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded, company-linked accounts
+(TechCorp Inc / rahul.k, meera.n, vikram.s), both directions:
+1. Capacity-1 class filled by a personal booking. Queued a *corporate*
+   waitlist candidate, then — after a real ~10s gap — a *newer personal*
+   candidate. Cancelled the personal booking → the older *corporate*
+   candidate was correctly promoted (status: booked), the newer personal
+   one correctly stayed waitlisted, and the promoted member received the
+   existing `waitlist_promotion` notification (NOTIF-002).
+2. Mirror case on a second class: filled by a corporate booking, older
+   *personal* candidate queued first, newer corporate candidate second.
+   Cancelled the corporate booking → the older *personal* candidate was
+   correctly promoted, the newer corporate one correctly stayed
+   waitlisted.
+3. All test classes/bookings/notifications deleted afterward; TechCorp's
+   credit pool balance restored to its pre-test value.
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's critical-problems item #2 ("Waitlists don't coordinate")
+and known-issues.md's CORP-003 — see that entry for exactly which
+adjacent gaps (BOOK-004, CORP-001, transactional promotion, RESCH-003,
+CLASS-004) are explicitly still open and why. CORP-001's and BOOK-004's
+own known-issues.md entries updated to point at the promotion logic's
+new location (`waitlist-service.ts`), since the bugs themselves moved
+with it unchanged. New file follows the same `src/features/bookings/`
+home CORP-002's `capacity-service.ts` established in the previous commit.
+
+---
+
 ## 2026-08-07 — FIX(bookings): count both personal and corporate bookings toward class capacity
 
 **Type:** FIX
