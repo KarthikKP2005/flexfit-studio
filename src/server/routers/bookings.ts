@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { bookings, classes, memberships, checkins, users } from "@/db/schema";
+import { bookings, classes, memberships, checkins, users, notifications } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 
 /**
@@ -195,6 +195,9 @@ export const bookingsRouter = router({
    *   class start, and only if the booking had actually spent a credit.
    * - Promotion does not currently re-check the promoted member's
    *   credit balance — see BOOK-004.
+   * A promoted member is sent a `waitlist_promotion` notification (see
+   * NOTIF-002 in known-issues.md) — added on top of the existing
+   * promotion logic above, which is otherwise unchanged.
    *
    * @throws NOT_FOUND if the booking doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
@@ -296,6 +299,16 @@ export const bookingsRouter = router({
                 .where(eq(memberships.id, ms.id));
             }
           }
+
+          // NOTIF-002: let the promoted member know they got a confirmed
+          // spot — this is new, everything above it in this `if (next)`
+          // block is unchanged.
+          await ctx.db.insert(notifications).values({
+            userId: next.userId,
+            type: "waitlist_promotion",
+            title: "You're off the waitlist!",
+            message: `You've been booked into ${row.cls.name} on ${row.cls.startsAt}.`,
+          });
         }
       }
 

@@ -8,6 +8,7 @@ import {
   companyMembers,
   checkins,
   users,
+  notifications,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 
@@ -209,6 +210,10 @@ export const corporateBookingsRouter = router({
    * - CORP-003: only ever considers the corporate waitlist — a personal
    *   member waiting for the same class is never considered here, and
    *   bookings.ts's cancel never considers this table either.
+   * A promoted member is sent a `waitlist_promotion` notification (see
+   * NOTIF-002 in known-issues.md, same defect as bookings.ts's cancel) —
+   * added on top of the existing promotion logic, which is unchanged,
+   * bug-for-bug (still fires even in the CORP-001 free-booking case).
    *
    * @throws NOT_FOUND if the booking doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
@@ -313,6 +318,15 @@ export const corporateBookingsRouter = router({
               })
               .where(eq(companies.id, company.id));
           }
+
+          // NOTIF-002: notify the promoted member, same as bookings.ts's
+          // cancel — everything above this insert is unchanged.
+          await ctx.db.insert(notifications).values({
+            userId: next.userId,
+            type: "waitlist_promotion",
+            title: "You're off the waitlist!",
+            message: `You've been booked into ${row.cls.name} on ${row.cls.startsAt}.`,
+          });
         }
       }
 
