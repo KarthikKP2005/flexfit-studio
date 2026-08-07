@@ -7,6 +7,14 @@ picked, so it can be defended.
 
 ---
 
+## 2026-08-07 — Database Indexing for Schedule Load Performance
+
+**Decision:** Added `classes_starts_at_idx` and `bookings_class_id_idx` indexes via Drizzle schema to `flexfit.db`.
+
+**Why:** The `classes.list` tRPC query (used heavily by the public `/schedule` page) runs a correlated SQL subquery `(select count(*) from bookings where classId = classes.id)` to determine `spotsLeft`. Because `classId` was unindexed, SQLite performed an O(N) full table scan of the `bookings` table for *every single scheduled class item*. Adding an index to `bookings.classId` transforms this scan into an instant O(1) lookup, resolving the dev-mode lag and ensuring production scales beyond a few hundred bookings without throttling.
+
+---
+
 ## 2026-08-06 — Test runner setup
 
 **Decision:** Added `vitest.config.ts` at the repo root, resolving the `@/*`

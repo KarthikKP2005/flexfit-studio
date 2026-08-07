@@ -10,6 +10,28 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(db): add database indexes for schedule load performance
+
+**Type:** FIX
+
+**Defect ID:** n/a (Performance optimization)
+
+**Behavior change:** yes — schedule page loading speed is drastically improved due to indexes on `bookings.classId` and `classes.startsAt`.
+
+**Date:** 2026-08-07
+
+**Files touched:**
+- `src/db/schema.ts` — imported `index` and added indexes to `classes` and `bookings` tables.
+- `documents/architecture-decisions.md` — logged the ADR for schema modification.
+- `flexfit.db` — recreated/migrated database with new indexes.
+
+**Tests added/updated:** n/a (Schema change, no business logic alteration).
+
+**Summary:** The `classes.list` endpoint suffered from an O(N) table scan of the `bookings` table for every single class returned, causing severe latency on the `/schedule` page in development. Adding `bookings_class_id_idx` converts the subquery into a sub-millisecond lookup.
+
+**AI tool note:** Authored with AI assistance.
+
+---
 ## 2026-08-06 — FIX(bookings): add member-facing UI for corporate booking
 
 **Type:** FIX
