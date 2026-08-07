@@ -10,6 +10,61 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — DOCUMENT(reschedule-modal): log a newly-discovered infinite-refetch-loop bug
+
+**Type:** DOCUMENT
+**Defect:** RESCH-006
+**Behavior change:** no — nothing in the code changed for this entry.
+**Tests:** n/a
+
+While verifying RESCH-006's sibling fix (RESCH-005, next entry) in a
+real browser, discovered that `reschedule-modal.tsx`'s `classes.list`
+query never actually resolves usable data — `from: new
+Date().toISOString()` is computed inline on every render, producing a
+new query key every time, which triggers an infinite fetch/re-render
+loop (reproduced: 200+ requests in 6 seconds, climbing with no sign of
+stopping). The picker shows "No other X classes available" permanently,
+regardless of what data actually exists. Confirmed via `git stash`
+against the unmodified code that this predates today's session entirely
+— not introduced by RESCH-005. Logged in `known-issues.md` with full
+repro details rather than silently fixed alongside RESCH-005 (Rule 4 —
+one defect per commit) or left undocumented.
+
+---
+
+## 2026-08-07 — FIX(reschedule-modal): exclude the original class from the reschedule picker
+
+**Type:** FIX
+**Defect:** RESCH-005
+**Behavior change:** yes — the class the member is already booked into no
+longer appears as a pickable target in the reschedule modal. No tRPC
+procedure changed; `reschedules.reschedule` is called exactly as before.
+**Files:** `src/components/reschedule-modal.tsx` (new `fromClassId` prop,
+`sameNameClasses` filter now also excludes it), `src/app/dashboard/page.tsx`
+(the only call site — `rescheduleModal` state gained `classId`, sourced
+from `bookings.mine`'s existing `classId` field, no new fetch)
+**Tests:** no automated test harness in this branch — verified two ways:
+1. Live in a headless Chromium session (Playwright): logged in as
+   rahul.k@example.com, opened the reschedule modal for a real "Sunrise
+   Yoga" booking. Blocked by RESCH-006 (see previous entry) from
+   observing the picker's actual rendered list, since it never resolves
+   in the browser regardless of this fix — documented there rather than
+   claimed as a false pass here.
+2. Direct data-level check: fetched real `classes.list` output (9
+   "Sunrise Yoga" instances) and applied the exact filter expression used
+   in the component with `fromClassId: 700` (the real original booking's
+   class) — confirmed id `700` is excluded and the other 8 instances are
+   not.
+Also ran `tsc --noEmit` and `pnpm build` (clean).
+
+Closes plan.md's member-flow item #5 ("Reschedule modal doesn't truly
+exclude the current class from the picker") and known-issues.md's
+RESCH-005. Deliberately scoped to just this: RESCH-006 (found during
+verification) and plan.md item #38 (stale error state, a separate,
+already-known gap in this same file) are both left untouched.
+
+---
+
 ## 2026-08-07 — FIX(members): add profile-edit UI
 
 **Type:** FIX

@@ -1023,6 +1023,81 @@ class-series entity that guarantees equal cost.
 
 ---
 
+### RESCH-005 — Reschedule modal didn't actually exclude the original class from the picker
+
+**Severity:** Medium (member-facing confusion — picking the class you're
+already in fails with a confusing server error instead of just not being
+offered)
+**Status:** Fixed on branch `reschedule-modal-member`
+**Area:** Rescheduling / Frontend
+**File:** `src/components/reschedule-modal.tsx`, `src/app/dashboard/page.tsx`
+
+**Original behavior:** the modal's own comment claimed the original
+class was excluded from the picker, but the filter only checked
+`cls.name === fromClassName` — the component was never given the
+original class's `id` to compare against, so the original stayed
+selectable and picking it failed server-side with "You already have an
+active booking for this class." See plan.md item #37.
+
+**Fix:** added a `fromClassId` prop, populated from `bookings.mine`'s
+existing `classId` field (already returned, nothing new fetched) at the
+one call site (`dashboard/page.tsx`). `sameNameClasses` now filters on
+`cls.name === fromClassName && cls.id !== fromClassId`.
+
+**Verification note (see RESCH-006 below):** this could not be verified
+by watching the picker render in a live browser — a separate, more
+severe pre-existing bug means the picker never shows resolved data at
+all, regardless of this fix. Verified instead by applying the exact
+filter expression to real `classes.list` output for a real member/booking
+(9 real "Sunrise Yoga" instances, `fromClassId: 700`): confirmed id `700`
+is excluded from the result and the other 8 instances are not.
+
+---
+
+### RESCH-006 — Reschedule modal's class picker never actually renders data (infinite refetch loop)
+
+**Severity:** High (the picker is effectively non-functional for every
+user, always — this is not an edge case)
+**Status:** Confirmed from source **and reproduced live** in a headless
+Chromium session (Playwright) while verifying RESCH-005 — not something
+plan.md's audit or any prior pass caught.
+**Area:** Rescheduling / Frontend
+**File:** `src/components/reschedule-modal.tsx` — the `classes.list`
+`useQuery` call
+
+**Current behavior:** `trpc.classes.list.useQuery({ from: new
+Date().toISOString() }, { enabled: isOpen })` computes `from` inline on
+every render. Because the input object is a new value every render,
+tRPC/react-query treats each render as a *different* query — the fetch
+that resolves triggers a state update, which causes a re-render, which
+computes a new `from`, which starts a *new* query, forever. Reproduced
+live: opening the modal fired **over 200 `classes.list` requests in 6
+seconds**, climbing steadily with no sign of stopping, and the picker
+showed "No other &lt;X&gt; classes available" for the entire 6-second
+observation window even though the underlying data (confirmed via a
+direct `classes.list` call) contained 9 matching classes. Confirmed via
+`git stash` that this reproduces identically against the code exactly as
+it existed before RESCH-005's fix — pre-existing, not introduced by that
+change.
+
+**Expected invariant:** the query should fire once when the modal opens
+and once more only if `isOpen`/the target actually changes — not on
+every render.
+
+**Why not fixed here:** RESCH-005 was the requested, scoped fix (Rule 4
+— one defect per commit); this is a distinct, separately-discovered
+defect. Given its severity (the picker is unusable today, for everyone),
+it's flagged prominently rather than folded in silently or left for
+someone to rediscover later.
+
+**What "fixed" would look like:** compute `from` once (e.g.
+`useState(() => new Date().toISOString())` or a `useMemo` with an empty
+dependency array, or simply move it outside the render/hook entirely) so
+the query key stays stable across re-renders and only refetches when
+`isOpen` toggles.
+
+---
+
 ### AUTH-001 through NOTIF-001 note
 
 Both entries above were found while writing characterization tests, not

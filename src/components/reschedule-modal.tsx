@@ -6,14 +6,16 @@ import { formatDateTime } from "@/lib/format";
 
 /**
  * Modal for picking a same-named class to reschedule an existing
- * booking into. Not responsible for: excluding the original class from
- * the picker — see the behavior note on `sameNameClasses` below, this
- * component doesn't receive the original class's id at all.
+ * booking into. Excludes the original class itself from the picker (see
+ * RESCH-005 in known-issues.md) — not responsible for resetting `error`
+ * on reopen/reselect/overlay-close, a separate, still-open gap (plan.md
+ * item #38).
  */
 interface RescheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
   fromBookingId: number;
+  fromClassId: number;
   fromClassName: string;
   fromClassTime: string;
   onSuccess: () => void;
@@ -23,6 +25,7 @@ export function RescheduleModal({
   isOpen,
   onClose,
   fromBookingId,
+  fromClassId,
   fromClassName,
   fromClassTime,
   onSuccess,
@@ -42,14 +45,12 @@ export function RescheduleModal({
     }
   );
 
-  // Behavior note: despite the comment above, this does NOT exclude the
-  // original class — it only checks the name, and the component is
-  // never given the original class's id to compare against. The
-  // original class stays selectable; picking it fails server-side with
-  // "You already have an active booking for this class." See plan.md
-  // item #37.
+  // Same-named future classes, excluding the original one being moved
+  // from (RESCH-005 — previously only checked the name, so the original
+  // class stayed selectable and picking it failed server-side with
+  // "You already have an active booking for this class").
   const sameNameClasses = (availableClasses || []).filter(
-    (cls) => cls.name === fromClassName
+    (cls) => cls.name === fromClassName && cls.id !== fromClassId
   );
 
   const reschedule = trpc.reschedules.reschedule.useMutation({
