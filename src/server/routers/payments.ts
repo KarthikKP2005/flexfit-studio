@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { desc, eq } from "drizzle-orm";
-import { payments, users, memberships, membershipPlans } from "@/db/schema";
+import { payments, users, memberships, membershipPlans, bookings, classes, notifications } from "@/db/schema";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 
 /**
@@ -103,36 +103,69 @@ export const paymentsRouter = router({
   refund: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const row = await ctx.db
-        .select()
-        .from(payments)
-        .where(eq(payments.id, input.id))
-        .get();
+      return ctx.db.transaction(async (tx) => {
+        const row = await tx
+          .select()
+          .from(payments)
+          .where(eq(payments.id, input.id))
+          .get();
 
-      if (!row) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found." });
-      }
-      if (row.status !== "paid") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Only paid payments can be refunded.",
-        });
-      }
+        if (!row) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found." });
+        }
+        if (row.status !== "paid") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Only paid payments can be refunded.",
+          });
+        }
 
-      const updated = await ctx.db
-        .update(payments)
-        .set({ status: "refunded" })
-        .where(eq(payments.id, input.id))
-        .returning()
-        .get();
+        const updated = await tx
+          .update(payments)
+          .set({ status: "refunded" })
+          .where(eq(payments.id, input.id))
+          .returning()
+          .get();
 
-      if (row.membershipId) {
-        await ctx.db
-          .update(memberships)
-          .set({ status: "cancelled" })
-          .where(eq(memberships.id, row.membershipId));
-      }
+        if (row.membershipId) {
+          await tx
+            .update(memberships)
+            .set({ status: "cancelled", creditsRemaining: 0 })
+            .where(eq(memberships.id, row.membershipId));
 
-      return updated;
+          const futureBookings = await tx
+            .select({
+              id: bookings.id,
+              status: bookings.status,
+              className: classes.name,
+              startsAt: classes.startsAt,
+            })
+            .from(bookings)
+            .innerJoin(classes, eq(bookings.classId, classes.id))
+            .where(
+              and(
+                eq(bookings.membershipId, row.membershipId),
+                or(eq(bookings.status, "booked"), eq(bookings.status, "waitlisted")),
+                gte(classes.startsAt, new Date().toISOString())
+              )
+            );
+
+          for (const b of futureBookings) {
+            await tx
+              .update(bookings)
+              .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+              .where(eq(bookings.id, b.id));
+
+            await tx.insert(notifications).values({
+              userId: row.userId,
+              type: "booking_cancelled",
+              title: "Booking Cancelled",
+              message: `Your booking for ${b.className} on ${new Date(b.startsAt).toLocaleString()} was cancelled due to a payment refund.`,
+            });
+          }
+        }
+
+        return updated;
+      });
     }),
 });

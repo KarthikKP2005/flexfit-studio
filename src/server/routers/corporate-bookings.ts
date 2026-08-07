@@ -276,7 +276,7 @@ export const corporateBookingsRouter = router({
       // only (see CORP-003 — the personal-bookings waitlist for the
       // same class is never considered here).
       if (row.booking.status === "booked") {
-        const next = await ctx.db
+        const waitlisted = await ctx.db
           .select()
           .from(corporateBookings)
           .where(
@@ -285,17 +285,9 @@ export const corporateBookingsRouter = router({
               eq(corporateBookings.status, "waitlisted"),
             ),
           )
-          .orderBy(asc(corporateBookings.bookedAt))
-          .get();
+          .orderBy(asc(corporateBookings.bookedAt));
 
-        if (next) {
-          // Confirms the booking first, then only *maybe* deducts the
-          // cost below — see CORP-001, this ordering is the bug.
-          await ctx.db
-            .update(corporateBookings)
-            .set({ status: "booked", creditsUsed: row.cls.creditCost })
-            .where(eq(corporateBookings.id, next.id));
-
+        for (const next of waitlisted) {
           const company = await ctx.db
             .select()
             .from(companies)
@@ -303,15 +295,21 @@ export const corporateBookingsRouter = router({
             .get();
 
           if (company && company.creditPoolBalance >= row.cls.creditCost) {
+            // Deduct credits first
             await ctx.db
               .update(companies)
               .set({
-                creditPoolBalance: Math.max(
-                  0,
-                  company.creditPoolBalance - row.cls.creditCost,
-                ),
+                creditPoolBalance: company.creditPoolBalance - row.cls.creditCost,
               })
               .where(eq(companies.id, company.id));
+
+            // Then confirm booking
+            await ctx.db
+              .update(corporateBookings)
+              .set({ status: "booked", creditsUsed: row.cls.creditCost })
+              .where(eq(corporateBookings.id, next.id));
+
+            break; // Successfully promoted one person, stop looking
           }
         }
       }
@@ -362,7 +360,8 @@ export const corporateBookingsRouter = router({
 
       await ctx.db.insert(checkins).values({
         userId: booking.userId,
-        bookingId: null,
+        corporateBookingId: booking.id,
+        source: input.source,
       });
 
       return { ok: true };

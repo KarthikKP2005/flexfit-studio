@@ -259,7 +259,7 @@ export const bookingsRouter = router({
       // class (see BOOK-004: this does not check whether that member's
       // membership still has enough credits before promoting them).
       if (row.booking.status === "booked") {
-        const next = await ctx.db
+        const waitlisted = await ctx.db
           .select()
           .from(bookings)
           .where(
@@ -268,15 +268,9 @@ export const bookingsRouter = router({
               eq(bookings.status, "waitlisted"),
             ),
           )
-          .orderBy(asc(bookings.bookedAt))
-          .get();
+          .orderBy(asc(bookings.bookedAt));
 
-        if (next) {
-          await ctx.db
-            .update(bookings)
-            .set({ status: "booked", creditsUsed: row.cls.creditCost })
-            .where(eq(bookings.id, next.id));
-
+        for (const next of waitlisted) {
           if (next.membershipId) {
             const ms = await ctx.db
               .select()
@@ -284,16 +278,22 @@ export const bookingsRouter = router({
               .where(eq(memberships.id, next.membershipId))
               .get();
 
-            if (ms && ms.creditsRemaining < UNLIMITED_CREDITS) {
+            if (ms && ms.creditsRemaining >= row.cls.creditCost) {
+              // Deduct credits first
               await ctx.db
                 .update(memberships)
                 .set({
-                  creditsRemaining: Math.max(
-                    0,
-                    ms.creditsRemaining - row.cls.creditCost,
-                  ),
+                  creditsRemaining: ms.creditsRemaining - row.cls.creditCost,
                 })
                 .where(eq(memberships.id, ms.id));
+
+              // Then confirm booking
+              await ctx.db
+                .update(bookings)
+                .set({ status: "booked", creditsUsed: row.cls.creditCost })
+                .where(eq(bookings.id, next.id));
+
+              break;
             }
           }
         }

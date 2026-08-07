@@ -156,6 +156,7 @@ export const checkins = sqliteTable("checkins", {
     .notNull()
     .references(() => users.id),
   bookingId: integer("booking_id").references(() => bookings.id),
+  corporateBookingId: integer("corporate_booking_id").references(() => corporateBookings.id),
   checkedInAt: text("checked_in_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
@@ -320,6 +321,18 @@ export const corporateBookings = sqliteTable("corporate_bookings", {
   cancelledAt: text("cancelled_at"),
 });
 
+export const corporateLedger = sqliteTable("corporate_ledger", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id")
+    .notNull()
+    .references(() => companies.id),
+  amountCents: integer("amount_cents").notNull(),
+  creditsAdded: integer("credits_added").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type MembershipPlan = typeof membershipPlans.$inferSelect;
@@ -334,3 +347,4 @@ export type Company = typeof companies.$inferSelect;
 export type CompanyMember = typeof companyMembers.$inferSelect;
 export type CorporateBooking = typeof corporateBookings.$inferSelect;
 export type Reschedule = typeof reschedules.$inferSelect;
+export type CorporateLedger = typeof corporateLedger.$inferSelect;

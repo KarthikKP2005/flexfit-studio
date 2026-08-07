@@ -25,6 +25,7 @@ export default function CompanyDetailsPage() {
   const id = parseInt(params.id as string);
   const { data: company, isLoading, refetch } = trpc.adminCompanies.getById.useQuery({ id });
   const [topUpAmount, setTopUpAmount] = useState("");
+  const [topUpPrice, setTopUpPrice] = useState("0");
   const [showTopUpForm, setShowTopUpForm] = useState(false);
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
@@ -64,8 +65,9 @@ export default function CompanyDetailsPage() {
   const handleTopUp = (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseInt(topUpAmount);
+    const priceCents = Math.round(parseFloat(topUpPrice) * 100);
     if (amount > 0) {
-      topUpMutation.mutate({ id, amount });
+      topUpMutation.mutate({ id, amount, amountCents: priceCents });
     }
   };
 
@@ -125,18 +127,34 @@ export default function CompanyDetailsPage() {
       {showTopUpForm && (
         <div className="panel p-4">
           <form onSubmit={handleTopUp} className="space-y-3">
-            <div>
-              <label className="block text-sm font-medium mb-2">Top Up Amount</label>
-              <input
-                type="number"
-                value={topUpAmount}
-                onChange={(e) => setTopUpAmount(e.target.value)}
-                className="w-full px-3 py-2 border rounded"
-                style={{ borderColor: "var(--border)" }}
-                placeholder="Number of credits"
-                disabled={topUpMutation.isPending}
-                min="1"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Credits to Add</label>
+                <input
+                  type="number"
+                  value={topUpAmount}
+                  onChange={(e) => setTopUpAmount(e.target.value)}
+                  className="w-full px-3 py-2 border rounded"
+                  style={{ borderColor: "var(--border)" }}
+                  placeholder="Number of credits"
+                  disabled={topUpMutation.isPending}
+                  min="1"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Total Price Paid ($)</label>
+                <input
+                  type="number"
+                  value={topUpPrice}
+                  onChange={(e) => setTopUpPrice(e.target.value)}
+                  className="w-full px-3 py-2 border rounded"
+                  style={{ borderColor: "var(--border)" }}
+                  placeholder="0.00"
+                  disabled={topUpMutation.isPending}
+                  min="0"
+                  step="0.01"
+                />
+              </div>
             </div>
             <div className="flex gap-2">
               <button

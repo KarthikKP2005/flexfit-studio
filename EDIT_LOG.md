@@ -22,6 +22,24 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(admin): complete missing business logic flows
+
+**Type:** FIX
+**Defect:** missing business logic (refunds, cancellations, corporate ledger, waitlist promotion bugs)
+**Behavior change:** yes — `classes.cancel` now refunds credits and handles corporate bookings. `payments.refund` zeroes out credits and cancels future bookings. Added `corporate_ledger` for corporate top-ups which now show in revenue reports. Fixed waitlist promotion to check and deduct credits *before* promoting a user (fixing CORP-001/BOOK-004). Added `corporate_booking_id` to `checkins` for proper corporate attendance tracking (fixing CORP-004).
+**Files touched:**
+- `src/db/schema.ts` — added `corporateLedger`, `corporateBookingId` to `checkins`.
+- `src/server/routers/classes.ts` — updated `cancel`.
+- `src/server/routers/payments.ts` — updated `refund`.
+- `src/server/routers/admin-companies.ts` — updated `topUp`.
+- `src/app/admin/companies/[id]/page.tsx` — updated UI to collect total price for topups.
+- `src/server/routers/admin.ts` — included ledger in revenue queries.
+- `src/server/routers/bookings.ts` — fixed waitlist promotion.
+- `src/server/routers/corporate-bookings.ts` — fixed waitlist promotion, added `corporateBookingId` to checkins.
+**Tests:** no automated test harness (removed in prior refactor) — manually verified code changes.
+
+---
+
 ## 2026-08-07 — FIX(db): add database indexes for schedule load performance
 
 **Type:** FIX

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
-import { classes, bookings, users } from "@/db/schema";
+import { classes, bookings, users, corporateBookings, memberships, companies, notifications } from "@/db/schema";
 import { router, publicProcedure, staffProcedure, adminProcedure } from "../trpc";
 
 /**
@@ -183,24 +183,111 @@ export const classesRouter = router({
   cancel: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const cls = await ctx.db
-        .update(classes)
-        .set({ cancelled: true })
-        .where(eq(classes.id, input.id))
-        .returning()
-        .get();
+      return ctx.db.transaction(async (tx) => {
+        const cls = await tx
+          .update(classes)
+          .set({ cancelled: true })
+          .where(eq(classes.id, input.id))
+          .returning()
+          .get();
 
-      if (!cls) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
-      }
+        if (!cls) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+        }
 
-      await ctx.db
-        .update(bookings)
-        .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
-        .where(
-          and(eq(bookings.classId, input.id), eq(bookings.status, "booked")),
-        );
+        // 1. Get all booked and waitlisted personal bookings
+        const personalBookings = await tx
+          .select({
+            id: bookings.id,
+            status: bookings.status,
+            userId: bookings.userId,
+          })
+          .from(bookings)
+          .where(
+            and(
+              eq(bookings.classId, input.id),
+              or(eq(bookings.status, "booked"), eq(bookings.status, "waitlist"))
+            )
+          );
 
-      return cls;
+        // Refund personal credits for 'booked' only
+        for (const pb of personalBookings) {
+          if (pb.status === "booked") {
+            const member = await tx.select({ id: users.id }).from(users).where(eq(users.id, pb.userId)).get();
+            const membership = await tx
+              .select({ id: memberships.id, creditsRemaining: memberships.creditsRemaining })
+              .from(memberships)
+              .where(and(eq(memberships.userId, pb.userId), eq(memberships.status, "active")))
+              .get();
+              
+            if (membership) {
+              await tx
+                .update(memberships)
+                .set({ creditsRemaining: membership.creditsRemaining + cls.creditCost })
+                .where(eq(memberships.id, membership.id));
+            }
+          }
+          // Cancel booking/waitlist
+          await tx
+            .update(bookings)
+            .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+            .where(eq(bookings.id, pb.id));
+            
+          // Notify
+          await tx.insert(notifications).values({
+            userId: pb.userId,
+            type: "class_cancelled",
+            title: "Class Cancelled",
+            message: `Your class ${cls.name} has been cancelled.`,
+          });
+        }
+
+        // 2. Get all booked and waitlisted corporate bookings
+        const corpBookings = await tx
+          .select({
+            id: corporateBookings.id,
+            status: corporateBookings.status,
+            userId: corporateBookings.userId,
+            companyId: corporateBookings.companyId,
+          })
+          .from(corporateBookings)
+          .where(
+            and(
+              eq(corporateBookings.classId, input.id),
+              or(eq(corporateBookings.status, "booked"), eq(corporateBookings.status, "waitlist"))
+            )
+          );
+
+        for (const cb of corpBookings) {
+          if (cb.status === "booked") {
+            const company = await tx
+              .select({ id: companies.id, creditPoolBalance: companies.creditPoolBalance })
+              .from(companies)
+              .where(eq(companies.id, cb.companyId))
+              .get();
+              
+            if (company) {
+              await tx
+                .update(companies)
+                .set({ creditPoolBalance: company.creditPoolBalance + cls.creditCost })
+                .where(eq(companies.id, cb.companyId));
+            }
+          }
+          
+          await tx
+            .update(corporateBookings)
+            .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+            .where(eq(corporateBookings.id, cb.id));
+            
+          await tx.insert(notifications).values({
+            userId: cb.userId,
+            type: "class_cancelled",
+            title: "Class Cancelled",
+            message: `Your corporate class ${cls.name} has been cancelled.`,
+          });
+        }
+
+        return cls;
+      });
     }),
 });

@@ -1,14 +1,6 @@
 import { z } from "zod";
 import { and, eq, gte, sql, lte, desc, inArray } from "drizzle-orm";
-import {
-  users,
-  memberships,
-  classes,
-  bookings,
-  payments,
-  checkins,
-  membershipPlans,
-} from "@/db/schema";
+import { checkins, classes, payments, users, bookings, corporateBookings, memberships, corporateLedger, membershipPlans } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 
 /**
@@ -109,25 +101,38 @@ export const adminRouter = router({
   /**
    * Total paid-payment revenue grouped by month, newest first.
    *
-   * Behavior note (see ADMIN-002 in known-issues.md — not fixed here):
-   * corporate credit top-ups (admin-companies.ts's topUp) never create a
-   * payments row, so they're invisible here.
+   * Behavior note (FIX: ADMIN-002, Phase 2):
+   * Corporate credit top-ups are now included via the corporateLedger table.
    */
   revenueByMonth: adminProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.db
+    const paymentRows = await ctx.db
       .select({
         month: sql<string>`strftime('%Y-%m', ${payments.createdAt})`,
         totalCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)`,
       })
       .from(payments)
       .where(eq(payments.status, "paid"))
-      .groupBy(sql`strftime('%Y-%m', ${payments.createdAt})`)
-      .orderBy(sql`strftime('%Y-%m', ${payments.createdAt}) DESC`);
+      .groupBy(sql`strftime('%Y-%m', ${payments.createdAt})`);
 
-    return rows.map((r) => ({
-      month: r.month,
-      totalCents: Number(r.totalCents),
-    }));
+    const ledgerRows = await ctx.db
+      .select({
+        month: sql<string>`strftime('%Y-%m', ${corporateLedger.createdAt})`,
+        totalCents: sql<number>`coalesce(sum(${corporateLedger.amountCents}), 0)`,
+      })
+      .from(corporateLedger)
+      .groupBy(sql`strftime('%Y-%m', ${corporateLedger.createdAt})`);
+
+    const combined: Record<string, number> = {};
+    for (const r of paymentRows) {
+      combined[r.month] = (combined[r.month] || 0) + Number(r.totalCents);
+    }
+    for (const r of ledgerRows) {
+      combined[r.month] = (combined[r.month] || 0) + Number(r.totalCents);
+    }
+
+    return Object.entries(combined)
+      .map(([month, totalCents]) => ({ month, totalCents }))
+      .sort((a, b) => b.month.localeCompare(a.month));
   }),
 
   /** Total paid-payment revenue and count grouped by payment method, highest first. */
@@ -140,14 +145,30 @@ export const adminRouter = router({
       })
       .from(payments)
       .where(eq(payments.status, "paid"))
-      .groupBy(payments.method)
-      .orderBy(sql`sum(${payments.amountCents}) DESC`);
+      .groupBy(payments.method);
 
-    return rows.map((r) => ({
+    const [ledgerTotal] = await ctx.db
+      .select({
+        totalCents: sql<number>`coalesce(sum(${corporateLedger.amountCents}), 0)`,
+        count: sql<number>`count(*)`,
+      })
+      .from(corporateLedger);
+
+    const result = rows.map((r) => ({
       method: r.method,
       totalCents: Number(r.totalCents),
       count: Number(r.count),
     }));
+
+    if (ledgerTotal && Number(ledgerTotal.count) > 0) {
+      result.push({
+        method: "corporate_topup" as any,
+        totalCents: Number(ledgerTotal.totalCents),
+        count: Number(ledgerTotal.count),
+      });
+    }
+
+    return result.sort((a, b) => b.totalCents - a.totalCents);
   }),
 
   /** Active memberships whose endDate falls within the next 14 days. */

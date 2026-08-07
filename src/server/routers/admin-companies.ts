@@ -7,6 +7,7 @@ import {
   users,
   corporateBookings,
   classes,
+  corporateLedger,
 } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 
@@ -141,32 +142,41 @@ export const adminCompaniesRouter = router({
     }),
 
   /**
-   * Adds `amount` to a company's credit pool balance. No corresponding
-   * payment/ledger row is created — see ADMIN-002 in known-issues.md.
+   * Adds `amount` to a company's credit pool balance and logs it in corporateLedger.
    *
    * @throws NOT_FOUND if the company doesn't exist
    */
   topUp: adminProcedure
-    .input(z.object({ id: z.number(), amount: z.number().int().positive() }))
+    .input(z.object({ id: z.number(), amount: z.number().int().positive(), amountCents: z.number().int().min(0).default(0) }))
     .mutation(async ({ ctx, input }) => {
-      const company = await ctx.db
-        .select()
-        .from(companies)
-        .where(eq(companies.id, input.id))
-        .get();
+      return ctx.db.transaction(async (tx) => {
+        const company = await tx
+          .select()
+          .from(companies)
+          .where(eq(companies.id, input.id))
+          .get();
 
-      if (!company) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Company not found." });
-      }
+        if (!company) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Company not found." });
+        }
 
-      return ctx.db
-        .update(companies)
-        .set({
-          creditPoolBalance: company.creditPoolBalance + input.amount,
-        })
-        .where(eq(companies.id, input.id))
-        .returning()
-        .get();
+        const updated = await tx
+          .update(companies)
+          .set({
+            creditPoolBalance: company.creditPoolBalance + input.amount,
+          })
+          .where(eq(companies.id, input.id))
+          .returning()
+          .get();
+
+        await tx.insert(corporateLedger).values({
+          companyId: company.id,
+          amountCents: input.amountCents,
+          creditsAdded: input.amount,
+        });
+
+        return updated;
+      });
     }),
 
   /**
