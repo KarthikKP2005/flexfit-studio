@@ -1098,10 +1098,12 @@ later promotion (BOOK-004, fixed) then charges exactly once, correctly,
 with no code changes needed there — the fix is entirely in getting
 `reschedule`'s own bookkeeping right at the point of transition.
 
-**Not changed / still open:** RESCH-003 (reschedule never promotes the
-class being left) and RESCH-004 (no reconciliation of same-named classes
-with different `creditCost`, for the two transitions that don't change
-status) remain untouched — separate defect IDs, separate commits.
+**Not changed here / still open:** RESCH-004 (no reconciliation of
+same-named classes with different `creditCost`, for the two transitions
+that don't change status) remains untouched — separate defect ID,
+separate commit. RESCH-003 (reschedule never promotes the class being
+left) was also open at the time this fix landed, and has since been
+fixed too — see that entry below.
 
 **Verified live:** manual E2E against the running dev server with real
 seeded memberships (no automated test harness exists on this branch).
@@ -1120,23 +1122,43 @@ exactly 4 — charged once for the one continuous booking, not twice.
 ### RESCH-003 — Rescheduling away from a class never promotes that class's waitlist
 
 **Severity:** Medium
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 7)
+**Status:** Fixed on branch `reschedule-original-waitlist-member` (also
+flagged in plan.md's critical list, item 7, and plan.md's member-flow
+item #12)
 **Area:** Rescheduling / Waitlist
 **File:** `src/server/routers/reschedules.ts` — `reschedule`
 
-**Current behavior:** the original booking is cancelled as part of a
+**Original behavior:** the original booking was cancelled as part of a
 reschedule, freeing its seat — but unlike `bookings.ts`'s `cancel`,
-`reschedule` never runs any waitlist-promotion logic for the class being
-left. Anyone waitlisted for the original class stays waitlisted.
+`reschedule` never ran any waitlist-promotion logic for the class being
+left. Anyone waitlisted for the original class stayed waitlisted forever,
+even though a confirmed spot had just opened up.
 
-**Reproduction:** `src/server/routers/reschedules.test.ts`'s
-`reschedules.reschedule > RESCH-003: does not promote anyone waiting for
-the seat freed on the original class`.
+**Fix — exactly the change plan.md itself names:** after cancelling the
+original booking, if it was `booked` (a confirmed seat, matching the
+same guard `bookings.ts`'s `cancel` uses — a waitlisted original never
+held a seat, so there's nothing to free), `reschedule` now calls the
+same shared `promoteNextWaitlisted` (`src/features/bookings/
+waitlist-service.ts`) that `bookings.ts`'s and `corporate-bookings.ts`'s
+own `cancel` already call (CORP-003/CORP-001/BOOK-004, all previously
+fixed). No new policy decision was needed — this reuses the existing,
+already-fixed promotion logic unchanged, on the class being left instead
+of the class being joined.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md — call
-the same waitlist-promotion logic `bookings.ts`'s `cancel` uses, after
-successfully cancelling the original booking.
+**Not changed / still open:** RESCH-004 (no reconciliation of same-named
+classes with different `creditCost`) remains untouched — separate
+defect ID, separate commit.
+
+**Verified live:** manual E2E against the running dev server with real
+seeded accounts (no automated test harness exists on this branch).
+Filled a capacity-1 class with one member (confirmed, real charge) and
+had a second member join its waitlist. Rescheduled the first member
+away to a different, same-named class → confirmed the reschedule
+succeeded normally, AND the waitlisted member on the original class was
+correctly promoted (`status: "booked"`, correct `creditsUsed`, and a
+real `waitlist_promotion` notification — none of which happened before
+this fix, when they'd have stayed stuck waitlisted). `tsc --noEmit` and
+`pnpm build` both clean.
 
 ---
 
