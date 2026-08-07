@@ -114,18 +114,26 @@ export const plansRouter = router({
   /**
    * Toggles a plan's active flag.
    *
-   * Behavior note (see PLAN-004 in known-issues.md — not fixed here):
-   * if `id` doesn't match any plan, this silently returns undefined
-   * instead of throwing NOT_FOUND like most other update procedures do.
+   * Behavior note (FIX: PLAN-004):
+   * Now throws NOT_FOUND if the plan id doesn't match any row, consistent
+   * with other mutations.
+   *
+   * @throws NOT_FOUND if the plan doesn't exist
    */
   setActive: adminProcedure
     .input(z.object({ id: z.number(), active: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db
+      const updated = await ctx.db
         .update(membershipPlans)
         .set({ active: input.active })
         .where(eq(membershipPlans.id, input.id))
         .returning()
         .get();
+        
+      if (!updated) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Plan not found." });
+      }
+      
+      return updated;
     }),
 });

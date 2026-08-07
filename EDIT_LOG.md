@@ -10,6 +10,18 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(admin): fix broadcast deactivated members and plan setActive errors
+
+**Type:** FIX
+**Defect:** NOTIF-001, PLAN-004
+**Behavior change:** yes — `notifications.broadcast` now only sends notifications to active members (previously it sent to deactivated members too). `plans.setActive` now throws a `NOT_FOUND` error if the plan id does not exist (previously it silently returned undefined).
+**Files touched:**
+- `src/server/routers/notifications.ts` — updated `broadcast` filter to include `eq(users.active, true)`.
+- `src/server/routers/plans.ts` — updated `setActive` to check if update returned a row, else throw `NOT_FOUND`.
+**Tests:** no automated test harness (removed in prior refactor) — manually verified code changes.
+
+---
+
 ## 2026-08-07 — FIX(db): add database indexes for schedule load performance
 
 **Type:** FIX
