@@ -10,6 +10,18 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(trainer): complete missing business logic flows
+
+**Type:** FIX
+**Defect:** missing trainer business logic (Problems 4, 6, 7, 8, 10)
+**Behavior change:** yes — `classes.create` and `classes.update` now block if the assigned trainer doesn't exist, isn't active, or isn't available. `trainers.checkAvailability` was fixed to use the user's local timezone instead of UTC. `classes.cancel` and `classes.update` now allow trainers to cancel or edit their own classes. `trainers.rosterFor` was created to fetch a unified list of personal and corporate attendees.
+**Files touched:**
+- `src/server/routers/classes.ts` — updated `create`, `update`, `cancel`.
+- `src/server/routers/trainers.ts` — added `rosterFor`, fixed timezone logic in `checkAvailability`.
+**Tests:** no automated test harness (removed in prior refactor) — manually verified code changes.
+
+---
+
 ## 2026-08-07 — FIX(trainer): create trainer schedule and availability UI
 
 **Type:** FIX

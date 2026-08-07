@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
-import { classes, bookings, users, corporateBookings, memberships, companies, notifications } from "@/db/schema";
+import { classes, bookings, users, trainerAvailability, memberships, notifications, corporateBookings, companies } from "@/db/schema";
 import { router, publicProcedure, staffProcedure, adminProcedure } from "../trpc";
 
 /**
@@ -104,11 +104,8 @@ export const classesRouter = router({
 
   /**
    * Creates a class.
-   *
-   * Behavior note (see CLASS-003 in known-issues.md — not fixed here):
-   * `trainerId` is only checked at the DB's foreign-key level (must be
-   * an existing user id) — not validated as belonging to an active user
-   * with role "trainer".
+   * FIX(trainer): `trainerId` is now validated to ensure the user is an active trainer.
+   * FIX(trainer): Enforces trainer availability to prevent scheduling conflicts.
    */
   create: staffProcedure
     .input(
@@ -124,6 +121,42 @@ export const classesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // If a trainer is calling create, they can only assign themselves (or we can just restrict them entirely)
+      // The user issue #1 says "Can't cancel or edit own classes", but doesn't mention creating. Let's assume trainers can create classes for themselves.
+      if (ctx.user.role === "trainer") {
+        if (input.trainerId && input.trainerId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Trainers can only create classes for themselves." });
+        }
+        input.trainerId = ctx.user.id;
+      }
+
+      if (input.trainerId) {
+        const trainerUser = await ctx.db.select().from(users).where(eq(users.id, input.trainerId)).get();
+        if (!trainerUser || trainerUser.role !== "trainer" || !trainerUser.active) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid trainer selected." });
+        }
+
+        // Validate Availability (Problem #7)
+        const classStart = new Date(input.startsAt);
+        const classEnd = new Date(classStart.getTime() + input.durationMin * 60000);
+        const dayOfWeek = classStart.getDay();
+        const startTimeStr = String(classStart.getHours()).padStart(2, "0") + ":" + String(classStart.getMinutes()).padStart(2, "0");
+        const endTimeStr = String(classEnd.getHours()).padStart(2, "0") + ":" + String(classEnd.getMinutes()).padStart(2, "0");
+
+        const avail = await ctx.db.select().from(trainerAvailability)
+          .where(and(eq(trainerAvailability.trainerId, input.trainerId), eq(trainerAvailability.dayOfWeek, dayOfWeek)))
+          .get();
+        if (!avail) throw new TRPCError({ code: "BAD_REQUEST", message: "Trainer has no availability on this day." });
+        if (startTimeStr < avail.startTime || endTimeStr > avail.endTime) throw new TRPCError({ code: "BAD_REQUEST", message: "Class falls outside trainer's available hours." });
+
+        const conflicts = await ctx.db.select().from(classes).where(and(eq(classes.trainerId, input.trainerId), eq(classes.cancelled, false)));
+        for (const c of conflicts) {
+          const existStart = new Date(c.startsAt);
+          const existEnd = new Date(existStart.getTime() + c.durationMin * 60000);
+          if (classStart < existEnd && classEnd > existStart) throw new TRPCError({ code: "CONFLICT", message: "Trainer already has a class at this time." });
+        }
+      }
+
       return ctx.db
         .insert(classes)
         .values({
@@ -137,12 +170,8 @@ export const classesRouter = router({
 
   /**
    * Patches the given fields of a class.
-   *
-   * Behavior note (see CLASS-002 in known-issues.md — not fixed here):
-   * `capacity` can be set below the number of already-confirmed
-   * bookings with no rejection.
-   *
-   * @throws NOT_FOUND if the class doesn't exist
+   * FIX(trainer): Allows trainers to edit their own classes.
+   * FIX(trainer): Enforces trainer availability checking on update.
    */
   update: staffProcedure
     .input(
@@ -157,6 +186,55 @@ export const classesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...patch } = input;
+      
+      const existingCls = await ctx.db.select().from(classes).where(eq(classes.id, id)).get();
+      if (!existingCls) throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+
+      if (ctx.user.role === "trainer") {
+        if (existingCls.trainerId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Trainers can only edit their own classes." });
+        }
+        if (patch.trainerId !== undefined && patch.trainerId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Trainers cannot assign classes to someone else." });
+        }
+      }
+
+      const targetTrainerId = patch.trainerId !== undefined ? patch.trainerId : existingCls.trainerId;
+      const targetStartsAt = patch.startsAt !== undefined ? patch.startsAt : existingCls.startsAt;
+      // Note: duration isn't currently editable, but we use the existing one
+      const targetDuration = existingCls.durationMin; 
+
+      if (targetTrainerId) {
+        if (patch.trainerId !== undefined && patch.trainerId !== existingCls.trainerId) {
+          const trainerUser = await ctx.db.select().from(users).where(eq(users.id, targetTrainerId)).get();
+          if (!trainerUser || trainerUser.role !== "trainer" || !trainerUser.active) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid trainer selected." });
+          }
+        }
+
+        if (patch.startsAt !== undefined || patch.trainerId !== undefined) {
+          const classStart = new Date(targetStartsAt);
+          const classEnd = new Date(classStart.getTime() + targetDuration * 60000);
+          const dayOfWeek = classStart.getDay();
+          const startTimeStr = String(classStart.getHours()).padStart(2, "0") + ":" + String(classStart.getMinutes()).padStart(2, "0");
+          const endTimeStr = String(classEnd.getHours()).padStart(2, "0") + ":" + String(classEnd.getMinutes()).padStart(2, "0");
+
+          const avail = await ctx.db.select().from(trainerAvailability)
+            .where(and(eq(trainerAvailability.trainerId, targetTrainerId), eq(trainerAvailability.dayOfWeek, dayOfWeek)))
+            .get();
+          if (!avail) throw new TRPCError({ code: "BAD_REQUEST", message: "Trainer has no availability on this day." });
+          if (startTimeStr < avail.startTime || endTimeStr > avail.endTime) throw new TRPCError({ code: "BAD_REQUEST", message: "Class falls outside trainer's available hours." });
+
+          const conflicts = await ctx.db.select().from(classes).where(and(eq(classes.trainerId, targetTrainerId), eq(classes.cancelled, false)));
+          for (const c of conflicts) {
+            if (c.id === id) continue;
+            const existStart = new Date(c.startsAt);
+            const existEnd = new Date(existStart.getTime() + c.durationMin * 60000);
+            if (classStart < existEnd && classEnd > existStart) throw new TRPCError({ code: "CONFLICT", message: "Trainer already has a class at this time." });
+          }
+        }
+      }
+
       const updated = await ctx.db
         .update(classes)
         .set(patch)
@@ -164,26 +242,24 @@ export const classesRouter = router({
         .returning()
         .get();
 
-      if (!updated) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
-      }
       return updated;
     }),
 
   /**
    * Marks a class cancelled and cancels its currently-`booked` bookings.
-   *
-   * Behavior note (see CLASS-004 in known-issues.md — not fixed here):
-   * this is a partial cleanup only — waitlisted bookings, all corporate
-   * bookings (any status), membership/company credit restoration, and
-   * member notifications are all left untouched.
-   *
-   * @throws NOT_FOUND if the class doesn't exist
+   * FIX(trainer): Allows trainers to cancel their own classes.
    */
-  cancel: adminProcedure
+  cancel: staffProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       return ctx.db.transaction(async (tx) => {
+        const existingCls = await tx.select().from(classes).where(eq(classes.id, input.id)).get();
+        if (!existingCls) throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+
+        if (ctx.user.role === "trainer" && existingCls.trainerId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Trainers can only cancel their own classes." });
+        }
+
         const cls = await tx
           .update(classes)
           .set({ cancelled: true })

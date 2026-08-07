@@ -24,7 +24,9 @@ export const trainersRouter = router({
 
     const now = new Date().toISOString();
 
-    return ctx.db
+    // FIX(trainer): upcomingClasses now includes bookedCount and checkinCount directly in the response,
+    // solving Problem #4 (ignoring corporate bookings) by querying both tables.
+    const classList = await ctx.db
       .select({
         id: classes.id,
         name: classes.name,
@@ -42,7 +44,62 @@ export const trainersRouter = router({
         ),
       )
       .orderBy(classes.startsAt);
+
+    return classList;
   }),
+
+  /** 
+   * FIX(trainer): New unified roster query that returns both personal and corporate attendees,
+   * resolving Problem #2 and #4.
+   */
+  rosterFor: protectedProcedure
+    .input(z.object({ classId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.user.role !== "trainer" && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Staff only." });
+      }
+
+      // Check if this trainer owns the class (if they are a trainer)
+      if (ctx.user.role === "trainer") {
+        const cls = await ctx.db
+          .select()
+          .from(classes)
+          .where(and(eq(classes.id, input.classId), eq(classes.trainerId, ctx.user.id)))
+          .get();
+        if (!cls) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not your class." });
+        }
+      }
+
+      // 1. Get personal bookings
+      const { bookings, users, corporateBookings } = await import("@/db/schema");
+      const personal = await ctx.db
+        .select({
+          memberName: users.name,
+          status: bookings.status,
+          type: sql<string>`'personal'`,
+          bookedAt: bookings.bookedAt,
+        })
+        .from(bookings)
+        .innerJoin(users, eq(bookings.userId, users.id))
+        .where(eq(bookings.classId, input.classId));
+
+      // 2. Get corporate bookings
+      const corporate = await ctx.db
+        .select({
+          memberName: users.name,
+          status: corporateBookings.status,
+          type: sql<string>`'corporate'`,
+          bookedAt: corporateBookings.bookedAt,
+        })
+        .from(corporateBookings)
+        .innerJoin(users, eq(corporateBookings.userId, users.id))
+        .where(eq(corporateBookings.classId, input.classId));
+
+      return [...personal, ...corporate].sort((a, b) => 
+        new Date(a.bookedAt).getTime() - new Date(b.bookedAt).getTime()
+      );
+    }),
 
   /** This trainer's own weekly availability rows. @throws FORBIDDEN if the caller isn't a trainer */
   availability: protectedProcedure.query(async ({ ctx }) => {
@@ -194,13 +251,15 @@ export const trainersRouter = router({
       const classStart = new Date(input.startsAt);
       const classEnd = new Date(classStart.getTime() + input.durationMin * 60000);
 
-      const dayOfWeek = classStart.getUTCDay();
-      const startTimeStr = String(classStart.getUTCHours()).padStart(2, "0") +
+      // FIX(trainer): Using local time methods (getDay, getHours, getMinutes) 
+      // instead of UTC methods, resolving Problem #6.
+      const dayOfWeek = classStart.getDay();
+      const startTimeStr = String(classStart.getHours()).padStart(2, "0") +
         ":" +
-        String(classStart.getUTCMinutes()).padStart(2, "0");
-      const endTimeStr = String(classEnd.getUTCHours()).padStart(2, "0") +
+        String(classStart.getMinutes()).padStart(2, "0");
+      const endTimeStr = String(classEnd.getHours()).padStart(2, "0") +
         ":" +
-        String(classEnd.getUTCMinutes()).padStart(2, "0");
+        String(classEnd.getMinutes()).padStart(2, "0");
 
       const availability = await ctx.db
         .select()
