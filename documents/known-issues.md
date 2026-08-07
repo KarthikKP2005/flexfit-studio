@@ -459,6 +459,42 @@ input.
 
 ---
 
+### MEMBER-004 — No member-facing UI for editing your own profile
+
+**Severity:** Medium (feature gap, not a misbehaving code path — a
+member's name/phone could previously only be changed by an admin, via
+`members.setActive`-adjacent staff tooling that doesn't itself exist as
+UI either)
+**Status:** Fixed on branch `profile-edit-member`
+**Area:** Members / Member onboarding
+**File:** `src/app/profile/page.tsx` (new), `src/components/NavBar.tsx`
+
+**Original behavior:** `members.ts`'s `updateProfile` mutation existed
+and worked correctly (updates the caller's own `name`/`phone`, other
+fields untouched), but no page ever called it — see plan.md's
+member-flow item #4.
+
+**Fix:** added `/profile`, a new page that loads the caller's own data
+via the *unmodified* `members.profile` query and edits `name`/`phone`
+via the *unmodified* `members.updateProfile` mutation. Email and role are
+shown read-only — `updateProfile`'s input schema only ever accepted
+`name`/`phone`, so this page doesn't invent editability for fields the
+backend never supported. Linked from `NavBar` by turning the previously
+plain `{user.name}` text into a link to `/profile`. On a successful save,
+both `members.profile` and `auth.me` are invalidated, since `NavBar`
+reads its displayed name from `auth.me`, not `members.profile` — without
+invalidating both, a name change wouldn't show up in the header until the
+next full page load.
+
+**Not in scope for this fix:** `updateProfile` doesn't support email or
+password changes, and this page doesn't add that capability — it only
+exposes what the mutation already does. AUTH-001 (passwordHash returned
+by `auth.me`) is unrelated and untouched, and is incidentally
+reproducible from this page's own `auth.me` invalidation call, same as
+it always was.
+
+---
+
 ### TRAINER-001 — `setAvailability` accepts any string as a time, with no range validation
 
 **Severity:** Low

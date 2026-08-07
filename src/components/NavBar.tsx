@@ -92,7 +92,9 @@ export function NavBar() {
           )}
           {user ? (
             <>
-              <span className="text-sm muted">{user.name}</span>
+              <Link href="/profile" className="text-sm muted hover:text-white">
+                {user.name}
+              </Link>
               <button
                 className="btn"
                 onClick={() => logout.mutate()}

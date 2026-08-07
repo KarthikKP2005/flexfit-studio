@@ -10,6 +10,40 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(members): add profile-edit UI
+
+**Type:** FIX
+**Defect:** MEMBER-004
+**Behavior change:** yes — a new route (`/profile`) now exists and is
+reachable from `NavBar` (clicking your own name). No existing route,
+procedure input/output, error code, or error message changed;
+`members.profile` and `members.updateProfile` were called exactly as
+they already existed, not modified.
+**Files:** `src/app/profile/page.tsx` (new), `src/components/NavBar.tsx`
+(the plain `{user.name}` text is now a link to `/profile`)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server:
+1. `members.profile` before → baseline name/phone recorded.
+2. `members.updateProfile` with a new name/phone → 200, row updated.
+3. `members.profile` after → reflects the new values.
+4. `auth.me` after → also reflects the new name, confirming the
+   NavBar-visible name updates too (NavBar reads `auth.me`, not
+   `members.profile`, hence invalidating both on save).
+5. `members.updateProfile` with `phone: null` → phone cleared correctly.
+6. Restored the test account's original name/phone afterward so
+   `flexfit.db` is unpolluted.
+Also ran `tsc --noEmit` and `pnpm build` (clean, `/profile` compiles as
+a static route).
+
+Closes plan.md's member-flow item #4 ("No profile-edit UI — mutation
+exists, no form") and known-issues.md's MEMBER-004. `updateProfile` was
+read closely before building on top of it — confirmed it only accepts
+name/phone, so no email/password editing was added (that capability
+doesn't exist server-side, and inventing it wasn't asked for or in
+scope). No other files were touched.
+
+---
+
 ## 2026-08-07 — FIX(notifications): send membership-expiring reminders via a real daily cron
 
 **Type:** FIX
