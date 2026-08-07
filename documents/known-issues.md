@@ -723,43 +723,53 @@ its own commit, not part of this pass.
 
 ### BOOK-004 — Waitlist promotion on cancel does not re-check the promoted member's credit balance
 
-**Severity:** High (a member can be promoted into a paid class while
-holding zero credits, and their balance is silently floored at zero
-instead of the promotion being rejected)
-**Status:** Confirmed from source (also flagged in plan.md, item #4 —
-and this is the exact scenario AGENT_RULES.md's Rule 5 uses as its own
-worked example for how to comment a known bug)
+**Severity:** High (a member could be promoted into a paid class while
+holding insufficient credits, with their balance silently floored at
+zero instead of the promotion being rejected)
+**Status:** Fixed on branch `personal-waitlist-credit-member` (also
+flagged in plan.md, item #4 — and this is the exact scenario
+AGENT_RULES.md's Rule 5 uses as its own worked example for how to
+comment a known bug)
 **Area:** Booking / Waitlist
-**File:** `src/features/bookings/waitlist-service.ts` — the promotion
-logic this describes moved here as part of CORP-003's fix (unified
-waitlist promotion), but is otherwise byte-for-byte unchanged; it was
-previously inline in `bookings.ts`'s `cancel`.
+**File:** `src/features/bookings/waitlist-service.ts` —
+`tryPromotePersonalCandidate`
 
-**Current behavior:** when a confirmed (`booked`) booking is cancelled,
-the oldest waitlisted booking for that class is promoted to `booked`
-unconditionally — there is no check that the promoted member's
-membership still has enough credits. The subsequent balance update uses
-`Math.max(0, ms.creditsRemaining - row.cls.creditCost)`, which floors at
-zero rather than rejecting the promotion or leaving the member on the
+**Original behavior:** when a confirmed (`booked`) booking was
+cancelled, the oldest waitlisted booking for that class was promoted to
+`booked` unconditionally — there was no check that the promoted member's
+membership still had enough credits. The subsequent balance update used
+`Math.max(0, ms.creditsRemaining - row.cls.creditCost)`, which floored
+at zero rather than rejecting the promotion or leaving the member on the
 waitlist.
 
-**Expected invariant:** a member should not be promoted into a class they
-can't afford; either skip them and try the next candidate, or leave them
-waitlisted and record why promotion failed (plan.md leaves this an open
-policy choice).
+**Fix — same Rule 8 policy already chosen for CORP-001 (its exact
+sibling bug on the corporate side), reused here rather than re-decided
+for consistency:** credits are now verified BEFORE promoting. On
+insufficient credits, the candidate is **skipped** (left waitlisted, not
+promoted) and the next-oldest remaining candidate across *either*
+waitlist is tried instead — not "stop and leave waitlisted," for the
+same reason as CORP-001: that would let one under-funded member block
+every eligible person behind them, personal or corporate. Since
+eligibility is now confirmed before the deduction ever runs, the
+`Math.max(0, ...)` floor is gone entirely — a plain subtraction can't go
+negative once the check has already passed, so the floor was never
+actually a fix, just a symptom of the missing one.
 
-**Why not fixed here:** this is a defined FIX per plan.md, but the
-correct failure-handling policy (skip vs. leave waitlisted) needs an
-explicit decision, not a silent guess — see Rule 8.
+**Not changed:** a booking with no `membershipId`, or one whose
+membership row can no longer be found, is still treated as eligible —
+matching the original code, which never blocked promotion on either
+condition either; that's a separate, narrower edge case outside this
+defect's scope.
 
-**Reproduction:** `src/server/routers/bookings.test.ts`'s
-`bookings.cancel > BOOK-004: promotes a waitlisted member with zero
-credits, flooring their balance at zero instead of rejecting the
-promotion`.
-
-**What "fixed" would look like:** validate the candidate's credits before
-promoting; on insufficient credits, either try the next-oldest waitlisted
-candidate or leave this one waitlisted (policy TBD, see above).
+**Verified live** (manual E2E, mirroring CORP-001's exact test with
+roles swapped): a personal candidate with a real, limited membership
+joined a waitlist while they could afford the class; their credits were
+then spent down via a second real booking so they could no longer afford
+it by promotion time. A newer corporate candidate joined the same
+waitlist. Cancelling the confirmed booking correctly **skipped** the
+now-ineligible personal candidate (stayed waitlisted, membership balance
+unchanged, no notification) and promoted the corporate candidate
+instead. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 

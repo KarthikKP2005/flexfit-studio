@@ -260,8 +260,8 @@ export const corporateBookingsRouter = router({
       }
 
       // Freeing a confirmed spot promotes whoever has waited longest and
-      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001,
-      // both fixed) — see features/bookings/waitlist-service.ts.
+      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
+      // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
       if (row.booking.status === "booked") {
         await promoteNextWaitlisted(ctx.db, row.cls);
       }

@@ -10,6 +10,59 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(bookings): verify membership credit before promoting a personal waitlist candidate
+
+**Type:** FIX
+**Defect:** BOOK-004
+**Behavior change:** yes — a personal waitlist candidate whose membership
+can no longer afford the class is now correctly skipped (stays
+waitlisted, no charge, no confirmation) instead of being wrongly
+confirmed as `booked` with the deduction floored at zero via
+`Math.max(0, ...)`. The next-oldest eligible candidate (personal or
+corporate) is promoted instead of nobody. No tRPC procedure's input,
+output shape, or error codes/messages changed. A booking with no
+`membershipId`, or one whose membership row can no longer be found, is
+still treated as eligible, exactly as before — that narrower edge case
+is out of scope for this defect.
+**Files:** `src/features/bookings/waitlist-service.ts`
+(`promotePersonalCandidate` renamed to `tryPromotePersonalCandidate` and
+rewritten to verify `creditsRemaining` before promoting, mirroring
+`tryPromoteCorporateCandidate`'s shape exactly; the main loop in
+`promoteNextWaitlisted` made symmetric between the two sources), `src/
+server/routers/bookings.ts` and `src/server/routers/corporate-bookings.ts`
+(comments only, describing the now-fully-fixed promotion behavior)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded accounts, mirroring
+CORP-001's exact test with roles swapped:
+1. Capacity-1 class (cost 9). Filled personally. A personal candidate
+   (rahul, limited membership) joined the waitlist while their
+   membership could afford it (10 credits).
+2. Rahul's membership was then spent down to 1 credit via a second,
+   real personal booking on an unrelated class — so by promotion time,
+   rahul could no longer afford the 9-credit class.
+3. A corporate candidate (meera, TechCorp) joined the same waitlist
+   afterward (newer than rahul).
+4. Cancelled the confirmed booking → rahul was correctly **skipped**
+   (`bookings.mine` still showed `status: "waitlisted"`, no
+   notification sent to him, his membership balance stayed at 1 — not
+   further deducted for a booking that didn't happen), and meera was
+   correctly promoted instead (`status: "booked"`, correct credit
+   deduction from TechCorp, got the `waitlist_promotion` notification).
+5. All test classes/bookings/notifications deleted afterward; rahul's
+   membership and TechCorp's balance restored to their exact pre-test
+   values (10 and 98).
+6. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #9 ("Normal waitlist promotion can
+overdraw a membership") and known-issues.md's BOOK-004 — see that entry
+for the Rule 8 policy decision (skip-and-try-next, reused verbatim from
+CORP-001 rather than re-decided, and why) and for what's still
+explicitly out of scope (the missing-membershipId edge case, and the
+broader check-then-write transactional gap shared with every other
+booking flow).
+
+---
+
 ## 2026-08-07 — FIX(bookings): verify company credit before promoting a corporate waitlist candidate
 
 **Type:** FIX
