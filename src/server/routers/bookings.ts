@@ -3,13 +3,16 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { bookings, classes, memberships, checkins, users, notifications } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { isClassFull } from "@/features/bookings/capacity-service";
 
 /**
  * Personal (membership-credit-funded) class bookings: browse, book,
  * cancel, check-in, and waitlist. Not responsible for: corporate
  * bookings — corporate-bookings.ts is a structurally parallel but
  * entirely separate table/flow, not reconciled against this one for
- * capacity or waitlist order (see plan.md's capacity/waitlist findings).
+ * waitlist order (see CORP-003 in known-issues.md). Capacity *is* now
+ * reconciled — `book` below shares `isClassFull` with
+ * corporate-bookings.ts's `book` and reschedules.ts (CORP-002, fixed).
  */
 
 /**
@@ -84,7 +87,10 @@ export const bookingsRouter = router({
   /**
    * Books the caller into a class, or waitlists them if it's full.
    * Waitlisted bookings always have creditsUsed: 0 — credit is only
-   * spent once a confirmed spot exists.
+   * spent once a confirmed spot exists. "Full" is judged from combined
+   * personal + corporate confirmed bookings (CORP-002, fixed — see
+   * features/bookings/capacity-service.ts) — a class already filled by
+   * corporate bookings now correctly waitlists here too.
    *
    * @throws NOT_FOUND if the class doesn't exist
    * @throws BAD_REQUEST if the class is cancelled or has already started
@@ -153,14 +159,7 @@ export const bookingsRouter = router({
         });
       }
 
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(bookings)
-        .where(
-          and(eq(bookings.classId, cls.id), eq(bookings.status, "booked")),
-        );
-
-      const isFull = Number(count) >= cls.capacity;
+      const isFull = await isClassFull(ctx.db, cls.id, cls.capacity);
 
       const created = await ctx.db
         .insert(bookings)

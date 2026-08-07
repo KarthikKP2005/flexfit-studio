@@ -8,6 +8,7 @@ import {
   memberships,
 } from "@/db/schema";
 import { router, protectedProcedure } from "../trpc";
+import { isClassFull } from "@/features/bookings/capacity-service";
 
 /**
  * Moving a personal booking from one class instance to another
@@ -15,7 +16,9 @@ import { router, protectedProcedure } from "../trpc";
  * move (see RESCH-001/002/004 in known-issues.md — this router does not
  * charge, refund, or validate credits against what the target class
  * actually costs) or promoting the original class's waitlist after the
- * move (see RESCH-003).
+ * move (see RESCH-003). Target-class capacity *is* shared with
+ * bookings.ts/corporate-bookings.ts (CORP-002, fixed) — both `reschedule`
+ * and `validateReschedule` below now call the same `isClassFull`.
  *
  * `reschedule` (mutation) and `validateReschedule` (query) intentionally
  * duplicate the same validation steps rather than sharing one function —
@@ -206,15 +209,9 @@ export const reschedulesRouter = router({
         });
       }
 
-      // Check if target class is full
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(bookings)
-        .where(
-          and(eq(bookings.classId, targetClass.id), eq(bookings.status, "booked")),
-        );
-
-      const targetIsFull = Number(count) >= targetClass.capacity;
+      // Check if target class is full (CORP-002, fixed — combined
+      // personal + corporate occupancy, not personal bookings alone).
+      const targetIsFull = await isClassFull(ctx.db, targetClass.id, targetClass.capacity);
 
       // Looked up but never read below — the new booking's membershipId
       // and creditsUsed both come from `originalBooking` directly, not
@@ -425,15 +422,9 @@ export const reschedulesRouter = router({
         };
       }
 
-      // Check if target class is full
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(bookings)
-        .where(
-          and(eq(bookings.classId, targetClass.id), eq(bookings.status, "booked")),
-        );
-
-      const targetIsFull = Number(count) >= targetClass.capacity;
+      // Check if target class is full (CORP-002, fixed — combined
+      // personal + corporate occupancy, not personal bookings alone).
+      const targetIsFull = await isClassFull(ctx.db, targetClass.id, targetClass.capacity);
 
       return {
         valid: true,

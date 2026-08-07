@@ -797,28 +797,64 @@ recorded reason.
 
 ### CORP-002 — Corporate booking capacity is judged independently of personal bookings on the same class
 
-**Severity:** High (a class can be overbooked: full on personal
+**Severity:** High (a class could be overbooked: full on personal
 bookings, then further overbooked by corporate bookings, or vice versa)
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 1 — the corporate side of the same finding `bookings.ts`
-exhibits from the personal side)
-**Area:** Corporate bookings / Capacity
-**File:** `src/server/routers/corporate-bookings.ts` — `book`
+**Status:** Fixed on branch `booking-capacity-member` (also flagged in
+plan.md's critical list, item 1 — the corporate side of the same finding
+`bookings.ts` exhibited from the personal side)
+**Area:** Corporate bookings / Booking / Rescheduling / Capacity
+**File:** `src/features/bookings/capacity-service.ts` (new),
+`src/server/routers/bookings.ts` — `book`,
+`src/server/routers/corporate-bookings.ts` — `book`,
+`src/server/routers/reschedules.ts` — `reschedule` and `validateReschedule`
 
-**Current behavior:** the `isFull` check counts only `corporateBookings`
-rows with `status = "booked"` for the class — it never looks at the
-`bookings` table. A class already at capacity from personal bookings
-still accepts a confirmed corporate booking (and the reverse is true from
-`bookings.ts`'s side).
+**Original behavior:** `corporateBookings.book`'s `isFull` check counted
+only `corporateBookings` rows for the class, never `bookings`. Mirrored
+from the personal side: `bookings.book`'s `isFull` counted only
+`bookings`, never `corporateBookings`. `reschedules.ts`'s `reschedule`
+and `validateReschedule` each independently ran the same personal-only
+count a third and fourth time. A class already at capacity from one
+booking source would still accept a confirmed booking (or a confirmed
+reschedule target) from the other.
 
-**Reproduction:** `src/server/routers/corporate-bookings.test.ts`'s
-`corporateBookings.book > CORP-002: capacity is judged from
-corporateBookings alone...`.
+**Fix:** one shared `isClassFull(db, classId, capacity)` in the new
+`src/features/bookings/capacity-service.ts` (the exact filename
+AGENT_RULES.md Rule 7 uses as its own worked example), counting confirmed
+occupancy from both `bookings` and `corporateBookings`. All four
+independent inline counts (`bookings.book`, `corporateBookings.book`,
+`reschedules.reschedule`, `reschedules.validateReschedule`) now call it
+instead. No output shape, error code, or message changed anywhere — only
+the truth value `isFull`/`targetIsFull` feeds into the same existing
+booked-vs-waitlisted branching.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md — one
-shared occupancy service counting both booking sources, used consistently
-by both `book` procedures, `classes.list`'s spotsLeft, the trainer
-roster, and `admin.classUtilisation` (ADMIN-001).
+**Verified live** (manual E2E against the dev server, real seed
+accounts): filled a capacity-1 class with a personal booking, then
+attempted a corporate booking on the same class → correctly waitlisted
+(previously would have wrongly confirmed). Reverse direction (corporate
+fills, personal attempts) → correctly waitlisted. Rescheduled into a
+different capacity-1 class already filled via the other booking source →
+`validateReschedule` correctly previewed `targetIsFull: true` and the
+actual `reschedule` mutation correctly waitlisted, matching the preview.
+`tsc --noEmit` and `pnpm build` both clean.
+
+**Explicitly not touched by this fix — still open:**
+- `classes.list`'s `spotsLeft`/`full` (the public `/schedule` display)
+  still counts personal bookings only. This is a **display accuracy**
+  gap, not an overbooking gap — the fix above prevents overbooking
+  regardless of what the display shows — but it means `/schedule` can
+  now look slightly more out of sync with real booking outcomes than
+  before (shows "spots available" when the other booking source already
+  filled the class and a personal booker would actually get waitlisted).
+  Pre-existing, not introduced by this fix.
+- `admin.classUtilisation` — already tracked separately as **ADMIN-001**,
+  untouched here.
+- Trainer roster booked-counts (`/trainer/schedule`) — same root cause,
+  no formal defect ID yet; noted here as remaining follow-up work.
+- The check-then-insert race between `isClassFull`'s read and the
+  caller's subsequent insert is unchanged — a still-open, broader,
+  already-documented gap (plan.md's "no transactions" findings), not
+  made worse by this fix (the original single-table checks had the exact
+  same race).
 
 ---
 
