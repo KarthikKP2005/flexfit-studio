@@ -236,6 +236,50 @@ before/after screenshot verification if picked back up.
 
 ---
 
+## 2026-08-08 — PLAN-001 policy: reject a second subscription instead of allowing multiple active memberships
+
+**Decision:** `plans.ts`'s `subscribe` now rejects (`CONFLICT`) a
+subscription attempt while the caller already has a `status: "active"`
+membership, instead of silently inserting a second one. No
+renewal/extension/queueing support was added.
+
+**Why this needed a decision, not just a fix:** plan.md's own PLAN-001
+writeup lists four plausible policies (reject / extend / queue /
+stack-with-explicit-charge) and says explicitly the choice "should not
+be guessed during refactoring" — unlike COMPANY-001, where plan.md
+itself named one option as "the simpler and safer rule." This one had no
+stated preference, so per Rule 8 it was put to the user directly rather
+than picked silently.
+
+**Why Reject over the other three:**
+- **Pure subtraction of the bad behavior.** Reject requires no new
+  status values, no rule for how credits combine across two plans, and
+  no "who flips it to active later" logic — Extend and Queue both need
+  new concepts the schema/code don't have today.
+- **Precedent already set in this codebase.** COMPANY-001 (fixed earlier
+  this session) took the identical shape for a structurally similar
+  problem: "one X per user, reject a second." Reject is the direct
+  analogue, not a new pattern to justify separately.
+- **Actually closes the defect.** The core problem is "two simultaneous
+  active memberships, and downstream code (MEMBER-002's resolution,
+  `bookings.ts`'s separate lookup) can disagree about which one is
+  current." Reject makes that state unreachable via `subscribe`. Stack
+  would leave the ambiguity in place, just labeled; Extend/Queue still
+  allow a transient multi-row state while switching over.
+
+**Named tradeoff, not hidden:** a member who wants to renew before their
+current membership expires has no self-serve path — they must wait for
+it to end, or have staff cancel/refund it first (e.g. via
+`payments.refund`, unmodified). This is a real, narrower UX gap,
+recorded here and in known-issues.md's PLAN-001 entry as a deliberate
+scope boundary of this fix, not solved by it.
+
+**Verification note:** confirming the fix required actually clearing a
+seeded member's active membership to exercise the "success after no
+active membership" path — done via the existing (unmodified)
+`payments.refund` against the dev server, not by editing the database
+directly, so the verification exercised real application code end to
+end.
 ## 2026-08-08 — `companyMembers.userId` made unique (COMPANY-001 fix)
 
 **Decision:** added `.unique()` to `companyMembers.userId` in

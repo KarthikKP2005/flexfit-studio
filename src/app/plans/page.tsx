@@ -5,9 +5,11 @@ import { formatMoney } from "@/lib/format";
 
 /**
  * Membership plan catalog and self-serve subscribe button. Not
- * responsible for: preventing a member from subscribing to a second
- * plan while one is already active — the server allows it (see PLAN-001
- * in known-issues.md) and this page doesn't add its own guard either.
+ * responsible for: pre-emptively disabling the Subscribe button for a
+ * member who already has an active membership — `plans.subscribe`
+ * rejects that server-side with CONFLICT (PLAN-001, fixed) and this page
+ * relies on `subscribe.error.message` (rendered below) to surface it,
+ * rather than duplicating the "do they already have one" check client-side.
  */
 export default function PlansPage() {
   const utils = trpc.useUtils();
