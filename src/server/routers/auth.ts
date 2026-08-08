@@ -148,4 +148,35 @@ export const authRouter = router({
     store.delete(SESSION_COOKIE);
     return { ok: true };
   }),
+
+  /**
+   * Simplified password reset (for demo purposes).
+   * Finds user by email and directly updates their password.
+   *
+   * @throws NOT_FOUND if the email doesn't exist
+   */
+  resetPassword: publicProcedure
+    .input(z.object({ email: z.string().email(), newPassword: z.string().min(6) }))
+    .mutation(async ({ ctx, input }) => {
+      const email = input.email.toLowerCase().trim();
+      const user = await ctx.db
+        .select()
+        .from(users)
+        .where(eq(users.email, email))
+        .get();
+
+      if (!user) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No account found with that email address.",
+        });
+      }
+
+      await ctx.db
+        .update(users)
+        .set({ passwordHash: hashPassword(input.newPassword) })
+        .where(eq(users.id, user.id));
+
+      return { ok: true };
+    }),
 });

@@ -49,7 +49,12 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-sm muted">Password</label>
+          <div className="flex items-center justify-between">
+            <label className="text-sm muted">Password</label>
+            <Link href="/forgot-password" className="text-sm hover:text-white" style={{ color: "var(--text)" }}>
+              Forgot password?
+            </Link>
+          </div>
           <input
             className="input"
             type="password"
