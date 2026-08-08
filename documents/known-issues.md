@@ -598,6 +598,49 @@ to find trainers/other admins here too (e.g. to demote one).
 
 ---
 
+### MEMBER-006 — `getCurrentMembership` does not check `startDate`
+
+**Severity:** Low (no reproduction path existed in the running app —
+`plans.subscribe` always creates memberships with `startDate: today`, so
+a future-dated membership could previously only exist via direct DB
+manipulation or a not-yet-built admin membership-creation UI; this was a
+latent gap, not an actively exploitable one)
+**Status:** Fixed on branch `fix/member-006-membership-startdate-check`
+**Area:** Membership
+**File:** `src/features/memberships/current-membership.ts` — `getCurrentMembership`
+
+**Original behavior:** the `where` clause checked `status = "active"`
+and `endDate >= today`, but never `startDate <= today`. A membership
+whose `startDate` was in the future would still be picked as the
+caller's current membership — usable for booking (`bookings.book`) and
+shown as current on `/dashboard`/`/profile` (`members.profile`) —
+before it was actually supposed to start.
+
+**Fix:** added `startDate <= today` to `getCurrentMembership`'s `where`
+clause. Because both `bookings.book` and `members.profile` already call
+this one shared function (MEMBER-002, fixed), the fix landed in one
+place and both call sites picked it up automatically — no other file
+needed a logic change.
+
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md): since no UI path can create a
+future-dated membership, inserted one directly into the dev database
+(`userId: 10`, `startDate` 12 days out, `status: "active"`) for a member
+with no other active membership. Confirmed `members.profile` returned
+`membership: null` (not the future one), and `bookings.book` rejected
+with `FORBIDDEN`/"An active membership is required to book classes."
+Also confirmed no regression: a different member's normal,
+already-started active membership still resolved correctly on both call
+sites. `tsc --noEmit` and `next build` both clean. Test data was deleted
+afterward.
+
+**Not in scope for this fix:** `plans.subscribe` itself still doesn't
+accept or set a future `startDate` (it's hardcoded to `today`) — this
+fix only corrects `getCurrentMembership`'s eligibility check for
+whenever such a row exists, by any means.
+
+---
+
 ### TRAINER-001 — `setAvailability` accepts any string as a time, with no range validation
 
 **Severity:** Low

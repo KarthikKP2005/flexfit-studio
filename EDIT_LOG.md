@@ -10,6 +10,62 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — FIX(memberships): getCurrentMembership rejects a not-yet-started membership
+
+**Type:** FIX
+**Defect:** MEMBER-006
+**Behavior change:** yes — `getCurrentMembership` (used by both
+`bookings.book` and `members.profile`) no longer treats a membership
+with a future `startDate` as the caller's current one. No procedure's
+input schema, output shape, or error codes changed — this only affects
+*which row* is resolved as "current," same shape as the MEMBER-002 fix.
+**Files:** `src/features/memberships/current-membership.ts`
+(`getCurrentMembership`'s `where` clause gained `startDate <= today`;
+docstring updated — the "not yet its own known-issues.md entry" note is
+now resolved)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server, since no UI path can create a future-dated
+membership:
+1. Inserted a membership directly into the dev DB for a member with no
+   other active membership: `startDate` 12 days in the future,
+   `status: "active"`.
+2. `members.profile` → `membership: null` (the future-dated row was not
+   picked) — before this fix it would have been.
+3. `bookings.book` → `FORBIDDEN`, "An active membership is required to
+   book classes." — same rejection a member with no membership at all
+   would get.
+4. Regression check: a different member's normal, already-started
+   active membership still resolved correctly on both `profile` and
+   `bookings.book`.
+5. Deleted the test membership row afterward.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's MEMBER-006 (plan.md item #21). `plans.subscribe`
+itself is untouched — it still only ever creates memberships with
+`startDate: today`, so this fix protects against future-dated rows
+however they come to exist (direct DB access, or a future admin
+membership-creation UI), rather than changing how memberships are
+created today.
+
+---
+
+## 2026-08-08 — DOCUMENT(members): log MEMBER-006 (getCurrentMembership doesn't check startDate)
+
+**Type:** DOCUMENT
+**Defect:** MEMBER-006
+**Behavior change:** no — nothing in the code changed for this entry.
+**Files:** `documents/known-issues.md`
+**Tests:** n/a
+
+plan.md item #21 ("membership start date is not consistently
+considered") was already referenced inline in `current-membership.ts`'s
+docstring since the MEMBER-002 fix, but had no known-issues.md entry of
+its own yet. Logged as **MEMBER-006** so the follow-up FIX has a defect
+id to reference, per Rule 2's checklist and the same DOCUMENT-then-FIX
+pattern used for MEMBER-005.
+
+---
+
 ## 2026-08-08 — FIX(members): profile shows the member's actually-current membership
 
 **Type:** FIX

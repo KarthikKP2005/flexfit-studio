@@ -14,17 +14,12 @@ import { memberships } from "@/db/schema";
 
 /**
  * The membership `userId` should book/pay against right now: status
- * "active" and endDate >= today, most-distant endDate first if somehow
- * more than one qualifies (see PLAN-001 in known-issues.md — subscribe
- * now rejects a second active membership, so this tiebreak shouldn't be
- * reachable for new data, but existing rows created before that fix
- * could still collide).
- *
- * Does not check startDate — a membership with a future startDate is
- * still treated as usable today (plan.md item #21, not yet tracked as
- * its own known-issues.md entry; carried forward unchanged from the
- * pre-extraction behavior in bookings.ts, not fixed as part of this
- * change).
+ * "active", startDate <= today, and endDate >= today (MEMBER-006, fixed
+ * — a future-dated membership is no longer treated as usable before it
+ * starts), most-distant endDate first if somehow more than one qualifies
+ * (see PLAN-001 in known-issues.md — subscribe now rejects a second
+ * active membership, so this tiebreak shouldn't be reachable for new
+ * data, but existing rows created before that fix could still collide).
  */
 export async function getCurrentMembership(
   db: typeof import("@/db").db,
@@ -38,6 +33,7 @@ export async function getCurrentMembership(
       and(
         eq(memberships.userId, userId),
         eq(memberships.status, "active"),
+        sql`${memberships.startDate} <= ${today}`,
         sql`${memberships.endDate} >= ${today}`,
       ),
     )
