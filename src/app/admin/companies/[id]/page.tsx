@@ -4,6 +4,14 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@/server/routers/_app";
+
+type RouterOutput = inferRouterOutputs<AppRouter>;
+type MemberSearchItem = RouterOutput["members"]["search"][number];
+type CompanyDetail = NonNullable<RouterOutput["adminCompanies"]["getById"]>;
+type LinkedMember = CompanyDetail["members"][number];
+type RecentBooking = CompanyDetail["recentBookings"][number];
 
 /**
  * Single company's detail: credit pool + top-up, linked members +
@@ -178,10 +186,10 @@ export default function CompanyDetailsPage() {
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {memberSearchData
                 .filter(
-                  (user: any) =>
-                    !company.members.some((m: any) => m.id === user.id),
+                  (user: MemberSearchItem) =>
+                    !company.members.some((m: LinkedMember) => m.id === user.id),
                 )
-                .map((user: any) => (
+                .map((user: MemberSearchItem) => (
                   <div
                     key={user.id}
                     className="flex items-center justify-between p-2 border rounded"
@@ -221,7 +229,7 @@ export default function CompanyDetailsPage() {
         <h2 className="font-medium">Linked Members ({company.members.length})</h2>
         {company.members.length > 0 ? (
           <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
-            {company.members.map((member: any) => (
+            {company.members.map((member: LinkedMember) => (
               <div key={member.id} className="flex items-center gap-4 p-3">
                 <div className="flex-1">
                   <div className="font-medium text-sm">{member.name}</div>
@@ -246,7 +254,7 @@ export default function CompanyDetailsPage() {
         <h2 className="font-medium">Recent Corporate Bookings</h2>
         {company.recentBookings.length > 0 ? (
           <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
-            {company.recentBookings.map((booking: any) => (
+            {company.recentBookings.map((booking: RecentBooking) => (
               <div key={booking.id} className="p-3 text-sm space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{booking.className}</span>

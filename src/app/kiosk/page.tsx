@@ -24,7 +24,7 @@ import { formatDateTime } from "@/lib/format";
 export default function KioskPage() {
   const { data: user } = trpc.auth.me.useQuery();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedMember, setSelectedMember] = useState<any>(null);
+  const [selectedMember, setSelectedMember] = useState<{ id: number; name: string; email: string; phone: string | null } | null>(null);
   const [checkinSuccess, setCheckinSuccess] = useState<{ memberName: string; className: string } | null>(null);
 
   const lookupMember = trpc.members.lookupByEmailOrPhone.useQuery(
