@@ -10,6 +10,51 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — FIX(payments): refund cancels dependent bookings and promotes freed seats
+
+**Type:** FIX
+**Defect:** PAY-001
+**Behavior change:** yes — `payments.refund` now cancels every `booked`/
+`waitlisted` booking under the refunded membership (previously left
+untouched), and promotes the next eligible waitlisted candidate for each
+freed confirmed seat. Already-`attended` bookings and `creditsRemaining`
+are unchanged. `refund`'s input schema, output shape, and error codes
+are unchanged — same payment row returned, same `NOT_FOUND`/`BAD_REQUEST`
+conditions as before.
+**Files:** `src/server/routers/payments.ts` (`refund` gained a loop over
+dependent bookings after cancelling the membership; reuses the existing
+`promoteNextWaitlisted` from `src/features/bookings/waitlist-service.ts`
+— no new promotion logic; file and procedure header comments updated)
+**Policy:** cancel dependent bookings/waitlist, leave attended bookings
+and credits alone — chosen explicitly with the user after plan.md
+flagged this as a genuine ambiguity with no recommended default (same
+shape as PLAN-001's decision). Full reasoning in
+`architecture-decisions.md`'s 2026-08-08 entry.
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server:
+1. Refunded a seeded member's payment (`rahul.k@example.com`, ~50 active
+   `booked`/`waitlisted` bookings, 8 already-`attended`).
+2. `members.profile` → `membership: null` (correctly cancelled and no
+   longer resolved as current).
+3. All ~50 active bookings flipped to `cancelled`; `classesAttended`
+   stayed at 8 — unchanged, since the fix's query only ever selects
+   `status IN (booked, waitlisted)`, structurally excluding `attended`
+   rows.
+4. Manufactured a waitlisted booking for a second member on a class the
+   refunded member was confirmed into; confirmed that candidate was
+   promoted to `booked` by the refund's cancellation loop, the same way
+   a normal `bookings.cancel` would promote them.
+5. Test data reset afterward (`pnpm db:reset`) since the refund can't be
+   reversed through any existing mutation.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's PAY-001 (plan.md item #22). `payments.markPaid`
+is unrelated and untouched. Corporate bookings are untouched —
+`payments.membershipId` never references a company, so there's nothing
+corporate for a membership refund to reconcile.
+
+---
+
 ## 2026-08-08 — FIX(memberships): getCurrentMembership rejects a not-yet-started membership
 
 **Type:** FIX

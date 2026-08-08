@@ -386,3 +386,52 @@ automatically, and Booking already used the correct definition before
 this change; Kiosk's and Admin's membership-history display are a
 different shape of problem (they show a full list, not a single "current"
 pick) and are already flagged separately in their own file comments.
+
+---
+
+## 2026-08-08 — PAY-001 policy: refund cancels dependent bookings/waitlist entries, promotes freed seats
+
+**Decision:** `payments.ts`'s `refund` now cancels every `booked`/
+`waitlisted` row under the refunded membership, in addition to
+cancelling the membership itself. A cancelled `booked` row's freed seat
+triggers the existing shared `promoteNextWaitlisted`. Already-`attended`
+bookings and `creditsRemaining` are left untouched.
+
+**Why this needed a decision, not just a fix:** plan.md's PAY-001
+writeup lists four plausible policies (cancel future bookings / keep
+them valid / restore or remove credits / remove waitlist entries) with
+no stated preference, and says explicitly "this should not be guessed
+during refactoring." Put to the user directly per Rule 8, same as
+PLAN-001.
+
+**Why "cancel dependent bookings/waitlist, leave attended alone" over
+the alternative (document-only, leave refund exactly as-is):**
+- It's the interpretation that actually matches what "refund" means —
+  the payment is being reversed, so what it paid for (future, unused
+  classes) is reversed too. Leaving bookings valid after a refund would
+  mean a member can attend classes for free, which is a starker
+  inconsistency than the "no UI" or "silent undefined" gaps this repo's
+  other DOCUMENT-only entries describe.
+- It reuses machinery that already exists and is already trusted
+  (`promoteNextWaitlisted`, the same function `bookings.cancel` calls) —
+  no new waitlist/promotion logic was invented for this fix, keeping the
+  change small and low-risk despite touching booking state.
+- Leaving already-`attended` bookings alone avoids inventing a rule for
+  something that already happened — a class that was already attended
+  isn't "undone" by a later refund, and the schema has no concept of
+  reversing a completed attendance.
+
+**Why not also touch credits:** once the membership is `cancelled`,
+`getCurrentMembership` (MEMBER-002/MEMBER-006, both fixed) never selects
+it again for booking eligibility, regardless of what `creditsRemaining`
+holds. Zeroing or preserving that field has no behavioral effect either
+way — so this fix doesn't touch it, avoiding an unforced decision that
+wouldn't change anything a user could observe.
+
+**Not in scope:** corporate bookings are untouched — a personal
+membership refund has no corporate-side counterpart to reconcile
+(`payments.membershipId` never references a company). `payments.markPaid`
+is unrelated and untouched. The promotion loop is not wrapped in a
+transaction, same pre-existing gap `promoteNextWaitlisted`'s own header
+comment already documents (plan.md's broader "no transactions" finding)
+— not made worse by this fix, not fixed by it either.
