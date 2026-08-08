@@ -159,11 +159,13 @@ affected, then bulk-inserts one `class_cancelled` notification per
 affected member. The set of bookings that get cancelled is unchanged —
 still `booked` personal bookings only.
 
-**Not in scope for this fix:** this does not expand CLASS-004's scope.
-Waitlisted personal bookings and all corporate bookings on the cancelled
-class are still left completely untouched (not cancelled, no credit
-restored, and consequently — since they're never touched — no
-notification either). Fixing that gap is CLASS-004's job, not this one.
+**Not in scope for this fix:** this did not expand CLASS-004's scope at
+the time — waitlisted personal bookings and all corporate bookings on
+the cancelled class were still left completely untouched. CLASS-004 has
+since been fixed (see that entry) and closed the rest of this gap; the
+notification logic this fix added now lives inside
+`class-cancellation-service.ts`'s `cancelClass`, extended to cover every
+affected member, not just booked personal ones.
 
 ---
 
@@ -615,32 +617,73 @@ before assigning.
 ### CLASS-004 — `cancel` only cancels confirmed normal bookings; waitlisted entries, corporate bookings, credits, and notifications are all left untouched
 
 **Severity:** High (member-facing — someone waitlisted for a cancelled
-class is never told, and a corporate attendee's booking silently survives
-a class that no longer exists)
-**Status:** Confirmed from source (also flagged in plan.md's critical
-list, item 9)
+class was never told, and a corporate attendee's booking silently
+survived a class that no longer exists)
+**Status:** Fixed on branch `class-cancellation-cleanup-member` (also
+flagged in plan.md's critical list, item 9, and plan.md's member-flow
+item #14)
 **Area:** Classes / Corporate bookings / Notifications
-**File:** `src/server/routers/classes.ts` — `cancel`
+**File:** `src/features/bookings/class-cancellation-service.ts` (new) —
+`cancelClass`; `src/server/routers/classes.ts` — `cancel` (now a thin
+wrapper around it)
 
-**Current behavior:** sets `classes.cancelled = true`, then only updates
-`bookings` rows with `status = "booked"` to `"cancelled"`. Does not: touch
+**Original behavior:** set `classes.cancelled = true`, then only updated
+`bookings` rows with `status = "booked"` to `"cancelled"`. Did not: touch
 `waitlisted` bookings, touch `corporateBookings` at all (any status),
-restore any membership credit, restore any company credit pool, or
-insert a `class_cancelled` notification (the type exists in the schema
-and is unused here, same gap as NOTIF-001's sibling types).
+restore any membership credit, or restore any company credit pool.
+(NOTIF-003, fixed separately and earlier, had already closed the
+narrower "no notification at all" gap for the one case that *was*
+handled — booked personal bookings — but explicitly deferred everyone
+else to this fix.)
 
-**Reproduction:** `src/server/routers/classes.test.ts`'s
-`classes.cancel` tests — one shows the waitlisted-entry gap directly, the
-other shows credits/corporate bookings are untouched.
+**Fix — new `cancelClass(db, classId)` service, per plan.md's own
+required design** (marks the class cancelled → cancels all active
+normal and corporate bookings → restores credits where applicable →
+notifies affected members → returns a structured summary): cancels
+every still-`booked`-or-`waitlisted` row in **both** `bookings` and
+`corporateBookings` for the class, refunds credits for every one that
+had actually paid, and sends a `class_cancelled` notification to every
+affected member — personal and corporate, previously-booked and
+previously-waitlisted alike. `classes.ts`'s `cancel` is now a thin
+wrapper (Rule 7) that just calls this and shapes the response;
+`classes.ts`'s own file header and `cancel`'s doc comment were updated
+to match.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md — a
-`cancelClass` service that atomically cancels all active normal and
-corporate bookings, restores credits appropriately, and notifies affected
-members. Large enough, and touches enough shared behavior (see BOOK/CORP
-entries once bookings.ts and corporate-bookings.ts are characterized),
-that it needs its own careful FIX with characterization tests proving the
-*current* incomplete behavior first — noted here as a marker for that
-future test suite.
+**Refund policy — Rule 8 decision (plan.md doesn't specify a time
+window here, and none existed in this code path before this fix):**
+every cancelled `booked` booking with `creditsUsed > 0` is refunded in
+**full, unconditionally** — no `FREE_CANCELLATION_HOURS` /
+`CORPORATE_FREE_CANCELLATION_HOURS` check, unlike `bookings.ts`'s /
+`corporate-bookings.ts`'s own member-initiated `cancel`. Those windows
+exist to discourage a *member* from bailing late on their own choice;
+here the *studio* cancelled the class, so there's no late-notice
+behavior to discourage — applying that window would just penalize the
+member for a decision that wasn't theirs. `waitlisted` bookings always
+have `creditsUsed: 0` (BOOK-004/RESCH-002, both already fixed), so
+refunding them is always a no-op — matching plan.md's own required
+design ("Marks waitlisted entries cancelled without credit refunds")
+without any special-casing needed.
+
+**Not changed / still open:** the check-then-write race this shares with
+every other multi-step booking flow (plan.md item 44, "no transactions")
+is untouched — same, already-documented, broader gap.
+
+**Verified live:** manual E2E against the running dev server with real
+seeded accounts (no automated test harness exists on this branch), two
+classes covering all four combinations: Class A (capacity 2) — a real
+personal `booked` booking (real charge) and a real corporate `booked`
+booking (real charge to the company), plus a personal booking that
+correctly waitlisted once full; Class B (capacity 1) — an unlimited-plan
+personal `booked` booking (never actually decremented) and a corporate
+booking that correctly waitlisted once full. Cancelling both classes as
+admin confirmed: all 5 bookings across both tables flipped to
+`cancelled` (including the two that were `waitlisted` — untouched
+before this fix); the personal member's membership and the company's
+credit pool were both refunded back to their exact pre-test values; the
+unlimited membership was correctly left alone (nothing to refund); and
+every one of the 5 affected members received a `class_cancelled`
+notification — including the two who were only ever waitlisted, who
+got none before this fix. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
@@ -929,11 +972,14 @@ repeated logic into one place instead of four").
 - Atomic/transactional promotion (check + two writes + notification, not
   wrapped in a transaction) — separate, already-documented, broader "no
   transactions" finding (plan.md item 44).
-- RESCH-003 (reschedule frees a seat but never triggers *any* promotion)
-  and CLASS-004 (class cancellation doesn't either) — `promoteNextWaitlisted`
-  is now available for both as natural follow-up work, but wasn't wired
-  in here; only the two `cancel` mutations that already had promotion
-  logic were touched.
+- RESCH-003 (reschedule frees a seat but never triggers *any*
+  promotion) — `promoteNextWaitlisted` was already available as natural
+  follow-up work here, and was later wired in when RESCH-003 itself was
+  fixed. CLASS-004 (class cancellation) turned out **not** to need it
+  when it was fixed, on inspection: cancelling a class cancels its
+  entire waitlist too (there's no seat left over to promote anyone
+  into), unlike a reschedule or a normal cancel, which only ever moves
+  or frees a single seat while the rest of the class stays open.
 
 **Verified live** (manual E2E, real seeded/company-linked accounts,
 both directions): filled a capacity-1 class personally, queued a
