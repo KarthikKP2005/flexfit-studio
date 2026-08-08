@@ -804,25 +804,41 @@ recommendation given the time available.
 
 **Severity:** Medium (which company pays for a corporate booking becomes
 ambiguous — see `corporate-bookings.ts`'s single-row `.get()` company
-lookup, characterized once that file gets its own tests)
-**Status:** Confirmed from source (also flagged in plan.md, item #12)
+lookup)
+**Status:** Fixed on branch `fix/company-001-one-company-per-member`
 **Area:** Corporate accounts
-**File:** `src/server/routers/admin-companies.ts` — `linkMember`
+**File:** `src/db/schema.ts` — `companyMembers`; `src/server/routers/admin-companies.ts` — `linkMember`
 
-**Current behavior:** `linkMember` only rejects an exact duplicate
-(same `userId` + `companyId` pair, via CONFLICT) — nothing stops a second
-`linkMember` call linking the same user to a *different* company. The
-schema has no unique constraint on `companyMembers.userId` either.
+**Original behavior:** `linkMember` only rejected an exact duplicate
+(same `userId` + `companyId` pair, via CONFLICT) — nothing stopped a
+second `linkMember` call linking the same user to a *different*
+company. The schema had no unique constraint on `companyMembers.userId`
+either, so `corporate-bookings.ts`'s `getCompanyForMember` (a single-row
+`.get()` with no ordering) could arbitrarily pick among several active
+links for the same user.
 
-**Reproduction:** `src/server/routers/admin-companies.test.ts`'s
-`adminCompanies.linkMember / unlinkMember > COMPANY-001: allows linking
-the same member to a second, different company`.
+**Reproduction (pre-fix):** confirmed by reading the source and by
+manually calling `linkMember` twice for the same user against two
+different companies on the running dev server — both calls succeeded.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md — the
-simpler, safer rule is one active company per member, enforced with a
-unique constraint on `companyMembers.userId`. That's a schema change
-(Rule 1.2: needs a migration and a recorded reason), so it's a FIX with
-its own commit, not part of this pass.
+**Fix:** per plan.md's own recommendation — the simpler, safer rule is
+one company per member. Added `.unique()` to `companyMembers.userId` in
+`schema.ts` (a schema change per Rule 1.2 — see the
+`architecture-decisions.md` entry for the reasoning and the drizzle-kit/
+libsql push quirk hit while applying it). `linkMember` now checks for
+*any* existing link for the user (not just the same-company duplicate)
+and rejects it with a clear `CONFLICT` — `"...already linked to a
+different company. Unlink them first."` for a different company, or the
+original `"...already linked to this company."` message unchanged for
+an exact repeat. Verified manually (no test harness in this branch):
+link succeeds once, a second link to a different company is rejected, a
+repeat link to the same company still gets the original message.
+
+**Not in scope for this fix:** `corporate-bookings.ts`'s
+`getCompanyForMember` query itself is unchanged (still a single-row
+`.get()` filtered on `companies.active`) — only its comment was
+updated, since the ambiguity it described can no longer occur once the
+constraint is enforced.
 
 ---
 
