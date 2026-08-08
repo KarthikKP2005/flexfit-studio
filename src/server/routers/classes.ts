@@ -1,16 +1,22 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
-import { classes, bookings, users, notifications } from "@/db/schema";
+import { classes, bookings, users } from "@/db/schema";
 import { router, publicProcedure, staffProcedure, adminProcedure } from "../trpc";
+import { cancelClass } from "@/features/bookings/class-cancellation-service";
 
 /**
  * Class scheduling: public browse/detail, staff create/update, admin
- * cancel. Not responsible for: enforcing trainer availability during
- * create/update (see trainers.ts's checkAvailability, never called from
- * here — CLASS-003-adjacent) or counting corporate bookings toward
- * capacity/roster (that's tracked in a separate table entirely — see
- * corporate-bookings.ts).
+ * cancel. `cancel` is a thin wrapper around
+ * features/bookings/class-cancellation-service.ts's `cancelClass`
+ * (CLASS-004, fixed) — all the actual cleanup logic (cancelling
+ * personal/corporate bookings, refunding credits, notifying members)
+ * lives there, not here, per Rule 7's "routers stay thin" guidance. Not
+ * responsible for: enforcing trainer availability during create/update
+ * (see trainers.ts's checkAvailability, never called from here —
+ * CLASS-003-adjacent) or counting corporate bookings toward
+ * capacity/roster in `list`'s spotsLeft (that's tracked in a separate
+ * table entirely — see corporate-bookings.ts and ADMIN-001).
  */
 
 export const classesRouter = router({
@@ -171,54 +177,28 @@ export const classesRouter = router({
     }),
 
   /**
-   * Marks a class cancelled and cancels its currently-`booked` bookings.
-   *
-   * Behavior note (see CLASS-004 in known-issues.md — not fixed here):
-   * this is a partial cleanup only — waitlisted bookings, all corporate
-   * bookings (any status), and membership/company credit restoration are
-   * still left untouched. As of NOTIF-003, the members whose `booked`
-   * bookings *are* cancelled here now get a `class_cancelled`
-   * notification — waitlisted/corporate members still get none, matching
-   * CLASS-004's existing (undilated) scope.
+   * Marks a class cancelled and cleans up everything attached to it, via
+   * the shared `cancelClass` (CLASS-004, fixed): cancels every still-
+   * active booking on the class — personal AND corporate, `booked` AND
+   * `waitlisted` — refunds credits for the ones that had actually paid
+   * (unconditionally, no free-cancellation-window check; see that
+   * function's own comment for the Rule 8 reasoning), and notifies every
+   * affected member. The return value now includes a `summary` alongside
+   * the class row, per plan.md's "structured cancellation summary" ask —
+   * a deliberate output-shape change for this FIX (Rule 3), not something
+   * any UI currently depends on (`cancel` has no frontend caller today).
    *
    * @throws NOT_FOUND if the class doesn't exist
    */
   cancel: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const cls = await ctx.db
-        .update(classes)
-        .set({ cancelled: true })
-        .where(eq(classes.id, input.id))
-        .returning()
-        .get();
+      const result = await cancelClass(ctx.db, input.id);
 
-      if (!cls) {
+      if (!result) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
-      const cancelledBookings = await ctx.db
-        .update(bookings)
-        .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
-        .where(
-          and(eq(bookings.classId, input.id), eq(bookings.status, "booked")),
-        )
-        .returning();
-
-      // NOTIF-003: notify each member whose booking was just cancelled
-      // above — added on top of the existing (still-incomplete, see
-      // CLASS-004) cleanup, not expanding what gets cancelled.
-      if (cancelledBookings.length > 0) {
-        await ctx.db.insert(notifications).values(
-          cancelledBookings.map((b) => ({
-            userId: b.userId,
-            type: "class_cancelled" as const,
-            title: "Class cancelled",
-            message: `${cls.name} on ${cls.startsAt} has been cancelled.`,
-          })),
-        );
-      }
-
-      return cls;
+      return result;
     }),
 });

@@ -10,6 +10,59 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — FIX(classes): clean up all bookings, credits, and notifications when a class is cancelled
+
+**Type:** FIX
+**Defect:** CLASS-004
+**Behavior change:** yes — cancelling a class now cancels every active
+booking on it (personal AND corporate, `booked` AND `waitlisted`),
+refunds credits for every one that had actually paid (unconditional
+full refund, no free-cancellation-window check — see the Rule 8 note
+below), and notifies every affected member. Previously only `booked`
+personal bookings were cancelled, with no refund and no notification for
+anyone. `classes.cancel`'s return shape changed — it now returns
+`{ cls, summary }` instead of just the class row, per plan.md's
+"structured cancellation summary" ask; `cancel` has no frontend caller
+today, so nothing consumes the old shape.
+**Files:** `src/features/bookings/class-cancellation-service.ts` (new —
+`cancelClass`, all the actual cleanup logic, per Rule 7), `src/server/
+routers/classes.ts` (`cancel` reduced to a thin wrapper; file header and
+`cancel`'s doc comment updated to match), `documents/known-issues.md`
+(CLASS-004 rewritten as fixed; NOTIF-003 and CORP-003's entries updated
+— the latter's cross-reference to CLASS-004 was stale: cancelling a
+class turns out not to need `promoteNextWaitlisted` at all, since the
+whole waitlist is cancelled along with the class, unlike a reschedule or
+a normal cancel which only ever free a single seat)
+**Rule 8 decision (refund policy):** every cancelled `booked` booking
+with `creditsUsed > 0` is refunded in full, unconditionally — no
+`FREE_CANCELLATION_HOURS`/`CORPORATE_FREE_CANCELLATION_HOURS` window,
+unlike member-initiated cancellation. Those windows discourage a member
+from bailing late on their own choice; here the studio cancelled the
+class, so there's no late-notice behavior to discourage. Confirmed with
+the user before implementing — see `known-issues.md`'s CLASS-004 entry
+for the full reasoning.
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded accounts, covering all
+four combinations across two classes: a real personal `booked` booking
+(real charge, refunded on cancel), a real corporate `booked` booking
+(real charge to the company, refunded on cancel), a personal booking
+that waitlisted once full (never charged, correctly just cancelled with
+no refund needed), a corporate booking that waitlisted once full (same),
+and an unlimited-plan personal booking (never actually decremented,
+correctly left alone). Cancelling both test classes confirmed: all 5
+bookings flipped to `cancelled` including the 2 that were `waitlisted`
+(untouched before this fix); the personal membership and company credit
+pool were refunded to their exact pre-test values; the unlimited
+membership was untouched; and all 5 affected members got a
+`class_cancelled` notification, including the 2 who were only ever
+waitlisted (none before this fix). `tsc --noEmit` and `pnpm build` both
+clean.
+
+Closes plan.md's member-flow item #14 ("Class cancellation doesn't clean
+up member bookings properly") and known-issues.md's CLASS-004.
+
+---
+
 ## 2026-08-07 — FIX(reschedules): reject rescheduling to a class with a different credit cost
 
 **Type:** FIX
