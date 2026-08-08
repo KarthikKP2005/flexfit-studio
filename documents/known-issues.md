@@ -429,32 +429,64 @@ email/phone match, or return a list and require staff selection.
 
 ### MEMBER-002 — `profile` picks the membership with the latest `endDate`, regardless of `status`
 
-**Severity:** Medium (member-facing dashboard can show a cancelled/expired
-membership as current, while `bookings.ts`'s `activeMembershipFor` uses a
-different, status-aware query — the two can disagree)
-**Status:** Confirmed from source (also flagged in plan.md, item #20)
+**Severity:** Medium (member-facing dashboard could show a
+cancelled/expired membership as current, while `bookings.ts`'s
+`activeMembershipFor` used a different, status-aware query — the two
+could disagree)
+**Status:** Fixed on branch `fix/member-002-shared-membership-resolver`
 **Area:** Membership
-**File:** `src/server/routers/members.ts` — `profile`
+**File:** `src/features/memberships/current-membership.ts` (new),
+`src/server/routers/members.ts` — `profile`,
+`src/server/routers/bookings.ts` — `book`
 
-**Current behavior:** `orderBy(desc(memberships.endDate))` with no status
-filter, first row wins. A `cancelled` membership with a later `endDate`
-than the user's actually-`active` one is what gets shown as "current."
+**Original behavior:** `profile` used `orderBy(desc(memberships.endDate))`
+with no status filter, first row wins. A `cancelled` membership with a
+later `endDate` than the user's actually-`active` one was what got shown
+as "current" — meanwhile `bookings.ts` had its own separate, stricter
+query (`status = "active"` AND `endDate >= today`) for booking
+eligibility, so the two could pick different rows for the same user.
 
-**Expected invariant:** one single definition of "current membership,"
-used consistently by `profile`, `bookings.ts`'s booking eligibility, and
-anywhere else membership status matters.
+**Fix (split into two commits per Rule 3 — refactor and fix are
+different acts):**
+1. REFACTOR: `bookings.ts`'s private `activeMembershipFor` moved
+   verbatim into `src/features/memberships/current-membership.ts` as
+   `getCurrentMembership(db, userId)` — no behavior change, `bookings.book`
+   calls the exact same query it always did, just relocated.
+2. FIX: `members.ts`'s `profile` now calls the same
+   `getCurrentMembership` to decide which membership to display, instead
+   of its own looser query. `profile`'s output *shape* is unchanged
+   (same fields); only *which row* gets returned changes — for any user
+   whose latest-`endDate` membership isn't the actually-active one.
 
-**Why not fixed here:** plan.md recommends a shared
-`getCurrentMembership(userId, atDate)` resolver — a genuine
-cross-cutting change, not a local one-line fix, and out of scope for a
-comment/structure pass.
+**Expected invariant, now enforced:** one single definition of "current
+membership" (`status = "active"` AND `endDate >= today`), used
+consistently by `profile` (and therefore `/dashboard` and `/profile`,
+which both render `members.profile` directly) and `bookings.book`'s
+eligibility check.
 
-**Reproduction:** `src/server/routers/members.test.ts`'s
-`members.profile > MEMBER-002: shows the membership with the latest
-endDate even if a different one is the actually-active one`.
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md): reproduced the exact disagreement
+scenario against the dev server — cancelled a member's long-`endDate`
+membership (via `payments.refund`, unmodified), gave them a new
+shorter-`endDate` active one (via `plans.subscribe`), then confirmed
+`members.profile` now returns the *active, shorter* membership (not the
+cancelled, later-`endDate` one), and that a new `bookings.book` call
+attaches to that same membership id — the two no longer disagree.
+`tsc --noEmit` and `next build` both clean.
 
-**What "fixed" would look like:** a shared membership-resolution helper
-used by both `profile` and `bookings.ts`, per plan.md's recommendation.
+**Not in scope for this fix:** `getCurrentMembership` does not check
+`startDate` (plan.md item #21) — carried forward unchanged from
+`bookings.ts`'s pre-extraction behavior, not its own known-issues.md
+entry yet. `reschedules.ts`'s own copy of this same query is dead code
+(never called, already noted as such) and was left untouched. Full
+consistency across all six call sites plan.md's MEMBER-002 writeup names
+(Profile, Dashboard, Booking, Kiosk, Plan subscription, Admin member
+details) was not attempted — Dashboard/Profile are covered automatically
+(they render `members.profile`) and Booking already used the correct
+definition; Kiosk's and Admin's membership-*history* display
+(`members.byId`, a full list, not a single "current" pick) is a
+different shape of problem, already flagged separately in kiosk's own
+file header comment.
 
 ---
 

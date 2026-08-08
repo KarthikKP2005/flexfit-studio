@@ -3,41 +3,49 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { users, memberships, membershipPlans, bookings } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure, adminProcedure } from "../trpc";
+import { getCurrentMembership } from "@/features/memberships/current-membership";
 
 /**
  * Member self-service (profile) plus staff-facing member directory
- * (search, lookup, activate/deactivate, role changes). Not responsible
- * for: what counts as a member's "current" membership in booking
- * eligibility — that's a separate query in bookings.ts, and the two can
- * disagree (see MEMBER-002 in known-issues.md).
+ * (search, lookup, activate/deactivate, role changes). What counts as a
+ * member's "current" membership (MEMBER-002, fixed) is resolved by the
+ * shared `getCurrentMembership` in src/features/memberships/ — the same
+ * definition bookings.ts uses for booking eligibility, so `profile`'s
+ * displayed membership can no longer disagree with what a booking would
+ * actually charge against.
  */
 
 export const membersRouter = router({
   /**
-   * The caller's own profile: user fields, their membership (see
+   * The caller's own profile: user fields, their current membership (see
    * behavior note below), and a count of attended classes.
    *
-   * Behavior note (see MEMBER-002 in known-issues.md — not fixed here):
-   * `membership` is whichever row has the latest endDate, regardless of
-   * status — a cancelled/expired membership can be shown as current if
-   * it happens to have a later endDate than the actually-active one.
+   * Behavior note (MEMBER-002, fixed): `membership` is whichever row
+   * `getCurrentMembership` picks — status "active" and endDate >= today
+   * — not just whichever row has the latest endDate. A cancelled/expired
+   * membership with a later endDate than the real active one is no
+   * longer shown as current; if the caller has no currently-active
+   * membership, `membership` is `null` even if they have past ones.
    */
   profile: protectedProcedure.query(async ({ ctx }) => {
-    const membership = await ctx.db
-      .select({
-        id: memberships.id,
-        status: memberships.status,
-        startDate: memberships.startDate,
-        endDate: memberships.endDate,
-        creditsRemaining: memberships.creditsRemaining,
-        planName: membershipPlans.name,
-        planCredits: membershipPlans.classCredits,
-      })
-      .from(memberships)
-      .innerJoin(membershipPlans, eq(memberships.planId, membershipPlans.id))
-      .where(eq(memberships.userId, ctx.user.id))
-      .orderBy(desc(memberships.endDate))
-      .get();
+    const current = await getCurrentMembership(ctx.db, ctx.user.id);
+
+    const membership = current
+      ? await ctx.db
+          .select({
+            id: memberships.id,
+            status: memberships.status,
+            startDate: memberships.startDate,
+            endDate: memberships.endDate,
+            creditsRemaining: memberships.creditsRemaining,
+            planName: membershipPlans.name,
+            planCredits: membershipPlans.classCredits,
+          })
+          .from(memberships)
+          .innerJoin(membershipPlans, eq(memberships.planId, membershipPlans.id))
+          .where(eq(memberships.id, current.id))
+          .get()
+      : undefined;
 
     const [{ attended }] = await ctx.db
       .select({ attended: sql<number>`count(*)` })

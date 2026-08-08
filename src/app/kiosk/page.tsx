@@ -15,9 +15,11 @@ import { formatDateTime } from "@/lib/format";
  * - `selectedMember` is typed `any` (see plan.md item #42), losing the
  *   type safety tRPC would otherwise provide end-to-end.
  * - The expired-membership/no-credits warnings below are computed
- *   client-side from `memberDetails.data.memberships[0]` (the first
- *   membership row, not necessarily the current one — same ambiguity as
- *   MEMBER-002) and only disable the button in the UI; `markAttended`
+ *   client-side from `memberDetails.data.memberships[0]` (`members.byId`'s
+ *   full membership history, most-recent-startDate first — the first
+ *   entry isn't necessarily the currently-active one; a different, still-
+ *   open gap from MEMBER-002, which only covered `members.profile` and
+ *   is fixed) and only disable the button in the UI; `markAttended`
  *   itself does not re-verify either condition server-side, so a direct
  *   API call bypasses both checks entirely.
  */
