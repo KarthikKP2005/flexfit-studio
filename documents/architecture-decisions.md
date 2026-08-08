@@ -280,3 +280,54 @@ active membership" path — done via the existing (unmodified)
 `payments.refund` against the dev server, not by editing the database
 directly, so the verification exercised real application code end to
 end.
+## 2026-08-08 — `companyMembers.userId` made unique (COMPANY-001 fix)
+
+**Decision:** added `.unique()` to `companyMembers.userId` in
+`schema.ts`, enforcing "one company per member" at the database level,
+per plan.md's own recommendation for COMPANY-001 ("the simpler, safer
+rule" vs. supporting multiple companies per member with an explicit
+company-selector in the UI). `admin-companies.ts`'s `linkMember` was
+updated to check for *any* existing link for the user (not just an
+exact user+company duplicate) and reject it with a clear `CONFLICT`
+before the insert would otherwise hit the new DB constraint.
+
+**Why a schema change instead of just an application-level check:**
+Rule 1.2 permits schema changes when a migration and a recorded reason
+exist, and plan.md's own COMPANY-001 writeup treats the DB constraint as
+the actual fix, not the application-level pre-check alone — a
+check-then-insert without a backing constraint is exactly the kind of
+race-prone pattern flagged separately in plan.md's DB-integrity section
+(#43). `linkMember`'s pre-check exists for a *clean error message*, not
+as the sole enforcement.
+
+**Migration mechanics:** this repo has no versioned migration files —
+`drizzle.config.ts` is push-based (`out: "./drizzle"` is configured but
+unused; `pnpm db:push` diffs the live schema directly). Attempting
+`drizzle-kit push` to *add* a unique constraint to the existing
+`company_members` table in place failed with `LibsqlError: SQLITE_ERROR:
+no such index: company_members_user_id_unique` — a drizzle-kit/libsql
+ordering bug in the generated `ALTER TABLE` batch when adding a unique
+index to an already-populated table (not an application bug; the same
+class of drizzle/libsql driver quirk already noted in the
+`ADMIN-001`-adjacent test-infra entry above). Since `flexfit.db` is the
+disposable dev database (already reset earlier in this session, no real
+user data), the constraint was applied via `pnpm db:reset`
+(drop file → fresh `db:push`, a plain `CREATE TABLE` with the constraint
+inline, not an `ALTER` → `db:seed`) instead of an in-place push. Seed
+data was checked first and confirmed to link no user to more than one
+company, so the reset+reseed didn't hide a real conflict.
+
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md) against the reset dev server: linking a
+previously-unlinked member to a company succeeds; linking that same
+member to a *second, different* company now returns `CONFLICT` with
+"This member is already linked to a different company. Unlink them
+first."; re-linking to the *same* company still returns the original
+"This member is already linked to this company." message unchanged.
+`tsc --noEmit` and `next build` both clean.
+
+**Not in scope:** `corporate-bookings.ts`'s `getCompanyForMember` was
+left functionally identical (its `.get()` call and `companies.active`
+filter are unchanged) — only its comment was updated, since the
+ambiguity it previously documented (arbitrary pick among multiple
+active companies) can no longer occur once the constraint is live.

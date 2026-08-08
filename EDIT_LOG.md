@@ -48,6 +48,47 @@ memberships"). PLAN-002 (non-atomic membership+payment insert) and
 PLAN-003 (payment reference collisions) are unrelated and untouched.
 Renewal/extension is explicitly out of scope for this fix — see the
 "Named tradeoff" paragraph in `architecture-decisions.md`.
+## 2026-08-08 — FIX(admin-companies): enforce one company per member
+
+**Type:** FIX
+**Defect:** COMPANY-001
+**Behavior change:** yes — `adminCompanies.linkMember` now rejects
+linking a member who is already linked to *any* company (previously
+only rejected an exact duplicate of the same user+company pair). New
+error message for the new case: `"This member is already linked to a
+different company. Unlink them first."` The existing same-company
+duplicate message is unchanged.
+**Files:** `src/db/schema.ts` (`companyMembers.userId` now `.unique()`),
+`src/server/routers/admin-companies.ts` (`linkMember`'s existence check
+widened from "same user+company" to "any link for this user"; removed
+the now-unused `and` import), `src/server/routers/corporate-bookings.ts`
+(comments only — `getCompanyForMember` and the file header updated to
+reflect that a user can no longer have more than one active-company
+link; no query logic changed)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server:
+1. Reset the dev DB (`pnpm db:reset`) to apply the new constraint —
+   `drizzle-kit push` can't diff an in-place unique-constraint addition
+   on an existing SQLite table (`LibsqlError: no such index:
+   company_members_user_id_unique`, a drizzle-kit/libsql ordering bug,
+   not an application issue); a fresh `CREATE TABLE` via reset sidesteps
+   it. Confirmed seed data links no user to more than one company before
+   resetting, so nothing was silently dropped.
+2. `adminCompanies.linkMember` for a previously-unlinked member (id 10)
+   to company 1 → succeeds.
+3. Same member to company 2 → `CONFLICT`, new "different company"
+   message.
+4. Same member to company 1 again → `CONFLICT`, original "this company"
+   message, unchanged.
+5. Unlinked the test member afterward to restore clean seed state.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's COMPANY-001 (plan.md item #12). Full reasoning
+for the schema change, and the drizzle-kit/libsql push quirk hit while
+applying it, is in `architecture-decisions.md`'s 2026-08-08 entry.
+`corporate-bookings.ts`'s `getCompanyForMember` query itself is
+untouched — only the comment describing its now-resolved ambiguity
+changed.
 
 ---
 
