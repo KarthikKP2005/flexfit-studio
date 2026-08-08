@@ -72,6 +72,12 @@ export default function LoginPage() {
         >
           {login.isPending ? "Signing in..." : "Sign in"}
         </button>
+
+        <div className="text-center pt-2">
+          <Link href="/forgot-password" className="text-sm muted hover:text-white" style={{ color: "var(--text)" }}>
+            Forgot password?
+          </Link>
+        </div>
       </form>
 
       <p className="muted text-center text-sm">

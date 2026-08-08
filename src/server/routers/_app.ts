@@ -11,6 +11,7 @@ import { trainersRouter } from "./trainers";
 import { corporateBookingsRouter } from "./corporate-bookings";
 import { adminCompaniesRouter } from "./admin-companies";
 import { reschedulesRouter } from "./reschedules";
+import { adminStaffRouter } from "./adminStaff";
 
 export const appRouter = router({
   auth: authRouter,
@@ -23,6 +24,7 @@ export const appRouter = router({
   payments: paymentsRouter,
   admin: adminRouter,
   adminCompanies: adminCompaniesRouter,
+  adminStaff: adminStaffRouter,
   notifications: notificationsRouter,
   trainers: trainersRouter,
 });
