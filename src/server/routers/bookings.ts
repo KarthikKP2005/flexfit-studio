@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { bookings, classes, memberships, checkins, users } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
 import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
+import { getCurrentMembership } from "@/features/memberships/current-membership";
 
 /**
  * Personal (membership-credit-funded) class bookings: browse, book,
@@ -13,7 +14,10 @@ import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
  * entirely separate table/flow. Capacity and waitlist order *are* now
  * reconciled with it — `book` shares `isClassFull` (CORP-002, fixed) and
  * `cancel` shares `promoteNextWaitlisted` (CORP-003, fixed), both in
- * src/features/bookings/.
+ * src/features/bookings/. Which membership a member is currently
+ * eligible to book against is resolved by the shared
+ * `getCurrentMembership` (MEMBER-002, fixed) in
+ * src/features/memberships/ — this file no longer keeps its own copy.
  */
 
 /**
@@ -28,32 +32,6 @@ export const UNLIMITED_CREDITS = 999;
 /** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
 function hoursUntil(iso: string, now = new Date()): number {
   return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
-
-/**
- * The membership this user should book/pay against right now: status
- * "active" and endDate >= today, most-distant endDate first if somehow
- * more than one qualifies. Does not check startDate (see MEMBER-002-
- * adjacent gap: members.ts's `profile` uses a different, less strict
- * query and the two can disagree on which membership is "current").
- */
-async function activeMembershipFor(
-  db: typeof import("@/db").db,
-  userId: number,
-) {
-  const today = new Date().toISOString().slice(0, 10);
-  return db
-    .select()
-    .from(memberships)
-    .where(
-      and(
-        eq(memberships.userId, userId),
-        eq(memberships.status, "active"),
-        sql`${memberships.endDate} >= ${today}`,
-      ),
-    )
-    .orderBy(desc(memberships.endDate))
-    .get();
 }
 
 export const bookingsRouter = router({
@@ -144,7 +122,7 @@ export const bookingsRouter = router({
         });
       }
 
-      const membership = await activeMembershipFor(ctx.db, ctx.user.id);
+      const membership = await getCurrentMembership(ctx.db, ctx.user.id);
       if (!membership) {
         throw new TRPCError({
           code: "FORBIDDEN",

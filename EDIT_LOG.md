@@ -10,6 +10,83 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — FIX(members): profile shows the member's actually-current membership
+
+**Type:** FIX
+**Defect:** MEMBER-002
+**Behavior change:** yes — `members.profile`'s `membership` field is now
+whichever row `getCurrentMembership` picks (`status: "active"` AND
+`endDate >= today`), not just whichever row has the latest `endDate`.
+Output *shape* is unchanged (same fields); only *which* membership row
+gets returned changes, for accounts where those two definitions used to
+disagree. `/dashboard` and `/profile` both render this field directly,
+so both now display the same membership `bookings.book` would actually
+charge against.
+**Files:** `src/server/routers/members.ts` (`profile` now calls
+`getCurrentMembership` first, then fetches the plan-joined row for that
+specific membership id instead of its own broader query; file and
+procedure header comments updated), `src/app/kiosk/page.tsx` (comment
+only — corrected a reference that called its own, separate,
+still-unfixed `memberships[0]` gap "the same ambiguity as MEMBER-002,"
+which would now misleadingly imply that gap was also fixed)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server, reproducing the exact disagreement scenario:
+1. `rahul.k@example.com`'s baseline: membership 1, `active`,
+   `endDate: 2026-11-06`.
+2. Refunded that payment as admin (`payments.refund`, unmodified) →
+   membership 1 flipped to `status: "cancelled"`, `endDate` unchanged
+   (still 2026-11-06, the later date).
+3. `plans.subscribe`d to a shorter plan → membership 13, `active`,
+   `endDate: 2026-09-07` (earlier than membership 1's).
+4. `members.profile` → returned membership **13** (active, earlier
+   endDate) — confirming the old "latest endDate wins" pick (which would
+   have returned cancelled membership 1) no longer happens.
+5. Cancelled and rebooked a class → the new booking's `membershipId` was
+   **13**, matching what `profile` now shows — `bookings.book` and
+   `profile` agree.
+6. `/dashboard`, `/profile`, `/kiosk` all still render (200).
+Also ran `tsc --noEmit` and `next build` (both clean). Test bookings
+created during verification were cancelled afterward; seed data was not
+otherwise altered (the refund/resubscribe was to a real seeded member,
+left in its new state as a natural consequence of exercising unmodified
+mutations, same as prior sessions' verification pattern).
+
+Closes known-issues.md's MEMBER-002 (plan.md item #20). Depends on the
+REFACTOR entry immediately below (`getCurrentMembership` extraction),
+without which this commit would have had to duplicate the eligibility
+query a third time. PLAN-001 (this member's active-membership subscribe
+check) and MEMBER-001 (kiosk lookup ambiguity) are unrelated and
+untouched. See `architecture-decisions.md`'s 2026-08-08 entry for the
+full "why two commits, why this folder, what's out of scope" reasoning.
+
+---
+
+## 2026-08-08 — REFACTOR(bookings): extract activeMembershipFor into a shared getCurrentMembership
+
+**Type:** REFACTOR
+**Defect:** n/a (see the FIX(members) entry directly above — MEMBER-002)
+**Behavior change:** no — `bookings.book`'s eligibility check is
+byte-for-byte identical before and after; only the query's location
+moved.
+**Files:** `src/features/memberships/current-membership.ts` (new —
+`getCurrentMembership(db, userId)`, the exact where-clause/orderBy
+copied verbatim from `bookings.ts`'s private `activeMembershipFor`),
+`src/server/routers/bookings.ts` (`activeMembershipFor` removed, its one
+call site now calls the shared function; `desc` dropped from the
+drizzle-orm import since it was only used by the removed function; file
+header comment updated)
+**Tests:** no automated test harness in this branch — verified by direct
+comparison: the moved function's where clause (`userId` match, `status
+= "active"`, `endDate >= today`) and `orderBy(desc(endDate))` tiebreak
+are unchanged, just relocated. `tsc --noEmit` clean.
+
+Sets up the shared resolver that `members.ts`'s `profile` switches to in
+the FIX committed right after this one (see above) — done as a separate
+REFACTOR-then-FIX pair per Rule 3, since this commit alone changes
+nothing about what any procedure returns.
+
+---
+
 ## 2026-08-08 — FIX(plans): reject subscribing while an active membership exists
 
 **Type:** FIX
