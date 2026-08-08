@@ -10,6 +10,7 @@ import {
   users,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { hoursUntil } from "@/lib/date";
 
 /**
  * Corporate (company-credit-pool-funded) class bookings — structurally
@@ -27,10 +28,7 @@ import { router, protectedProcedure, staffProcedure } from "../trpc";
  */
 export const CORPORATE_FREE_CANCELLATION_HOURS = 24;
 
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
+// Removed duplicate hoursUntil definition
 
 /**
  * The active company this user is linked to, if any. Uses a single-row

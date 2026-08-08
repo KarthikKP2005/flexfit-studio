@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { bookings, classes, memberships, checkins, users } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { hoursUntil } from "@/lib/date";
 
 /**
  * Personal (membership-credit-funded) class bookings: browse, book,
@@ -21,10 +22,7 @@ export const FREE_CANCELLATION_HOURS = 12;
 /** Plans with this many credits are treated as unlimited and never decrement. */
 export const UNLIMITED_CREDITS = 999;
 
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
+// Removed duplicate hoursUntil definition
 
 /**
  * The membership this user should book/pay against right now: status

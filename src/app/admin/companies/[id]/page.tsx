@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
+import { TopUpForm } from "./TopUpForm";
 
 /**
  * Single company's detail: credit pool + top-up, linked members +
@@ -24,7 +25,6 @@ export default function CompanyDetailsPage() {
   const params = useParams();
   const id = parseInt(params.id as string);
   const { data: company, isLoading, refetch } = trpc.adminCompanies.getById.useQuery({ id });
-  const [topUpAmount, setTopUpAmount] = useState("");
   const [showTopUpForm, setShowTopUpForm] = useState(false);
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
@@ -32,14 +32,6 @@ export default function CompanyDetailsPage() {
     { q: memberQuery },
     { enabled: memberQuery.length > 2 },
   );
-
-  const topUpMutation = trpc.adminCompanies.topUp.useMutation({
-    onSuccess: () => {
-      setTopUpAmount("");
-      setShowTopUpForm(false);
-      refetch();
-    },
-  });
 
   const activeMutation = trpc.adminCompanies.updateActive.useMutation({
     onSuccess: () => {
@@ -60,14 +52,6 @@ export default function CompanyDetailsPage() {
       refetch();
     },
   });
-
-  const handleTopUp = (e: React.FormEvent) => {
-    e.preventDefault();
-    const amount = parseInt(topUpAmount);
-    if (amount > 0) {
-      topUpMutation.mutate({ id, amount });
-    }
-  };
 
   const handleToggleActive = () => {
     if (company) {
@@ -123,40 +107,14 @@ export default function CompanyDetailsPage() {
       </div>
 
       {showTopUpForm && (
-        <div className="panel p-4">
-          <form onSubmit={handleTopUp} className="space-y-3">
-            <div>
-              <label className="block text-sm font-medium mb-2">Top Up Amount</label>
-              <input
-                type="number"
-                value={topUpAmount}
-                onChange={(e) => setTopUpAmount(e.target.value)}
-                className="w-full px-3 py-2 border rounded"
-                style={{ borderColor: "var(--border)" }}
-                placeholder="Number of credits"
-                disabled={topUpMutation.isPending}
-                min="1"
-              />
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="btn"
-                disabled={topUpMutation.isPending || !topUpAmount}
-              >
-                {topUpMutation.isPending ? "Processing..." : "Top Up"}
-              </button>
-              <button
-                type="button"
-                className="btn-outline"
-                onClick={() => setShowTopUpForm(false)}
-                disabled={topUpMutation.isPending}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
+        <TopUpForm 
+          companyId={id} 
+          onCancel={() => setShowTopUpForm(false)} 
+          onSuccess={() => {
+            setShowTopUpForm(false);
+            refetch();
+          }} 
+        />
       )}
 
       {showMemberForm && (

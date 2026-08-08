@@ -8,6 +8,8 @@ import {
   memberships,
 } from "@/db/schema";
 import { router, protectedProcedure } from "../trpc";
+import { hoursUntil } from "@/lib/date";
+import { validateRescheduleRules, FREE_RESCHEDULE_HOURS } from "@/services/rescheduleService";
 
 /**
  * Moving a personal booking from one class instance to another
@@ -25,16 +27,7 @@ import { router, protectedProcedure } from "../trpc";
  * done carefully with its own characterization tests).
  */
 
-/**
- * Members may reschedule free of charge up to this many hours before the
- * original class starts. This is more generous than cancellation policy.
- */
-export const FREE_RESCHEDULE_HOURS = 4;
-
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
+// Removed duplicate hoursUntil definition
 
 /**
  * The membership this user should reschedule against: status "active"
@@ -115,32 +108,6 @@ export const reschedulesRouter = router({
       const originalBooking = originalRow.booking;
       const originalClass = originalRow.cls;
 
-      // Verify ownership
-      if (originalBooking.userId !== ctx.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You cannot reschedule this booking.",
-        });
-      }
-
-      // Verify booking is still active
-      if (originalBooking.status !== "booked" && originalBooking.status !== "waitlisted") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This booking is no longer active.",
-        });
-      }
-
-      // Verify reschedule is allowed (within 4 hours of original class)
-      const hoursBeforeOriginal = hoursUntil(originalClass.startsAt);
-      if (hoursBeforeOriginal < FREE_RESCHEDULE_HOURS) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `You can only reschedule up to ${FREE_RESCHEDULE_HOURS} hours before the class starts.`,
-        });
-      }
-
-      // Get target class
       const targetClass = await ctx.db
         .select()
         .from(classes)
@@ -154,35 +121,19 @@ export const reschedulesRouter = router({
         });
       }
 
-      // Verify target class has the same name
-      if (targetClass.name !== originalClass.name) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "You can only reschedule to a class with the same name.",
-        });
-      }
+      const validation = validateRescheduleRules(
+        originalBooking,
+        originalClass,
+        targetClass,
+        ctx.user.id
+      );
 
-      // Verify target class is not the same class
-      if (targetClass.id === originalClass.id) {
+      if (!validation.valid) {
+        // We throw BAD_REQUEST or FORBIDDEN based on the reason string, 
+        // or just default to BAD_REQUEST
         throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "You are already booked for this class.",
-        });
-      }
-
-      // Verify target class hasn't started
-      if (hoursUntil(targetClass.startsAt) <= 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has already started.",
-        });
-      }
-
-      // Verify target class is not cancelled
-      if (targetClass.cancelled) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has been cancelled.",
+          code: validation.reason?.includes("FORBIDDEN") || validation.reason?.includes("cannot reschedule") ? "FORBIDDEN" : "BAD_REQUEST",
+          message: validation.reason,
         });
       }
 
@@ -337,32 +288,6 @@ export const reschedulesRouter = router({
       const originalBooking = originalRow.booking;
       const originalClass = originalRow.cls;
 
-      // Verify ownership
-      if (originalBooking.userId !== ctx.user.id) {
-        return { valid: false, reason: "You cannot reschedule this booking." };
-      }
-
-      // Verify booking is still active
-      if (
-        originalBooking.status !== "booked" &&
-        originalBooking.status !== "waitlisted"
-      ) {
-        return {
-          valid: false,
-          reason: "This booking is no longer active.",
-        };
-      }
-
-      // Verify reschedule is allowed (within 4 hours of original class)
-      const hoursBeforeOriginal = hoursUntil(originalClass.startsAt);
-      if (hoursBeforeOriginal < FREE_RESCHEDULE_HOURS) {
-        return {
-          valid: false,
-          reason: `You can only reschedule up to ${FREE_RESCHEDULE_HOURS} hours before the class starts.`,
-        };
-      }
-
-      // Get target class
       const targetClass = await ctx.db
         .select()
         .from(classes)
@@ -373,36 +298,15 @@ export const reschedulesRouter = router({
         return { valid: false, reason: "Target class not found." };
       }
 
-      // Verify target class has the same name
-      if (targetClass.name !== originalClass.name) {
-        return {
-          valid: false,
-          reason: "You can only reschedule to a class with the same name.",
-        };
-      }
+      const validation = validateRescheduleRules(
+        originalBooking,
+        originalClass,
+        targetClass,
+        ctx.user.id
+      );
 
-      // Verify target class is not the same class
-      if (targetClass.id === originalClass.id) {
-        return {
-          valid: false,
-          reason: "You are already booked for this class.",
-        };
-      }
-
-      // Verify target class hasn't started
-      if (hoursUntil(targetClass.startsAt) <= 0) {
-        return {
-          valid: false,
-          reason: "This class has already started.",
-        };
-      }
-
-      // Verify target class is not cancelled
-      if (targetClass.cancelled) {
-        return {
-          valid: false,
-          reason: "This class has been cancelled.",
-        };
+      if (!validation.valid) {
+        return validation;
       }
 
       // Check if user already has an active booking for this class
