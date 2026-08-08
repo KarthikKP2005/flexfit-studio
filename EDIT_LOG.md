@@ -10,6 +10,47 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — FIX(plans): reject subscribing while an active membership exists
+
+**Type:** FIX
+**Defect:** PLAN-001
+**Behavior change:** yes — `plans.subscribe` now throws `CONFLICT`
+("You already have an active membership. Wait for it to end before
+subscribing again.") if the caller already has a `status: "active"`
+membership, instead of silently inserting a second one. `plans.list`,
+`create`, and `setActive` are unchanged.
+**Files:** `src/server/routers/plans.ts` (`subscribe` gained an
+existence check before the insert; file and procedure header comments
+updated), `src/app/plans/page.tsx` (comment only — it already surfaces
+`subscribe.error.message` in the UI, so no JSX/logic change was needed
+for the new error to reach the member)
+**Policy:** Reject was chosen explicitly with the user after plan.md
+flagged this as a genuine ambiguity with no recommended default (unlike
+COMPANY-001) — full reasoning in `architecture-decisions.md`'s
+2026-08-08 entry.
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server:
+1. Logged in as a seeded member with an active membership (`rahul.k@example.com`)
+   → `plans.subscribe` → `CONFLICT`, new message.
+2. Refunded that member's payment as admin (`payments.refund`,
+   unmodified) → their membership flipped to `status: "cancelled"`
+   (existing, unmodified behavior).
+3. `plans.subscribe` → succeeded, new `status: "active"` membership
+   created.
+4. `plans.subscribe` again immediately → `CONFLICT` again, confirming
+   the check applies to the freshly-created membership too.
+5. `/plans` still renders (200) with the fix in place.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's PLAN-001 (plan.md item #19/#4 depending on
+numbering — "Users can create multiple simultaneous active
+memberships"). PLAN-002 (non-atomic membership+payment insert) and
+PLAN-003 (payment reference collisions) are unrelated and untouched.
+Renewal/extension is explicitly out of scope for this fix — see the
+"Named tradeoff" paragraph in `architecture-decisions.md`.
+
+---
+
 ## 2026-08-08 — FIX(classes): stop leaking the class roster to unauthenticated callers
 
 **Type:** FIX

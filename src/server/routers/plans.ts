@@ -1,14 +1,17 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { membershipPlans, memberships, payments } from "@/db/schema";
 import { router, publicProcedure, protectedProcedure, adminProcedure } from "../trpc";
 
 /**
  * Membership plan catalog and self-serve subscription. Not responsible
  * for: payment processing (subscribe just records a "paid" row instantly
- * — there's no real gateway) or enforcing one active membership per user
- * (see PLAN-001 in known-issues.md).
+ * — there's no real gateway). `subscribe` rejects a second subscription
+ * while one `status: "active"` membership already exists (PLAN-001,
+ * fixed) — it does not support renewal/extension; a member must wait for
+ * their current membership to end (or have staff intervene) before
+ * subscribing again.
  */
 
 function addDays(dateIso: string, days: number): string {
@@ -31,8 +34,6 @@ export const plansRouter = router({
    * "paid" payment row — there is no payment gateway, this is instant.
    *
    * Behavior notes (see known-issues.md, not fixed here):
-   * - PLAN-001: does not check for an existing active membership first;
-   *   a user can end up with multiple simultaneous active memberships.
    * - PLAN-002: the membership insert and payment insert are two
    *   separate statements, not wrapped in a transaction.
    * - PLAN-003: payment `reference` is `PAY-${Date.now()}`, which can
@@ -40,6 +41,10 @@ export const plansRouter = router({
    *
    * @throws NOT_FOUND if planId doesn't exist
    * @throws BAD_REQUEST if the plan exists but is inactive
+   * @throws CONFLICT if the caller already has an active membership
+   *   (PLAN-001, fixed — subscribe no longer allows a second simultaneous
+   *   active membership; renewal/extension is not supported by this
+   *   procedure, see the file header comment)
    */
   subscribe: protectedProcedure
     .input(
@@ -62,6 +67,25 @@ export const plansRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "This plan is no longer available.",
+        });
+      }
+
+      const existingActive = await ctx.db
+        .select()
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.userId, ctx.user.id),
+            eq(memberships.status, "active"),
+          ),
+        )
+        .get();
+
+      if (existingActive) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message:
+            "You already have an active membership. Wait for it to end before subscribing again.",
         });
       }
 

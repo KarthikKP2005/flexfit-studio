@@ -232,31 +232,53 @@ turn out to be unwanted.
 ### PLAN-001 — `subscribe` allows unlimited simultaneous active memberships
 
 **Severity:** Medium (no data corruption, but downstream code that
-assumes "one active membership per user" — see PLAN-005-style disagreement
-risk below — becomes ambiguous)
-**Status:** Confirmed from source (also flagged in plan.md, item #19)
+assumes "one active membership per user" becomes ambiguous — e.g.
+MEMBER-002's "latest endDate wins" resolution and `bookings.ts`'s
+separate active-membership lookup can each pick a different row)
+**Status:** Fixed on branch `fix/plan-001-reject-duplicate-subscription`
 **Area:** Membership
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** Inserts a new `status: "active"` membership row on
-every call, with no check for an existing active membership for that
-user. Calling `subscribe` twice for the same user creates two rows both
-with `status: "active"`.
+**Original behavior:** Inserted a new `status: "active"` membership row
+on every call, with no check for an existing active membership for that
+user. Calling `subscribe` twice for the same user created two rows both
+with `status: "active"`, and two separate `payments` rows (double
+charge).
 
-**Expected invariant:** undefined by the current code — plan.md lists
-several plausible policies (reject/extend/queue/stack-with-explicit-charge)
-and explicitly says the choice "should not be guessed during refactoring."
+**Policy decision (Rule 8 — this was an explicit choice, not a silent
+guess):** plan.md lists four plausible policies (reject / extend / queue
+/ stack-with-explicit-charge) and says the choice "should not be guessed
+during refactoring." Asked the user directly; **Reject** was chosen and
+confirmed before any code was written. Reasoning recorded in
+`architecture-decisions.md`'s entry for this fix — in short: it's the
+only option that's a pure subtraction of the bad behavior (no new
+status values, no credit-combination rules to invent), it matches the
+precedent set by COMPANY-001's fix ("one X per user, reject a second"),
+and it actually closes the defect rather than relabeling it (unlike
+Stack).
 
-**Why not fixed here:** Needs an explicit product decision before a FIX
-commit, not just a code change — see Rule 8 (never guess at an ambiguous
-business rule).
+**Fix:** `subscribe` now looks up the caller's existing `status:
+"active"` membership before inserting a new one; if one exists, throws
+`CONFLICT` ("You already have an active membership. Wait for it to end
+before subscribing again.") before either the membership or payment
+insert happens. `plans.list`, `create`, and `setActive` are unchanged.
 
-**Reproduction:** `src/server/routers/plans.test.ts`'s
-`plans.subscribe > PLAN-001: subscribing twice creates two simultaneous
-active memberships...`
+**Not in scope for this fix:** renewal/extension is not supported — a
+member with an active membership has no self-serve path to subscribe
+again before it ends or is cancelled by staff (e.g. via
+`payments.refund`). This is a known, deliberate scope boundary, not an
+oversight — extending `subscribe` to support renewal would require its
+own credit-combination policy decision. PLAN-002 (non-atomic
+membership+payment insert) and PLAN-003 (payment reference collisions)
+are unrelated and untouched.
 
-**What "fixed" would look like:** depends on the chosen policy — not
-specified here.
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md) against the dev server: a member with an
+existing active membership gets `CONFLICT` on a second `subscribe` call;
+after that membership was cancelled (via `payments.refund`, unmodified),
+`subscribe` succeeded normally; immediately subscribing again after that
+success was correctly rejected too. `tsc --noEmit` and `next build` both
+clean.
 
 ---
 
