@@ -10,6 +10,32 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — REFACTOR(bookings): extract activeMembershipFor into a shared getCurrentMembership
+
+**Type:** REFACTOR
+**Defect:** n/a (see FIX(members) entry directly below — MEMBER-002)
+**Behavior change:** no — `bookings.book`'s eligibility check is
+byte-for-byte identical before and after; only the query's location
+moved.
+**Files:** `src/features/memberships/current-membership.ts` (new —
+`getCurrentMembership(db, userId)`, the exact where-clause/orderBy
+copied verbatim from `bookings.ts`'s private `activeMembershipFor`),
+`src/server/routers/bookings.ts` (`activeMembershipFor` removed, its one
+call site now calls the shared function; `desc` dropped from the
+drizzle-orm import since it was only used by the removed function; file
+header comment updated)
+**Tests:** no automated test harness in this branch — verified by direct
+comparison: the moved function's where clause (`userId` match, `status
+= "active"`, `endDate >= today`) and `orderBy(desc(endDate))` tiebreak
+are unchanged, just relocated. `tsc --noEmit` clean.
+
+Sets up the shared resolver that `members.ts`'s `profile` switches to in
+the next commit (the actual MEMBER-002 fix) — done as a separate
+REFACTOR-then-FIX pair per Rule 3, since this commit alone changes
+nothing about what any procedure returns.
+
+---
+
 ## 2026-08-08 — FIX(plans): reject subscribing while an active membership exists
 
 **Type:** FIX

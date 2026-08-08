@@ -331,3 +331,58 @@ left functionally identical (its `.get()` call and `companies.active`
 filter are unchanged) — only its comment was updated, since the
 ambiguity it previously documented (arbitrary pick among multiple
 active companies) can no longer occur once the constraint is live.
+
+---
+
+## 2026-08-08 — `src/features/memberships/` folder + `getCurrentMembership`, shared between bookings.ts and members.ts (MEMBER-002)
+
+**Decision:** created `src/features/memberships/current-membership.ts`
+exporting `getCurrentMembership(db, userId)`, alongside the existing
+`src/features/bookings/`. `bookings.ts`'s private `activeMembershipFor`
+was moved there verbatim (Commit 1, REFACTOR, no behavior change), then
+`members.ts`'s `profile` was switched to call the same function instead
+of its own looser query (Commit 2, FIX — see the entry below and
+EDIT_LOG.md for the split reasoning).
+
+**Why a new top-level feature folder instead of putting this in
+`src/features/bookings/`:** a membership's "is this the one the caller
+should book/pay against right now" resolution is used by both
+`bookings.ts` (booking eligibility) and `members.ts` (profile/dashboard
+display) — it's a membership concern that bookings.ts happens to need,
+not a bookings concern. Nesting it under `src/features/bookings/` would
+make `members.ts` import from a folder named after a different domain,
+which is exactly the kind of misplaced-responsibility Rule 7 warns
+against. A sibling `src/features/memberships/` folder is the direct
+parallel to the existing `src/features/bookings/` and gives future
+membership-resolution logic (e.g. if PLAN-001's renewal gap or the
+startDate-check gap from plan.md item #21 get picked up later) an
+obvious home.
+
+**Why split into two commits (REFACTOR then FIX), not one:** the Prime
+Directive and Rule 3 both say refactor and fix must never be hidden
+inside the same change. Moving `bookings.ts`'s query verbatim into a
+shared module is a pure extraction — `bookings.book`'s behavior is
+byte-for-byte identical before and after (same where clause, same
+orderBy, same tiebreak). Changing `members.ts`'s `profile` to use that
+same resolver *is* a real behavior change (a member whose latest-endDate
+membership is cancelled will now see their actual active one instead, or
+nothing if they have none) — that's MEMBER-002's actual fix and needs
+its own commit, defect reference, and before/after documentation per
+Rule 3's FIX row.
+
+**Not in scope:** `reschedules.ts` has a third, near-identical copy of
+this same query — but it's dead code (declared, never called anywhere in
+that file, already noted as such by its own comment and confirmed by
+grep). Left untouched; resurrecting or removing dead code isn't part of
+this defect and would be its own separate, unrequested change.
+`getCurrentMembership` does not check `startDate` (plan.md item #21) —
+carried forward unchanged from `bookings.ts`'s pre-extraction behavior,
+not fixed here, and not yet its own numbered entry in known-issues.md.
+Full consistency across all six call sites plan.md's MEMBER-002 writeup
+names (Profile, Dashboard, Booking, Kiosk, Plan subscription, Admin
+member details) is not attempted here — Dashboard and Profile both
+render `members.profile` directly so they're covered by this fix
+automatically, and Booking already used the correct definition before
+this change; Kiosk's and Admin's membership-history display are a
+different shape of problem (they show a full list, not a single "current"
+pick) and are already flagged separately in their own file comments.
