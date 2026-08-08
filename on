@@ -1,0 +1,134 @@
+[1mdiff --git a/EDIT_LOG.md b/EDIT_LOG.md[m
+[1mindex ec1e8d5..5a2f379 100644[m
+[1m--- a/EDIT_LOG.md[m
+[1m+++ b/EDIT_LOG.md[m
+[36m@@ -10,6 +10,70 @@[m [mdiff before it landed; nothing here was auto-applied.[m
+ [m
+ ---[m
+ [m
+[32m+[m[32m## 2026-08-07 — FIX(members): add admin member-management UI[m
+[32m+[m
+[32m+[m[32m**Type:** FIX[m
+[32m+[m[32m**Defect:** MEMBER-005[m
+[32m+[m[32m**Behavior change:** yes — a new route (`/admin/members`) now exists and[m
+[32m+[m[32mis reachable from a "Members" button on `/admin`. No existing tRPC[m
+[32m+[m[32mprocedure's input, output, error code, or error message changed;[m
+[32m+[m[32m`members.search`, `members.byId`, `members.setActive`, and[m
+[32m+[m[32m`members.setRole` were called exactly as they already existed, not[m
+[32m+[m[32mmodified.[m
+[32m+[m[32m**Files:** `src/app/admin/members/page.tsx` (new), `src/app/admin/page.tsx`[m
+[32m+[m[32m(new "Members" link on the existing button row, same pattern as[m
+[32m+[m[32mCompanies/Reports/Announcements)[m
+[32m+[m[32m**Tests:** no automated test harness in this branch — verified manually[m
+[32m+[m[32magainst the running dev server (schema pushed and seeded first, since[m
+[32m+[m[32m`flexfit.db` was a fresh 0-byte file with no tables):[m
+[32m+[m[32m1. `auth.login` as `admin@flexfit.test` → session cookie.[m
+[32m+[m[32m2. `members.search` with `q=a` → returns matching users across all[m
+[32m+[m[32m   roles (unchanged existing behavior — not restricted to `role:[m
+[32m+[m[32m   "member"`).[m
+[32m+[m[32m3. `members.byId` for a real member id → full detail incl. membership[m
+[32m+[m[32m   history, `passwordHash` correctly stripped.[m
+[32m+[m[32m4. `members.setActive` with `active: false` on a real member id → row[m
+[32m+[m[32m   updated, `active: false` in the response.[m
+[32m+[m[32m5. `members.setRole` with `role: "trainer"` on the same id → row[m
+[32m+[m[32m   updated, `role: "trainer"` in the response.[m
+[32m+[m[32m6. `members.setActive` with a nonexistent id (`99999`) → confirmed the[m
+[32m+[m[32m   response is `null`/`undefined` (MEMBER-003, unchanged) rather than a[m
+[32m+[m[32m   thrown error — the new page's mutation handlers check for this and[m
+[32m+[m[32m   show an inline error instead of assuming success, without touching[m
+[32m+[m[32m   MEMBER-003 itself.[m
+[32m+[m[32m7. Restored the test member's original `role`/`active` values afterward[m
+[32m+[m[32m   so seed data is unpolluted.[m
+[32m+[m[32m8. Fetched `/admin/members` directly → 200, renders.[m
+[32m+[m[32mAlso ran `tsc --noEmit` and `pnpm build`/`next build` (both clean,[m
+[32m+[m[32m`/admin/members` compiles as a static route).[m
+[32m+[m
+[32m+[m[32mCloses known-issues.md's MEMBER-005. MEMBER-001 (arbitrary-match lookup)[m
+[32m+[m[32mand MEMBER-002 (latest-endDate-wins membership resolution) are unrelated[m
+[32m+[m[32mprocedures and untouched. `search`'s own behavior (matches any role, not[m
+[32m+[m[32mjust "member"; empty query returns everyone up to the default limit) is[m
+[32m+[m[32msurfaced as-is, not restricted by this page.[m
+[32m+[m
+[32m+[m[32m---[m
+[32m+[m
+[32m+[m[32m## 2026-08-07 — DOCUMENT(members): log MEMBER-005 (no admin member-management UI)[m
+[32m+[m
+[32m+[m[32m**Type:** DOCUMENT[m
+[32m+[m[32m**Defect:** MEMBER-005[m
+[32m+[m[32m**Behavior change:** no — nothing in the code changed for this entry.[m
+[32m+[m[32m**Files:** `documents/known-issues.md`[m
+[32m+[m[32m**Tests:** n/a[m
+[32m+[m
+[32m+[m[32mConfirmed by grep that `members.byId`, `members.setActive`, and[m
+[32m+[m[32m`members.setRole` have zero callers under `src/app/**`, and[m
+[32m+[m[32m`members.search`'s only caller is the company-linking member-picker in[m
+[32m+[m[32m`admin/companies/[id]/page.tsx` (a different purpose — linking, not[m
+[32m+[m[32mmanaging). Logged as **MEMBER-005** so the follow-up FIX (a new[m
+[32m+[m[32m`/admin/members` page) has a defect id to reference, per Rule 2's[m
+[32m+[m[32mchecklist and the same DOCUMENT-then-FIX pattern used for[m
+[32m+[m[32mAUTH-002/CORP-005/MEMBER-004.[m
+[32m+[m
+[32m+[m[32m---[m
+[32m+[m
+ ## 2026-08-07 — FIX(reschedule-modal): stop the infinite refetch loop in the class picker[m
+ [m
+ **Type:** FIX[m
+[1mdiff --git a/documents/known-issues.md b/documents/known-issues.md[m
+[1mindex 48b2a81..9e512b7 100644[m
+[1m--- a/documents/known-issues.md[m
+[1m+++ b/documents/known-issues.md[m
+[36m@@ -495,6 +495,53 @@[m [mit always was.[m
+ [m
+ ---[m
+ [m
+[32m+[m[32m### MEMBER-005 — No admin member-management UI (search/byId/setActive/setRole all backend-only)[m
+[32m+[m
+[32m+[m[32m**Severity:** Medium (feature gap, not a misbehaving code path — an admin[m
+[32m+[m[32mcould not look up a member, view their detail, deactivate them, or[m
+[32m+[m[32mchange their role from anywhere in the app)[m
+[32m+[m[32m**Status:** Fixed on branch `admin-members-ui`[m
+[32m+[m[32m**Area:** Members / Admin UI[m
+[32m+[m[32m**File:** `src/app/admin/members/page.tsx` (new), `src/app/admin/page.tsx`[m
+[32m+[m
+[32m+[m[32m**Original behavior:** all four procedures existed and worked correctly.[m
+[32m+[m[32m`search` was only ever called from the member-picker embedded in[m
+[32m+[m[32m`admin/companies/[id]/page.tsx` (there to link a member to a company,[m
+[32m+[m[32mnot to manage members generally). `byId`, `setActive`, and `setRole` had[m
+[32m+[m[32mzero callers anywhere under `src/app/**` — confirmed by grepping for[m
+[32m+[m[32m`members.byId`, `members.setActive`, `members.setRole` across the[m
+[32m+[m[32mfrontend. An admin could not look up a member, view their membership[m
+[32m+[m[32mhistory, deactivate an account, or change a role from anywhere in the[m
+[32m+[m[32mrunning app.[m
+[32m+[m
+[32m+[m[32m**Fix:** added `/admin/members`, a new admin-only page: a search bar[m
+[32m+[m[32mcalling the *unmodified* `members.search`, a result list, and a detail[m
+[32m+[m[32mpanel (`members.byId`) for the selected member showing membership[m
+[32m+[m[32mhistory plus activate/deactivate and role-change controls wired to the[m
+[32m+[m[32m*unmodified* `members.setActive`/`setRole`. None of the four procedures'[m
+[32m+[m[32minput schemas, output shapes, or error codes changed. Linked from a new[m
+[32m+[m[32m"Members" button on `/admin`'s existing button row, alongside[m
+[32m+[m[32mCompanies/Reports/Announcements (same pattern — reachable only from the[m
+[32m+[m[32madmin dashboard, not from `NavBar`).[m
+[32m+[m
+[32m+[m[32m**MEMBER-003 handled explicitly, not silently:** `setActive`/`setRole`[m
+[32m+[m[32mreturn `undefined` instead of throwing on a bad id. Verified directly[m
+[32m+[m[32magainst the running dev server that this is still true (id `99999`[m
+[32m+[m[32mreturns `null`/`undefined`, no error). The new page's mutation handlers[m
+[32m+[m[32mcheck the returned row before treating the change as applied and show an[m
+[32m+[m[32minline error if it comes back empty — a defensive check in the new UI[m
+[32m+[m[32mcode, not a fix to MEMBER-003 itself, which is untouched.[m
+[32m+[m
+[32m+[m[32m**Not in scope for this fix:** MEMBER-001 (arbitrary-match lookup) and[m
+[32m+[m[32mMEMBER-002 (latest-endDate-wins membership resolution) are unrelated[m
+[32m+[m[32mprocedures and untouched. `search`'s own behavior (matches any role, not[m
+[32m+[m[32mjust "member"; empty query returns everyone up to the default limit) is[m
+[32m+[m[32msurfaced as-is — the new page doesn't restrict results to `role:[m
+[32m+[m[32m"member"` since the backend doesn't either, and admins reasonably need[m
+[32m+[m[32mto find trainers/other admins here too (e.g. to demote one).[m
+[32m+[m
+[32m+[m[32m---[m
+[32m+[m
+ ### TRAINER-001 — `setAvailability` accepts any string as a time, with no range validation[m
+ [m
+ **Severity:** Low[m
+[1mdiff --git a/src/app/admin/page.tsx b/src/app/admin/page.tsx[

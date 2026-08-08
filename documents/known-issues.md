@@ -497,6 +497,53 @@ it always was.
 
 ---
 
+### MEMBER-005 — No admin member-management UI (search/byId/setActive/setRole all backend-only)
+
+**Severity:** Medium (feature gap, not a misbehaving code path — an admin
+could not look up a member, view their detail, deactivate them, or
+change their role from anywhere in the app)
+**Status:** Fixed on branch `admin-members-ui`
+**Area:** Members / Admin UI
+**File:** `src/app/admin/members/page.tsx` (new), `src/app/admin/page.tsx`
+
+**Original behavior:** all four procedures existed and worked correctly.
+`search` was only ever called from the member-picker embedded in
+`admin/companies/[id]/page.tsx` (there to link a member to a company,
+not to manage members generally). `byId`, `setActive`, and `setRole` had
+zero callers anywhere under `src/app/**` — confirmed by grepping for
+`members.byId`, `members.setActive`, `members.setRole` across the
+frontend. An admin could not look up a member, view their membership
+history, deactivate an account, or change a role from anywhere in the
+running app.
+
+**Fix:** added `/admin/members`, a new admin-only page: a search bar
+calling the *unmodified* `members.search`, a result list, and a detail
+panel (`members.byId`) for the selected member showing membership
+history plus activate/deactivate and role-change controls wired to the
+*unmodified* `members.setActive`/`setRole`. None of the four procedures'
+input schemas, output shapes, or error codes changed. Linked from a new
+"Members" button on `/admin`'s existing button row, alongside
+Companies/Reports/Announcements (same pattern — reachable only from the
+admin dashboard, not from `NavBar`).
+
+**MEMBER-003 handled explicitly, not silently:** `setActive`/`setRole`
+return `undefined` instead of throwing on a bad id. Verified directly
+against the running dev server that this is still true (id `99999`
+returns `null`/`undefined`, no error). The new page's mutation handlers
+check the returned row before treating the change as applied and show an
+inline error if it comes back empty — a defensive check in the new UI
+code, not a fix to MEMBER-003 itself, which is untouched.
+
+**Not in scope for this fix:** MEMBER-001 (arbitrary-match lookup) and
+MEMBER-002 (latest-endDate-wins membership resolution) are unrelated
+procedures and untouched. `search`'s own behavior (matches any role, not
+just "member"; empty query returns everyone up to the default limit) is
+surfaced as-is — the new page doesn't restrict results to `role:
+"member"` since the backend doesn't either, and admins reasonably need
+to find trainers/other admins here too (e.g. to demote one).
+
+---
+
 ### TRAINER-001 — `setAvailability` accepts any string as a time, with no range validation
 
 **Severity:** Low
