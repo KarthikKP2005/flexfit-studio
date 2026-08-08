@@ -81,17 +81,17 @@ export default function LoginPage() {
         </Link>
       </p>
 
-      {/* Demo credentials are hardcoded here unconditionally — fine for
-          this demo repo, but would need gating behind an env flag before
-          any production deployment. See plan.md item #51. */}
-      <div className="panel p-4 text-sm muted">
-        <p className="mb-2 font-medium" style={{ color: "var(--text)" }}>
-          Demo accounts
-        </p>
-        <p>admin@flexfit.test / admin123</p>
-        <p>arjun@flexfit.test / trainer123</p>
-        <p>rahul.k@example.com / member123</p>
-      </div>
+      {/* Demo credentials are gated behind an env check to prevent production exposure. */}
+      {process.env.NODE_ENV === "development" && (
+        <div className="panel p-4 text-sm muted mt-4">
+          <p className="mb-2 font-medium" style={{ color: "var(--text)" }}>
+            Demo accounts (Dev only)
+          </p>
+          <p>admin@flexfit.test / admin123</p>
+          <p>arjun@flexfit.test / trainer123</p>
+          <p>rahul.k@example.com / member123</p>
+        </div>
+      )}
     </div>
   );
 }

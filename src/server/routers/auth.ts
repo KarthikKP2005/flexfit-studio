@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { users, sessions } from "@/db/schema";
@@ -11,6 +11,8 @@ import {
   protectedProcedure,
   SESSION_COOKIE,
 } from "../trpc";
+import { rateLimit } from "@/lib/ratelimit";
+
 
 /**
  * Sign-up, sign-in, sign-out, and "who am I" for all roles. Not
@@ -47,6 +49,18 @@ export const authRouter = router({
   login: publicProcedure
     .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
+      // 1. Rate limit login attempts (max 5 per minute per email)
+      const allowed = await rateLimit(`login:${input.email.toLowerCase().trim()}`, 5, 60);
+      if (!allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many login attempts. Please try again later.",
+        });
+      }
+
+      // 2. Clean up expired sessions (Security Issue 3)
+      await ctx.db.delete(sessions).where(sql`${sessions.expiresAt} < ${new Date().toISOString()}`);
+
       const user = await ctx.db
         .select()
         .from(users)
@@ -80,6 +94,7 @@ export const authRouter = router({
       const store = await cookies();
       store.set(SESSION_COOKIE, token, {
         httpOnly: true,
+        secure: process.env.NODE_ENV === "production", // Security Issue 2
         sameSite: "lax",
         path: "/",
         expires: expiresAt,
@@ -105,6 +120,15 @@ export const authRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // 1. Rate limit registration (max 3 per hour per IP/Email is ideal, here using email)
+      const allowed = await rateLimit(`register:${input.email.toLowerCase().trim()}`, 3, 3600);
+      if (!allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many registration attempts. Please try again later.",
+        });
+      }
+
       const email = input.email.toLowerCase().trim();
       const existing = await ctx.db
         .select()
