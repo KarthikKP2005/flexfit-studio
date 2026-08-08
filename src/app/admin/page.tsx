@@ -42,6 +42,9 @@ export default function AdminPage() {
           <Link href="/admin/members" className="btn btn-sm btn-primary">
             Manage Staff & Members
           </Link>
+          <Link href="/admin/classes" className="btn btn-sm btn-primary">
+            Manage Classes
+          </Link>
           <Link href="/admin/companies" className="btn btn-sm">
             Corporate Memberships
           </Link>
