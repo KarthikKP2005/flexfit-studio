@@ -103,9 +103,22 @@ export default function SignupPage() {
         </div>
 
         {error && (
-          <p className="text-sm" style={{ color: "#f87171" }}>
-            {error.message}
-          </p>
+          <div className="rounded-md bg-red-500/10 p-3 border border-red-500/20">
+            <p className="text-sm text-red-500">
+              {(() => {
+                let msg = error.message;
+                try {
+                  if (msg.startsWith('[')) {
+                    const parsed = JSON.parse(msg);
+                    if (Array.isArray(parsed) && parsed[0]?.message) {
+                      msg = parsed.map(e => e.message).join(', ');
+                    }
+                  }
+                } catch (e) {}
+                return msg;
+              })()}
+            </p>
+          </div>
         )}
 
         <button
