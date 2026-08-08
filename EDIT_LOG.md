@@ -10,6 +10,45 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — FIX(classes): stop leaking the class roster to unauthenticated callers
+
+**Type:** FIX
+**Defect:** CLASS-001
+**Behavior change:** yes — `classes.byId` (renamed `classes.publicById`,
+still `publicProcedure`) no longer returns a `roster` field at all; it
+now returns the class row only. Previously anyone, signed in or not,
+could call it and get every attendee's name and email for that class.
+Confirmed `byId` had no frontend caller, so no UI is affected. Attendee
+info is unaffected for its legitimate (staff) consumers —
+`bookings.rosterFor` and `corporateBookings.rosterFor` (both
+`staffProcedure`, both pre-existing, both unchanged) still return the
+same data they always did.
+**Files:** `src/server/routers/classes.ts` (`byId` → `publicById`,
+roster query removed entirely; file header and the procedure's doc
+comment updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server:
+1. Called `classes.publicById` with no session cookie at all — response
+   contained only class fields, no `roster` key anywhere.
+2. Confirmed the old `classes.byId` path no longer resolves
+   (`NOT_FOUND`, "No procedure found on path").
+3. Confirmed `bookings.rosterFor` still returns full attendee
+   names/emails for a staff (admin) caller, unchanged — and still
+   correctly rejects an unauthenticated caller with
+   `UNAUTHORIZED`/"Sign in required."
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+No new `classes.rosterFor` was added — the staff-only roster capability
+plan.md asks to "keep" already existed in `bookings.rosterFor`/
+`corporateBookings.rosterFor`, in the exact shape needed; duplicating it
+a third time would have worked against the brief's own "pull repeated
+logic into one place instead of four."
+
+Closes plan.md's member-flow item #15 ("classes.byId publicly exposes
+the roster") and known-issues.md's CLASS-001.
+
+---
+
 ## 2026-08-08 — FIX(classes): clean up all bookings, credits, and notifications when a class is cancelled
 
 **Type:** FIX

@@ -550,24 +550,39 @@ cross-cutting change (also touches `bookings.ts`/`reschedules.ts`'s
 
 **Severity:** High (unauthenticated info exposure — anyone who can guess
 or enumerate a class id gets every attendee's name and email)
-**Status:** Confirmed from source (also flagged in plan.md, item #10)
+**Status:** Fixed on branch `class-roster-privacy-member` (also flagged
+in plan.md, item #10, and plan.md's member-flow item #15)
 **Area:** Classes / Security
-**File:** `src/server/routers/classes.ts` — `byId`
+**File:** `src/server/routers/classes.ts` — `publicById` (renamed from
+`byId`)
 
-**Current behavior:** `byId` is `publicProcedure`, and its response
-includes `roster: [{bookingId, status, memberName, memberEmail}]` for
-every booking on that class — no sign-in required.
+**Original behavior:** `byId` was `publicProcedure`, and its response
+included `roster: [{bookingId, status, memberName, memberEmail}]` for
+every booking on that class — no sign-in required. Confirmed `byId` was
+never called from any frontend page, so this was a pure backend
+liability with zero legitimate current consumer.
 
-**Reproduction:** `src/server/routers/classes.test.ts`'s
-`classes.byId > CLASS-001: an anonymous (unauthenticated) caller
-receives the full roster...`
+**Fix — exactly plan.md's required design, verified against what already
+exists rather than duplicated:** `byId` renamed to `publicById` (matching
+plan.md's own naming), still `publicProcedure`, now returns the class
+row only — no roster field at all. No new `classes.rosterFor` was
+added: `bookings.rosterFor` (already `staffProcedure`) already returns
+the identical `bookingId`/`status`/`memberName`/`memberEmail` shape for
+personal bookings, and `corporateBookings.rosterFor` already covers the
+corporate side — `byId`'s old roster only ever queried personal
+`bookings` anyway, so nothing is lost. Adding a third near-duplicate
+roster query would have been exactly the "repeated logic in four places"
+the brief asks to avoid.
 
-**Why not fixed here / what "fixed" would look like:** per plan.md — split
-into `classes.publicById` (class details only, still public) and keep
-`rosterFor` (already exists, `staffProcedure`) as the only source of
-attendee info. Changes `byId`'s output shape, so it's a FIX with its own
-defect-specific test, treated as a security correction rather than a
-cosmetic refactor.
+**Verified live:** manual E2E against the running dev server (no
+automated test harness exists on this branch). Called `classes.
+publicById` with no session cookie at all — confirmed the response
+contains only class fields, no `roster` key anywhere. Confirmed the old
+`classes.byId` path no longer resolves (`NOT_FOUND`, "No procedure
+found on path"). Confirmed `bookings.rosterFor` still returns full
+attendee names/emails for staff (admin cookie) — unchanged — and still
+correctly rejects an unauthenticated caller with `UNAUTHORIZED`/"Sign in
+required." `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 

@@ -7,7 +7,11 @@ import { cancelClass } from "@/features/bookings/class-cancellation-service";
 
 /**
  * Class scheduling: public browse/detail, staff create/update, admin
- * cancel. `cancel` is a thin wrapper around
+ * cancel. `list`/`publicById` are public and deliberately roster-free —
+ * `publicById` used to leak every attendee's name and email to anyone,
+ * signed in or not (CLASS-001, fixed); attendee info now only ever comes
+ * from the existing staff-gated `bookings.rosterFor`/
+ * `corporateBookings.rosterFor`. `cancel` is a thin wrapper around
  * features/bookings/class-cancellation-service.ts's `cancelClass`
  * (CLASS-004, fixed) — all the actual cleanup logic (cancelling
  * personal/corporate bookings, refunding credits, notifying members)
@@ -73,15 +77,24 @@ export const classesRouter = router({
     }),
 
   /**
-   * Class detail plus its roster.
-   *
-   * Behavior note (see CLASS-001 in known-issues.md — not fixed here):
-   * this is publicProcedure, but the roster it returns includes every
-   * attendee's name and email, with no sign-in required.
+   * Class detail — CLASS-001, fixed: no roster here anymore. This was
+   * `byId` and included every attendee's name and email in its response
+   * despite being `publicProcedure` (no sign-in required) — an
+   * unauthenticated info-exposure bug, not a cosmetic one. Renamed to
+   * `publicById` (matching plan.md's own naming for the split) to make
+   * "this is the public, roster-free view" explicit from the router's
+   * procedure list. Attendee info stays where it already correctly
+   * lives, staff-gated: `bookings.rosterFor` for personal bookings,
+   * `corporateBookings.rosterFor` for corporate ones — both already
+   * `staffProcedure`, both already returning the same
+   * bookingId/status/memberName/memberEmail shape this used to leak
+   * publicly. No new `classes.rosterFor` was added — that would just be
+   * a third copy of logic that already exists in exactly the shape
+   * needed, in two places.
    *
    * @throws NOT_FOUND if the class doesn't exist
    */
-  byId: publicProcedure
+  publicById: publicProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
       const cls = await ctx.db
@@ -94,18 +107,7 @@ export const classesRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
-      const roster = await ctx.db
-        .select({
-          bookingId: bookings.id,
-          status: bookings.status,
-          memberName: users.name,
-          memberEmail: users.email,
-        })
-        .from(bookings)
-        .innerJoin(users, eq(bookings.userId, users.id))
-        .where(eq(bookings.classId, cls.id));
-
-      return { ...cls, roster };
+      return cls;
     }),
 
   /**
