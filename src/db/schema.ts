@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Drizzle table definitions for the whole app — the single source of
@@ -84,7 +84,9 @@ export const memberships = sqliteTable("memberships", {
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [
+  index("memberships_user_id_idx").on(table.userId)
+]);
 
 /**
  * A single scheduled class instance, not a recurring series — two
@@ -140,7 +142,9 @@ export const bookings = sqliteTable("bookings", {
 }, (table) => [
   // PERF-01: Index on classId to optimize the O(N) table scan in `classes.list`.
   // Converts the `spotsLeft` correlated subquery into an instant O(1) lookup.
-  index("bookings_class_id_idx").on(table.classId)
+  index("bookings_class_id_idx").on(table.classId),
+  index("bookings_user_id_idx").on(table.userId),
+  index("bookings_status_idx").on(table.status)
 ]);
 
 /**
@@ -162,7 +166,9 @@ export const checkins = sqliteTable("checkins", {
   source: text("source", { enum: ["front_desk", "kiosk", "app"] })
     .notNull()
     .default("front_desk"),
-});
+}, (table) => [
+  uniqueIndex("checkins_booking_id_idx").on(table.bookingId)
+]);
 
 /**
  * One row per payment event. `plans.ts`'s subscribe mutation inserts one
@@ -207,7 +213,9 @@ export const notifications = sqliteTable("notifications", {
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [
+  index("notifications_user_id_idx").on(table.userId)
+]);
 
 /**
  * One row per trainer per day-of-week (`dayOfWeek` 0-6). trainers.ts's
@@ -226,7 +234,9 @@ export const trainerAvailability = sqliteTable("trainer_availability", {
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [
+  uniqueIndex("trainer_availability_trainer_id_day_of_week_idx").on(table.trainerId, table.dayOfWeek)
+]);
 
 /**
  * Audit trail of a reschedule action — links the cancelled fromBooking/
@@ -289,7 +299,9 @@ export const companyMembers = sqliteTable("company_members", {
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [
+  uniqueIndex("company_members_user_id_idx").on(table.userId)
+]);
 
 /**
  * Same status/credit shape as `bookings`, but paid from the linked

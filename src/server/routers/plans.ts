@@ -49,47 +49,49 @@ export const plansRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const plan = await ctx.db
-        .select()
-        .from(membershipPlans)
-        .where(eq(membershipPlans.id, input.planId))
-        .get();
+      return ctx.db.transaction(async (tx) => {
+        const plan = await tx
+          .select()
+          .from(membershipPlans)
+          .where(eq(membershipPlans.id, input.planId))
+          .get();
 
-      if (!plan) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Plan not found." });
-      }
-      if (!plan.active) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This plan is no longer available.",
-        });
-      }
+        if (!plan) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Plan not found." });
+        }
+        if (!plan.active) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "This plan is no longer available.",
+          });
+        }
 
-      const today = new Date().toISOString().slice(0, 10);
+        const today = new Date().toISOString().slice(0, 10);
 
-      const membership = await ctx.db
-        .insert(memberships)
-        .values({
+        const membership = await tx
+          .insert(memberships)
+          .values({
+            userId: ctx.user.id,
+            planId: plan.id,
+            startDate: today,
+            endDate: addDays(today, plan.durationDays),
+            creditsRemaining: plan.classCredits,
+            status: "active",
+          })
+          .returning()
+          .get();
+
+        await tx.insert(payments).values({
           userId: ctx.user.id,
-          planId: plan.id,
-          startDate: today,
-          endDate: addDays(today, plan.durationDays),
-          creditsRemaining: plan.classCredits,
-          status: "active",
-        })
-        .returning()
-        .get();
+          membershipId: membership.id,
+          amountCents: plan.priceCents,
+          method: input.method,
+          status: "paid",
+          reference: `PAY-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        });
 
-      await ctx.db.insert(payments).values({
-        userId: ctx.user.id,
-        membershipId: membership.id,
-        amountCents: plan.priceCents,
-        method: input.method,
-        status: "paid",
-        reference: `PAY-${Date.now()}`,
+        return membership;
       });
-
-      return membership;
     }),
 
   /** Adds a new plan to the catalog, active by default. */
