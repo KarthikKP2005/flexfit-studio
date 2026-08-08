@@ -10,6 +10,70 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-07 — FIX(members): add admin member-management UI
+
+**Type:** FIX
+**Defect:** MEMBER-005
+**Behavior change:** yes — a new route (`/admin/members`) now exists and
+is reachable from a "Members" button on `/admin`. No existing tRPC
+procedure's input, output, error code, or error message changed;
+`members.search`, `members.byId`, `members.setActive`, and
+`members.setRole` were called exactly as they already existed, not
+modified.
+**Files:** `src/app/admin/members/page.tsx` (new), `src/app/admin/page.tsx`
+(new "Members" link on the existing button row, same pattern as
+Companies/Reports/Announcements)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server (schema pushed and seeded first, since
+`flexfit.db` was a fresh 0-byte file with no tables):
+1. `auth.login` as `admin@flexfit.test` → session cookie.
+2. `members.search` with `q=a` → returns matching users across all
+   roles (unchanged existing behavior — not restricted to `role:
+   "member"`).
+3. `members.byId` for a real member id → full detail incl. membership
+   history, `passwordHash` correctly stripped.
+4. `members.setActive` with `active: false` on a real member id → row
+   updated, `active: false` in the response.
+5. `members.setRole` with `role: "trainer"` on the same id → row
+   updated, `role: "trainer"` in the response.
+6. `members.setActive` with a nonexistent id (`99999`) → confirmed the
+   response is `null`/`undefined` (MEMBER-003, unchanged) rather than a
+   thrown error — the new page's mutation handlers check for this and
+   show an inline error instead of assuming success, without touching
+   MEMBER-003 itself.
+7. Restored the test member's original `role`/`active` values afterward
+   so seed data is unpolluted.
+8. Fetched `/admin/members` directly → 200, renders.
+Also ran `tsc --noEmit` and `pnpm build`/`next build` (both clean,
+`/admin/members` compiles as a static route).
+
+Closes known-issues.md's MEMBER-005. MEMBER-001 (arbitrary-match lookup)
+and MEMBER-002 (latest-endDate-wins membership resolution) are unrelated
+procedures and untouched. `search`'s own behavior (matches any role, not
+just "member"; empty query returns everyone up to the default limit) is
+surfaced as-is, not restricted by this page.
+
+---
+
+## 2026-08-07 — DOCUMENT(members): log MEMBER-005 (no admin member-management UI)
+
+**Type:** DOCUMENT
+**Defect:** MEMBER-005
+**Behavior change:** no — nothing in the code changed for this entry.
+**Files:** `documents/known-issues.md`
+**Tests:** n/a
+
+Confirmed by grep that `members.byId`, `members.setActive`, and
+`members.setRole` have zero callers under `src/app/**`, and
+`members.search`'s only caller is the company-linking member-picker in
+`admin/companies/[id]/page.tsx` (a different purpose — linking, not
+managing). Logged as **MEMBER-005** so the follow-up FIX (a new
+`/admin/members` page) has a defect id to reference, per Rule 2's
+checklist and the same DOCUMENT-then-FIX pattern used for
+AUTH-002/CORP-005/MEMBER-004.
+
+---
+
 ## 2026-08-07 — FIX(reschedule-modal): stop the infinite refetch loop in the class picker
 
 **Type:** FIX
