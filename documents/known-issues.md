@@ -285,29 +285,37 @@ clean.
 ### PLAN-002 — `subscribe`'s membership + payment inserts are not atomic
 
 **Severity:** Low (SQLite/libsql writes rarely fail mid-request, but the
-window exists)
-**Status:** Confirmed from source (also flagged in plan.md, item #23)
+window existed)
+**Status:** Fixed on branch `fix/plan-002-003-subscribe-transaction-refs`
 **Area:** Membership / Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `db.insert(memberships)...` and
-`db.insert(payments)...` are two separate statements, not wrapped in a
-transaction. If the second insert throws, the membership row from the
-first insert remains committed with no matching payment record.
+**Original behavior:** `db.insert(memberships)...` and
+`db.insert(payments)...` were two separate statements, not wrapped in a
+transaction. If the second insert threw, the membership row from the
+first insert remained committed with no matching payment record.
 
-**Expected invariant:** both inserts succeed or both roll back.
+**Fix:** both inserts now run inside `ctx.db.transaction(async (tx) => { ... })`,
+using `tx` in place of `ctx.db` for both. If the payment insert fails,
+the membership insert rolls back with it — no more orphaned memberships.
+The `existingActive` check (PLAN-001) stays outside the transaction,
+unchanged — it's a read, not a write, and matches the check-then-insert
+shape every other duplicate-guard in this codebase already uses.
 
-**Why not fixed here:** wrapping in a Drizzle transaction is a behavior
-change to error handling (a failure now becomes "nothing happened" instead
-of "orphaned membership") — needs its own FIX commit and a test that can
-actually force the second insert to fail.
-
-**Reproduction:** not independently reproduced by a test here (forcing a
-mid-transaction failure requires more than characterization-level
-tooling) — confirmed by reading the source; not disputed.
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md): subscribed a member with no active
+membership via the dev server — succeeded, both the membership and
+payment rows were created together. Confirmed PLAN-001's duplicate
+rejection still fires correctly for a second `subscribe` call
+afterward, unaffected by the transaction wrap. `tsc --noEmit` and
+`next build` both clean. Forcing a genuine mid-transaction failure (to
+directly observe a rollback) was not attempted — same limitation this
+entry's original "why not fixed here" already named; the fix is the
+well-established `db.transaction(...)` pattern, not something requiring
+its own failure-injection test to trust.
 
 **What "fixed" would look like:** `await db.transaction(async (tx) => { ... })`
-wrapping both inserts.
+wrapping both inserts — this is now what the code does.
 
 ---
 
@@ -315,24 +323,35 @@ wrapping both inserts.
 
 **Severity:** Low (references are informational, not enforced unique by
 the schema — see plan.md's DB-integrity findings)
-**Status:** Confirmed from source (also flagged in plan.md, item #24)
+**Status:** Fixed on branch `fix/plan-002-003-subscribe-transaction-refs`
 **Area:** Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
-calls resolving within the same millisecond produce byte-identical
-reference strings. `payments.reference` has no unique constraint, so this
-doesn't error, it just produces duplicate references.
+**Original behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
+calls resolving within the same millisecond produced byte-identical
+reference strings. `payments.reference` has no unique constraint, so
+this didn't error, it just produced duplicate references.
 
-**Expected invariant:** each payment gets a distinguishable reference.
+**Fix:** `reference` is now `` `PAY-${randomUUID()}` `` (Node's built-in
+`crypto.randomUUID()`, no new dependency). Two subscriptions in the same
+millisecond now get distinguishable references — UUID v4 collision
+probability is negligible or, in practice, zero for this app's scale.
 
-**Why not fixed here:** changing the reference format changes payment
-data shape going forward — a FIX, not a refactor.
+**Why no DB-level unique constraint was added:** plan.md's own phrasing
+is conditional — "add a unique constraint if references are business
+identifiers." Confirmed by grep that `payments.reference` is never
+queried by value anywhere in this codebase; it's displayed in
+`payments.mine`/`payments.all` and nothing else. Since nothing depends
+on it being unique for correctness, adding a schema constraint would be
+an unforced change under Rule 1.2 ("never touch schema.ts casually") —
+the random-generation fix alone satisfies the actual defect (visibly
+duplicate references), without a migration.
 
-**Reproduction:** `src/server/routers/plans.test.ts`'s
-`plans.subscribe > PLAN-003: two subscriptions in the same millisecond
-produce the same payment reference` (mocks `Date.now()` to force the
-collision deterministically).
+**Verified manually** (no test harness in this branch): subscribed a
+member via the dev server and confirmed `payments.mine` shows a
+`PAY-<uuid>` reference (e.g.
+`PAY-5c4e195e-8188-4e20-be34-fd478717907f`), not a timestamp. `tsc
+--noEmit` and `next build` both clean.
 
 **What "fixed" would look like:** a UUID or crypto-random suffix instead
 of (or in addition to) the timestamp.

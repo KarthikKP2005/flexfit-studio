@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { membershipPlans, memberships, payments } from "@/db/schema";
 import { router, publicProcedure, protectedProcedure, adminProcedure } from "../trpc";
@@ -11,7 +12,9 @@ import { router, publicProcedure, protectedProcedure, adminProcedure } from "../
  * while one `status: "active"` membership already exists (PLAN-001,
  * fixed) — it does not support renewal/extension; a member must wait for
  * their current membership to end (or have staff intervene) before
- * subscribing again.
+ * subscribing again. The membership + payment insert is atomic
+ * (PLAN-002, fixed) and the payment `reference` is collision-resistant
+ * (PLAN-003, fixed) — see `subscribe`'s own comment for both.
  */
 
 function addDays(dateIso: string, days: number): string {
@@ -33,11 +36,22 @@ export const plansRouter = router({
    * Creates a new active membership for the caller and an accompanying
    * "paid" payment row — there is no payment gateway, this is instant.
    *
-   * Behavior notes (see known-issues.md, not fixed here):
-   * - PLAN-002: the membership insert and payment insert are two
-   *   separate statements, not wrapped in a transaction.
-   * - PLAN-003: payment `reference` is `PAY-${Date.now()}`, which can
-   *   collide across two subscriptions in the same millisecond.
+   * Behavior notes:
+   * - PLAN-002, fixed: the membership insert and payment insert now run
+   *   inside one `ctx.db.transaction`, so a failure between them can no
+   *   longer leave an orphaned membership with no payment record. The
+   *   `existingActive` check (PLAN-001) stays outside the transaction —
+   *   it's a read, not a write, and matches the check-then-insert shape
+   *   every other duplicate-guard in this codebase already uses.
+   * - PLAN-003, fixed: payment `reference` is now `PAY-<uuid>`
+   *   (`crypto.randomUUID()`) instead of `PAY-${Date.now()}`, so two
+   *   subscriptions in the same millisecond can no longer collide. No
+   *   database-level unique constraint was added — `reference` is
+   *   informational only (displayed in `payments.mine`/`payments.all`,
+   *   never queried by value anywhere in this codebase), so plan.md's
+   *   own conditional ("add a unique constraint if references are
+   *   business identifiers") doesn't apply here; adding one would be an
+   *   unforced schema change per Rule 1.2.
    *
    * @throws NOT_FOUND if planId doesn't exist
    * @throws BAD_REQUEST if the plan exists but is inactive
@@ -91,29 +105,31 @@ export const plansRouter = router({
 
       const today = new Date().toISOString().slice(0, 10);
 
-      const membership = await ctx.db
-        .insert(memberships)
-        .values({
+      return ctx.db.transaction(async (tx) => {
+        const membership = await tx
+          .insert(memberships)
+          .values({
+            userId: ctx.user.id,
+            planId: plan.id,
+            startDate: today,
+            endDate: addDays(today, plan.durationDays),
+            creditsRemaining: plan.classCredits,
+            status: "active",
+          })
+          .returning()
+          .get();
+
+        await tx.insert(payments).values({
           userId: ctx.user.id,
-          planId: plan.id,
-          startDate: today,
-          endDate: addDays(today, plan.durationDays),
-          creditsRemaining: plan.classCredits,
-          status: "active",
-        })
-        .returning()
-        .get();
+          membershipId: membership.id,
+          amountCents: plan.priceCents,
+          method: input.method,
+          status: "paid",
+          reference: `PAY-${randomUUID()}`,
+        });
 
-      await ctx.db.insert(payments).values({
-        userId: ctx.user.id,
-        membershipId: membership.id,
-        amountCents: plan.priceCents,
-        method: input.method,
-        status: "paid",
-        reference: `PAY-${Date.now()}`,
+        return membership;
       });
-
-      return membership;
     }),
 
   /** Adds a new plan to the catalog, active by default. */

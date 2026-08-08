@@ -10,6 +10,60 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-08 — FIX(plans): use a collision-resistant payment reference
+
+**Type:** FIX
+**Defect:** PLAN-003
+**Behavior change:** yes — `subscribe`'s payment `reference` is now
+`PAY-<uuid>` (`crypto.randomUUID()`) instead of `PAY-${Date.now()}`.
+Output shape is unchanged (`reference` is still a string); only its
+generated value changed. No DB-level unique constraint was added — see
+known-issues.md's PLAN-003 entry for why (never queried by value
+anywhere in this codebase, so it's not a business identifier plan.md's
+own conditional would apply to).
+**Files:** `src/server/routers/plans.ts` (`subscribe`'s reference
+generation; new `import { randomUUID } from "node:crypto"`; file and
+procedure header comments updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server: subscribed a member and confirmed
+`payments.mine` shows a `PAY-<uuid>` reference
+(`PAY-5c4e195e-8188-4e20-be34-fd478717907f`), not a timestamp. Also ran
+`tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's PLAN-003 (plan.md item #24). Landed on the same
+branch as the PLAN-002 fix directly below (both touch `subscribe`, done
+back to back), but as a separate commit per Rule 4 — one defect per
+commit, even on a shared branch, same pattern as RESCH-005/RESCH-006.
+
+---
+
+## 2026-08-08 — FIX(plans): wrap subscribe's membership+payment insert in a transaction
+
+**Type:** FIX
+**Defect:** PLAN-002
+**Behavior change:** yes — if the payment insert now fails, the
+membership insert rolls back with it (previously the membership row
+would remain committed with no matching payment). `subscribe`'s input
+schema, output shape, and error codes are otherwise unchanged.
+**Files:** `src/server/routers/plans.ts` (`subscribe`'s membership and
+payment inserts moved inside `ctx.db.transaction(async (tx) => { ... })`,
+using `tx` in place of `ctx.db` for both; the `existingActive` check
+(PLAN-001) stays outside, unchanged; file and procedure header comments
+updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server: subscribed a member with no active membership,
+confirmed both the membership and payment rows were created together;
+confirmed PLAN-001's duplicate-subscription rejection still fires
+correctly afterward, unaffected by the transaction wrap. Did not attempt
+to force a genuine mid-transaction failure (no tooling in this branch
+for that) — the fix is the standard `db.transaction(...)` pattern, not
+bespoke logic needing its own failure-injection proof. Also ran `tsc
+--noEmit` and `next build` (both clean).
+
+Closes known-issues.md's PLAN-002 (plan.md item #23).
+
+---
+
 ## 2026-08-08 — FIX(memberships): getCurrentMembership rejects a not-yet-started membership
 
 **Type:** FIX
