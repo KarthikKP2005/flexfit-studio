@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import {
   companies,
   companyMembers,
@@ -172,13 +172,16 @@ export const adminCompaniesRouter = router({
   /**
    * Links a member to a company.
    *
-   * Behavior note (see COMPANY-001 in known-issues.md — not fixed here):
-   * only rejects an exact duplicate (same user + same company) — nothing
-   * stops a user from being linked to more than one company at once.
+   * Behavior note (COMPANY-001 in known-issues.md, fixed): a member can
+   * only be linked to one company at a time — `companyMembers.userId` is
+   * unique at the DB level (see schema.ts), so this checks for *any*
+   * existing link for the user, not just a duplicate of the same
+   * company, and rejects it with a clear message before the insert
+   * would otherwise hit the DB constraint.
    *
    * @throws NOT_FOUND if the company or user doesn't exist
    * @throws BAD_REQUEST if the user's role isn't "member"
-   * @throws CONFLICT if this exact user+company link already exists
+   * @throws CONFLICT if this user is already linked to a company (this one or another)
    */
   linkMember: adminProcedure
     .input(z.object({ companyId: z.number(), userId: z.number() }))
@@ -213,18 +216,16 @@ export const adminCompaniesRouter = router({
       const existing = await ctx.db
         .select()
         .from(companyMembers)
-        .where(
-          and(
-            eq(companyMembers.userId, input.userId),
-            eq(companyMembers.companyId, input.companyId),
-          ),
-        )
+        .where(eq(companyMembers.userId, input.userId))
         .get();
 
       if (existing) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "This member is already linked to this company.",
+          message:
+            existing.companyId === input.companyId
+              ? "This member is already linked to this company."
+              : "This member is already linked to a different company. Unlink them first.",
         });
       }
 

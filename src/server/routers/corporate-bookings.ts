@@ -20,9 +20,9 @@ import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
  * reconciled with the personal side — `book` shares `isClassFull`
  * (CORP-002, fixed) and `cancel` shares `promoteNextWaitlisted`
  * (CORP-003, fixed), both in src/features/bookings/.
- * Not responsible for: which company a member belongs to when they
- * belong to more than one (see COMPANY-001 — getCompanyForMember below
- * just takes whichever active-company link `.get()` happens to return).
+ * Not responsible for: linking/unlinking a member to a company (see
+ * admin-companies.ts) — this file only reads that link via
+ * `getCompanyForMember` below.
  */
 
 /**
@@ -37,10 +37,13 @@ function hoursUntil(iso: string, now = new Date()): number {
 }
 
 /**
- * The active company this user is linked to, if any. Uses a single-row
- * `.get()` with no ordering — if a user is linked to more than one
- * active company (schema allows it, see COMPANY-001), which one this
- * returns is arbitrary.
+ * The company this user is linked to, if any and if it's active.
+ *
+ * Behavior note (COMPANY-001 in known-issues.md, fixed): `companyMembers.userId`
+ * is unique at the DB level, so a member can be linked to at most one
+ * company — this `.get()` can only ever match zero or one row. If that
+ * one company has since been deactivated, this still correctly returns
+ * nothing (the `companies.active` filter below), not the inactive link.
  */
 async function getCompanyForMember(
   db: typeof import("@/db").db,
@@ -345,9 +348,7 @@ export const corporateBookingsRouter = router({
    * The active company the caller themselves is linked to, if any — the
    * member-facing counterpart to `getCompanyForMember` above (which was
    * previously only used internally by `book`). Added for CORP-005 so the
-   * UI can know whether to offer a company-credit booking option at all;
-   * does not change `getCompanyForMember`'s own logic or its COMPANY-001
-   * caveat (arbitrary pick if linked to more than one active company).
+   * UI can know whether to offer a company-credit booking option at all.
    */
   myCompany: protectedProcedure.query(async ({ ctx }) => {
     const row = await getCompanyForMember(ctx.db, ctx.user.id);
