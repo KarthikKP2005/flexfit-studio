@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   corporateBookings,
   classes,
@@ -8,15 +8,18 @@ import {
   companyMembers,
   checkins,
   users,
-  notifications,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { isClassFull } from "@/features/bookings/capacity-service";
+import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
 
 /**
  * Corporate (company-credit-pool-funded) class bookings — structurally
- * parallel to bookings.ts's personal bookings, but a separate table with
- * its own capacity/waitlist/credit handling that is never reconciled
- * against the personal side (see CORP-002/CORP-003 in known-issues.md).
+ * parallel to bookings.ts's personal bookings, a separate table with its
+ * own credit handling. Capacity and waitlist order are both now
+ * reconciled with the personal side — `book` shares `isClassFull`
+ * (CORP-002, fixed) and `cancel` shares `promoteNextWaitlisted`
+ * (CORP-003, fixed), both in src/features/bookings/.
  * Not responsible for: which company a member belongs to when they
  * belong to more than one (see COMPANY-001 — getCompanyForMember below
  * just takes whichever active-company link `.get()` happens to return).
@@ -89,12 +92,10 @@ export const corporateBookingsRouter = router({
 
   /**
    * Books the caller into a class against their linked company's credit
-   * pool, or waitlists them if full.
-   *
-   * Behavior note (see CORP-002 in known-issues.md — not fixed here):
-   * "full" is judged from `corporateBookings` alone — a class already
-   * at capacity from personal bookings (see bookings.ts) can still
-   * accept a confirmed corporate booking here.
+   * pool, or waitlists them if full. "Full" is judged from combined
+   * personal + corporate confirmed bookings (CORP-002, fixed — see
+   * features/bookings/capacity-service.ts) — a class already filled by
+   * personal bookings now correctly waitlists a corporate booking too.
    *
    * @throws NOT_FOUND if the class doesn't exist
    * @throws BAD_REQUEST if the class is cancelled or has already started
@@ -162,17 +163,7 @@ export const corporateBookingsRouter = router({
         });
       }
 
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(corporateBookings)
-        .where(
-          and(
-            eq(corporateBookings.classId, cls.id),
-            eq(corporateBookings.status, "booked"),
-          ),
-        );
-
-      const isFull = Number(count) >= cls.capacity;
+      const isFull = await isClassFull(ctx.db, cls.id, cls.capacity);
 
       const created = await ctx.db
         .insert(corporateBookings)
@@ -200,20 +191,12 @@ export const corporateBookingsRouter = router({
 
   /**
    * Cancels a corporate booking and, if eligible, refunds the credit
-   * pool. Also promotes the longest-waiting *corporate* waitlisted
-   * booking into the freed seat, if the cancelled booking was confirmed.
-   *
-   * Behavior notes (see known-issues.md, not fixed here):
-   * - CORP-001: promotion confirms the booking before checking whether
-   *   the company can afford it — insufficient credits skip the
-   *   deduction but not the confirmation, producing a free booking.
-   * - CORP-003: only ever considers the corporate waitlist — a personal
-   *   member waiting for the same class is never considered here, and
-   *   bookings.ts's cancel never considers this table either.
-   * A promoted member is sent a `waitlist_promotion` notification (see
-   * NOTIF-002 in known-issues.md, same defect as bookings.ts's cancel) —
-   * added on top of the existing promotion logic, which is unchanged,
-   * bug-for-bug (still fires even in the CORP-001 free-booking case).
+   * pool. Also promotes the longest-waiting ELIGIBLE candidate into the
+   * freed seat, if the cancelled booking was confirmed — checking BOTH
+   * the corporate and personal waitlists together (CORP-003, fixed), and
+   * verifying a corporate candidate's company credit before promoting
+   * them, skipping to the next-oldest candidate if they can't afford it
+   * (CORP-001, fixed) — see features/bookings/waitlist-service.ts.
    *
    * @throws NOT_FOUND if the booking doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
@@ -276,58 +259,11 @@ export const corporateBookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes the member who has waited
-      // longest among *corporate* waitlisted bookings for this class
-      // only (see CORP-003 — the personal-bookings waitlist for the
-      // same class is never considered here).
+      // Freeing a confirmed spot promotes whoever has waited longest and
+      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
+      // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
       if (row.booking.status === "booked") {
-        const next = await ctx.db
-          .select()
-          .from(corporateBookings)
-          .where(
-            and(
-              eq(corporateBookings.classId, row.cls.id),
-              eq(corporateBookings.status, "waitlisted"),
-            ),
-          )
-          .orderBy(asc(corporateBookings.bookedAt))
-          .get();
-
-        if (next) {
-          // Confirms the booking first, then only *maybe* deducts the
-          // cost below — see CORP-001, this ordering is the bug.
-          await ctx.db
-            .update(corporateBookings)
-            .set({ status: "booked", creditsUsed: row.cls.creditCost })
-            .where(eq(corporateBookings.id, next.id));
-
-          const company = await ctx.db
-            .select()
-            .from(companies)
-            .where(eq(companies.id, next.companyId))
-            .get();
-
-          if (company && company.creditPoolBalance >= row.cls.creditCost) {
-            await ctx.db
-              .update(companies)
-              .set({
-                creditPoolBalance: Math.max(
-                  0,
-                  company.creditPoolBalance - row.cls.creditCost,
-                ),
-              })
-              .where(eq(companies.id, company.id));
-          }
-
-          // NOTIF-002: notify the promoted member, same as bookings.ts's
-          // cancel — everything above this insert is unchanged.
-          await ctx.db.insert(notifications).values({
-            userId: next.userId,
-            type: "waitlist_promotion",
-            title: "You're off the waitlist!",
-            message: `You've been booked into ${row.cls.name} on ${row.cls.startsAt}.`,
-          });
-        }
+        await promoteNextWaitlisted(ctx.db, row.cls);
       }
 
       return { ok: true, refunded: refundable };
