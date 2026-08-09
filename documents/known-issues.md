@@ -371,32 +371,54 @@ throw `NOT_FOUND` when the updated row comes back empty.
 
 ### PAY-001 — `refund` cancels the membership but leaves bookings and credits untouched
 
-**Severity:** Medium (member keeps classes they were refunded for, and
-keeps whatever credits they still had)
-**Status:** Confirmed from source (also flagged in plan.md, item #22)
+**Severity:** Medium (member kept classes they were refunded for, and
+kept whatever credits they still had)
+**Status:** Fixed on branch `fix/pay-001-refund-cancels-bookings`
 **Area:** Payments / Membership
 **File:** `src/server/routers/payments.ts` — `refund`
 
-**Current behavior:** `refund` sets the payment to `status: "refunded"`
-and, if the payment has a `membershipId`, sets that membership's `status`
-to `"cancelled"`. Nothing else changes: existing `bookings` rows made
-against that membership stay `"booked"` (the member can still attend),
-and `creditsRemaining` is untouched.
+**Original behavior:** `refund` set the payment to `status: "refunded"`
+and, if the payment had a `membershipId`, set that membership's `status`
+to `"cancelled"`. Nothing else changed: existing `bookings` rows made
+against that membership stayed `"booked"` (the member could still
+attend), and `creditsRemaining` was untouched.
 
-**Expected invariant:** undefined by the current code — plan.md lists
-several plausible policies (cancel future bookings / keep them valid /
-restore or remove credits / remove waitlist entries) and says explicitly
-this "should not be guessed during refactoring."
+**Policy decision (Rule 8 — this was an explicit choice, not a silent
+guess):** plan.md lists several plausible policies (cancel future
+bookings / keep them valid / restore or remove credits / remove waitlist
+entries) and says explicitly this "should not be guessed during
+refactoring." Asked the user directly; chose **cancel dependent
+bookings/waitlist entries, leave already-attended bookings alone,
+promote freed seats** — the "you didn't pay for it, you don't keep it"
+interpretation. Full reasoning in `architecture-decisions.md`.
 
-**Why not fixed here:** needs a product decision on what a refund should
-mean for already-committed bookings before this is a FIX, not a guess.
+**Fix:** `refund` now cancels every `booked` or `waitlisted` row under
+the refunded membership (`bookings.membershipId`) in addition to
+cancelling the membership itself. Each cancelled `booked` (confirmed)
+row frees a seat, so it promotes the next eligible waitlisted candidate
+for that class via the existing shared `promoteNextWaitlisted` (same
+logic `bookings.cancel` already uses) — no new promotion logic invented.
+`creditsRemaining` on the membership is deliberately left untouched: it's
+moot once the membership is `cancelled`, since `getCurrentMembership`
+(MEMBER-002/MEMBER-006, both fixed) never selects a cancelled membership
+again regardless of its credit balance.
 
-**Reproduction:** `src/server/routers/payments.test.ts`'s
-`payments.refund > PAY-001: does not touch bookings or credits already
-made against the cancelled membership`.
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md): refunded a seeded member's payment who had
+~50 active `booked`/`waitlisted` bookings and 8 already-`attended` ones.
+Confirmed: their membership flipped to `null` on `members.profile`; all
+`booked`/`waitlisted` bookings became `cancelled`; `classesAttended`
+stayed at 8 (unchanged — the fix's `WHERE status IN (booked, waitlisted)`
+structurally cannot touch `attended` rows). Separately manufactured a
+waitlisted booking for another member on a class the refunded member was
+confirmed into, and confirmed that candidate was promoted to `booked`
+by the refund's cancellation, exactly as a normal `bookings.cancel`
+would promote them. `tsc --noEmit` and `next build` both clean.
 
-**What "fixed" would look like:** depends on the chosen policy — not
-specified here.
+**Not in scope for this fix:** corporate bookings are untouched —
+`payments.membershipId` only ever links to a personal `memberships` row,
+never a company's credit pool, so a membership refund has nothing
+corporate to reconcile. `markPaid` is unrelated and untouched.
 
 ---
 
