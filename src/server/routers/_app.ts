@@ -12,6 +12,9 @@ import { corporateBookingsRouter } from "./corporate-bookings";
 import { adminCompaniesRouter } from "./admin-companies";
 import { reschedulesRouter } from "./reschedules";
 import { adminStaffRouter } from "./adminStaff";
+import { adminClassesRouter } from "./adminClasses";
+import { adminMembersRouter } from "./adminMembers";
+import { adminPlansRouter } from "./adminPlans";
 
 export const appRouter = router({
   auth: authRouter,
@@ -25,6 +28,9 @@ export const appRouter = router({
   admin: adminRouter,
   adminCompanies: adminCompaniesRouter,
   adminStaff: adminStaffRouter,
+  adminClasses: adminClassesRouter,
+  adminMembers: adminMembersRouter,
+  adminPlans: adminPlansRouter,
   notifications: notificationsRouter,
   trainers: trainersRouter,
 });

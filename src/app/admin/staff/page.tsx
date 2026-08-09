@@ -116,6 +116,9 @@ export default function AdminStaffPage() {
               >
                 {user.active ? "Active" : "Inactive"}
               </span>
+              <Link href={`/admin/staff/${user.id}`} className="btn btn-sm btn-outline">
+                {user.role === "trainer" ? "Manage Schedule" : "View"}
+              </Link>
             </div>
           </div>
         ))}

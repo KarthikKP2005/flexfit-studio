@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq, inArray } from "drizzle-orm";
-import { users } from "@/db/schema";
+import { users, trainerAvailability } from "@/db/schema";
 import { hashPassword } from "@/lib/password";
 import { router, adminProcedure } from "../trpc";
 
@@ -49,6 +49,67 @@ export const adminStaffRouter = router({
         role: "trainer",
         active: true,
       });
+
+      return { ok: true };
+    }),
+
+  /**
+   * Fetch a specific trainer's availability.
+   * WHY IT'S IMPLEMENTED: Admins need to know when trainers are supposed to work.
+   */
+  getAvailability: adminProcedure
+    .input(z.object({ trainerId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.db
+        .select()
+        .from(trainerAvailability)
+        .where(eq(trainerAvailability.trainerId, input.trainerId));
+    }),
+
+  /**
+   * Set a specific trainer's availability (overwrites previous availability).
+   * WHY IT'S IMPLEMENTED: Admins need to override trainer schedules (e.g., call in sick)
+   * without needing the trainer to log in and do it themselves.
+   */
+  setAvailability: adminProcedure
+    .input(
+      z.object({
+        trainerId: z.number(),
+        slots: z.array(
+          z.object({
+            dayOfWeek: z.number().min(0).max(6),
+            startTime: z.string(),
+            endTime: z.string(),
+          })
+        ),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const trainer = await ctx.db
+        .select()
+        .from(users)
+        .where(eq(users.id, input.trainerId))
+        .get();
+
+      if (!trainer || trainer.role !== "trainer") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "User is not a trainer" });
+      }
+
+      // Overwrite by deleting old slots and inserting new ones
+      await ctx.db
+        .delete(trainerAvailability)
+        .where(eq(trainerAvailability.trainerId, input.trainerId));
+
+      if (input.slots.length > 0) {
+        await ctx.db.insert(trainerAvailability).values(
+          input.slots.map((s) => ({
+            trainerId: input.trainerId,
+            dayOfWeek: s.dayOfWeek,
+            startTime: s.startTime,
+            endTime: s.endTime,
+          }))
+        );
+      }
 
       return { ok: true };
     }),
