@@ -286,56 +286,58 @@ clean.
 
 **Severity:** Low (SQLite/libsql writes rarely fail mid-request, but the
 window exists)
-**Status:** Confirmed from source (also flagged in plan.md, item #23)
+**Status:** Fixed on branch `fix/plan-002-003-atomic-subscribe-payment-refs`
 **Area:** Membership / Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `db.insert(memberships)...` and
-`db.insert(payments)...` are two separate statements, not wrapped in a
-transaction. If the second insert throws, the membership row from the
-first insert remains committed with no matching payment record.
+**Original behavior:** `db.insert(memberships)...` and
+`db.insert(payments)...` were two separate statements, not wrapped in a
+transaction. If the second insert threw, the membership row from the
+first insert remained committed with no matching payment record.
 
 **Expected invariant:** both inserts succeed or both roll back.
 
-**Why not fixed here:** wrapping in a Drizzle transaction is a behavior
-change to error handling (a failure now becomes "nothing happened" instead
-of "orphaned membership") — needs its own FIX commit and a test that can
-actually force the second insert to fail.
+**Fix:** both inserts now run inside a single
+`await ctx.db.transaction(async (tx) => { ... })`, using `tx` (not `ctx.db`)
+for both statements. A failure on either insert now rolls both back —
+"nothing happened" instead of "orphaned membership." `plans.list`,
+`create`, and `setActive` are unchanged.
 
-**Reproduction:** not independently reproduced by a test here (forcing a
-mid-transaction failure requires more than characterization-level
-tooling) — confirmed by reading the source; not disputed.
-
-**What "fixed" would look like:** `await db.transaction(async (tx) => { ... })`
-wrapping both inserts.
+**Verified manually** (no automated test harness exists anywhere in this
+repo currently — no `.test.ts` files, no vitest config — so this follows
+the same manual-verification precedent as PLAN-001/PLAN-004) against the
+dev server: `subscribe` still returns the membership row and creates a
+matching payment on the happy path; `tsc --noEmit` and `next build` both
+clean.
 
 ---
 
 ### PLAN-003 — Payment `reference` can collide across concurrent subscriptions
 
 **Severity:** Low (references are informational, not enforced unique by
-the schema — see plan.md's DB-integrity findings)
-**Status:** Confirmed from source (also flagged in plan.md, item #24)
+the schema — see plan.md's DB-integrity findings, item #22/#24)
+**Status:** Fixed on branch `fix/plan-002-003-atomic-subscribe-payment-refs`
 **Area:** Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
-calls resolving within the same millisecond produce byte-identical
+**Original behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
+calls resolving within the same millisecond produced byte-identical
 reference strings. `payments.reference` has no unique constraint, so this
-doesn't error, it just produces duplicate references.
+didn't error, it just produced duplicate references.
 
 **Expected invariant:** each payment gets a distinguishable reference.
 
-**Why not fixed here:** changing the reference format changes payment
-data shape going forward — a FIX, not a refactor.
+**Fix:** `reference: \`PAY-${crypto.randomUUID()}\`` — a UUID suffix instead
+of the millisecond timestamp, so two subscriptions in the same request
+tick can no longer produce identical references. `payments.reference`
+still has no DB-level unique constraint (out of scope here — see
+DB-integrity findings in plan.md item #43); this fix only removes the
+practical collision source, it doesn't add schema-level enforcement.
 
-**Reproduction:** `src/server/routers/plans.test.ts`'s
-`plans.subscribe > PLAN-003: two subscriptions in the same millisecond
-produce the same payment reference` (mocks `Date.now()` to force the
-collision deterministically).
-
-**What "fixed" would look like:** a UUID or crypto-random suffix instead
-of (or in addition to) the timestamp.
+**Verified manually** (same caveat as PLAN-002 — no test harness exists in
+this repo): confirmed two back-to-back `subscribe` calls now produce
+distinct `PAY-<uuid>` references; `tsc --noEmit` and `next build` both
+clean.
 
 ---
 
