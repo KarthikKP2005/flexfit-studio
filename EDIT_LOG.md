@@ -10,6 +10,37 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-09 — FIX(plans): make subscribe's insert atomic and its payment reference collision-resistant
+
+**Type:** FIX
+**Defect:** PLAN-002, PLAN-003
+**Behavior change:** yes — `subscribe`'s membership insert and payment
+insert now run inside one `ctx.db.transaction`, so a failure on either
+side rolls both back instead of leaving an orphaned membership row.
+Payment `reference` is now `PAY-<uuid>` (`crypto.randomUUID()`) instead
+of `PAY-${Date.now()}`, so two subscriptions resolving in the same
+millisecond no longer produce identical references. `plans.list`,
+`create`, and `setActive` are unchanged; `subscribe`'s input schema,
+success return shape, and existing `NOT_FOUND`/`BAD_REQUEST`/`CONFLICT`
+errors are unchanged.
+**Files touched:**
+- `src/server/routers/plans.ts` — wrapped `subscribe`'s two inserts in a
+  transaction, switched the payment reference to a UUID, updated the
+  function's header comment to mark PLAN-002/PLAN-003 fixed instead of
+  "not fixed here."
+- `documents/known-issues.md` — marked PLAN-002 and PLAN-003 Fixed, kept
+  the original problem description, recorded what changed.
+**Tests:** no automated test harness exists anywhere in this repo
+currently (no `.test.ts` files, no vitest config on this branch) —
+manually verified against the dev server that `subscribe` still returns
+the membership row and creates a matching payment on the happy path, and
+that two back-to-back calls now produce distinct `PAY-<uuid>`
+references. `tsc --noEmit` and `next build` both clean. This follows the
+same manual-verification precedent already used for PLAN-001 and
+PLAN-004 in this log.
+
+---
+
 ## 2026-08-07 — FIX(admin): fix broadcast deactivated members and plan setActive errors
 
 **Type:** FIX
