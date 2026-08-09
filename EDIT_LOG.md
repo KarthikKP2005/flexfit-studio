@@ -10,6 +10,33 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-09 — FIX(kiosk): stop blocking check-in on zero credits
+
+**Type:** FIX
+**Defect:** KIOSK-001
+**Behavior change:** yes — the kiosk's Check-in button no longer
+disables when the member's current membership has zero credits
+remaining; it now disables only on a pending mutation or an expired
+membership. No tRPC procedure touched — `markAttended` already never
+checked credits server-side (only booking status + check-in window), so
+this only removes a client-side false block that didn't match what the
+server actually allowed.
+**Files touched:**
+- `src/app/kiosk/page.tsx` — removed `hasNoCredits` from the Check-in
+  button's `disabled` list; the "No credits remaining" banner stays but
+  is now informational only. Updated the file header and banner comments
+  to reflect the fix instead of describing it as open.
+- `documents/known-issues.md` — added KIOSK-001 (new prefix, first
+  kiosk-specific entry).
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope — verified by reading
+`bookings.ts:markAttended` directly and confirming it never checked
+credits (only `status === "booked"` and the check-in window), so the
+client-side fix can't diverge from server behavior. `tsc --noEmit` shows
+no new errors.
+
+---
+
 ## 2026-08-07 — FIX(admin): fix broadcast deactivated members and plan setActive errors
 
 **Type:** FIX

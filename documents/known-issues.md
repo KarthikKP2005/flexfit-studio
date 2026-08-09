@@ -1043,6 +1043,55 @@ candidate instead. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
+### KIOSK-001 — Kiosk wrongly blocked check-in for a member at zero credits
+
+**Severity:** Medium (member-facing — front desk staff physically could
+not check in a member who had already paid for and confirmed the exact
+class they were standing in front of, if that booking spent their last
+credit)
+**Status:** Fixed on branch `fix/kiosk-001-zero-credits-checkin`
+**Area:** Kiosk / Frontend
+**File:** `src/app/kiosk/page.tsx`
+
+**Original behavior:** `hasNoCredits` (computed from
+`memberDetails.data.memberships[0].creditsRemaining === 0`) was included
+in the Check-in button's `disabled` condition — see plan.md item #25 (role
+list item #26). Credits are spent at *booking* time (`bookings.book`
+deducts them when the booking is created), not at check-in time — so a
+member who booked a class with their last remaining credit already holds
+a valid, confirmed booking; their credit balance being zero afterward
+says nothing about whether that specific booking is legitimate.
+
+**Server-side check (unchanged, already correct):** `bookings.ts`'s
+`markAttended` never checked credits — only `booking.status === "booked"`
+and the 30-minutes-before-to-end-of-class check-in window. So the bug
+was purely a client-side false block; nothing server-side needed to
+change, and no tRPC procedure's input/output/error shape changed.
+
+**Fix:** removed `hasNoCredits` from the button's `disabled` list. The
+button now disables only on `markAttended.isPending` or
+`isMembershipExpired`. The "⚠ No credits remaining" banner is unchanged
+and still displays — it's informational only now, not a gate.
+
+**Not in scope for this fix:** `isMembershipExpired` still disables the
+button, untouched — whether an *expired* membership should also be
+allowed to check into a booking made while it was still active is a
+separate, undecided question (not what plan.md item #25/role-list #26
+asked about), left alone per Rule 8 rather than guessed. Also untouched:
+`hasNoCredits`/`isMembershipExpired` are still computed from
+`memberships[0]` (most-recent-startDate, not necessarily the active
+one) — the same MEMBER-002-shaped gap noted in the file's existing
+header comment, out of scope here since it affects which membership is
+looked at, not whether credits should gate check-in at all.
+
+**Verification:** traced `markAttended`'s server-side checks directly
+(`src/server/routers/bookings.ts:314-353`) — confirms it only checks
+booking status and the check-in window, never credits, so removing the
+client-side credit gate doesn't let the UI diverge from what the server
+already allows. `tsc --noEmit` shows no new errors.
+
+---
+
 ### CORP-002 — Corporate booking capacity is judged independently of personal bookings on the same class
 
 **Severity:** High (a class could be overbooked: full on personal
