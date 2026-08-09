@@ -8,6 +8,8 @@ import {
   payments,
   checkins,
   membershipPlans,
+  studioSettings,
+  corporateBookings,
 } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 import { notifyExpiringMemberships } from "../jobs/membership-expiry";
@@ -47,9 +49,15 @@ export const adminRouter = router({
       .where(and(gte(classes.startsAt, now), eq(classes.cancelled, false)));
 
     const [{ revenueCents }] = await ctx.db
-      .select({ revenueCents: sql<number>`coalesce(sum(amount_cents), 0)` })
-      .from(payments)
-      .where(eq(payments.status, "paid"));
+      .select({ revenueCents: sql<number>`coalesce(sum(${membershipPlans.priceCents}), 0)` })
+      .from(memberships)
+      .innerJoin(membershipPlans, eq(memberships.planId, membershipPlans.id))
+      .where(
+        and(
+          eq(memberships.status, "active"),
+          sql`${memberships.endDate} >= ${today}`
+        )
+      );
 
     const [{ totalCheckins }] = await ctx.db
       .select({ totalCheckins: sql<number>`count(*)` })
@@ -150,6 +158,56 @@ export const adminRouter = router({
       count: Number(r.count),
     }));
   }),
+
+  /**
+   * Trainer Payroll (Total Heads).
+   * Bypasses `checkins` due to missing `bookingId` for corporate bookings.
+   * Calculates total attended bookings grouped by trainer.
+   */
+  trainerPayroll: adminProcedure.query(async ({ ctx }) => {
+    // Current month filter
+    const rows = await ctx.db.execute(sql`
+      SELECT u.name as trainerName, 
+             (COUNT(DISTINCT b.id) + COUNT(DISTINCT cb.id)) as totalHeads
+      FROM ${classes} c
+      JOIN ${users} u ON c.trainer_id = u.id
+      LEFT JOIN ${bookings} b ON b.class_id = c.id AND b.status = 'attended'
+      LEFT JOIN ${corporateBookings} cb ON cb.class_id = c.id AND cb.status = 'attended'
+      WHERE strftime('%Y-%m', c.starts_at) = strftime('%Y-%m', 'now')
+      GROUP BY u.id, u.name
+      ORDER BY totalHeads DESC
+    `);
+
+    return rows.rows.map(r => ({
+      trainerName: String(r.trainerName),
+      totalHeads: Number(r.totalHeads),
+    }));
+  }),
+
+  /** Get studio settings */
+  settings: adminProcedure.query(async ({ ctx }) => {
+    let settingsRow = await ctx.db.select().from(studioSettings).limit(1).get();
+    if (!settingsRow) {
+      settingsRow = await ctx.db.insert(studioSettings).values({ checkinWindowMinutes: 30 }).returning().get();
+    }
+    return settingsRow;
+  }),
+
+  /** Update studio settings */
+  updateSettings: adminProcedure
+    .input(z.object({ checkinWindowMinutes: z.number().int().min(5).max(1440) }))
+    .mutation(async ({ ctx, input }) => {
+      let settingsRow = await ctx.db.select().from(studioSettings).limit(1).get();
+      if (!settingsRow) {
+        return ctx.db.insert(studioSettings).values(input).returning().get();
+      }
+      return ctx.db
+        .update(studioSettings)
+        .set(input)
+        .where(eq(studioSettings.id, settingsRow.id))
+        .returning()
+        .get();
+    }),
 
   /**
    * Manually runs the same membership-expiry notification job the

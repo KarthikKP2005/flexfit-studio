@@ -8,6 +8,7 @@ import {
   companyMembers,
   checkins,
   users,
+  studioSettings,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
@@ -369,13 +370,16 @@ export const corporateBookingsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
+      let settingsRow = await ctx.db.select().from(studioSettings).limit(1).get();
+      const windowMinutes = settingsRow?.checkinWindowMinutes ?? 30;
+
       const now = Date.now();
       const startMs = new Date(cls.startsAt).getTime();
       const endMs = startMs + cls.durationMin * 60000;
-      if (now < startMs - 30 * 60000 || now > endMs) {
+      if (now < startMs - windowMinutes * 60000 || now > endMs) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Check-in is only allowed from 30 minutes before class starts until it ends.",
+          message: `Check-in is only allowed from ${windowMinutes} minutes before class starts until it ends.`,
         });
       }
 

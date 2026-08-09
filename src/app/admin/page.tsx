@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { formatMoney, formatDateTime } from "@/lib/format";
@@ -16,11 +17,23 @@ import { formatMoney, formatDateTime } from "@/lib/format";
  * boundary either way.
  */
 export default function AdminPage() {
+  const utils = trpc.useUtils();
   const { data: stats, isLoading, error } = trpc.admin.stats.useQuery(undefined, {
     retry: false,
   });
   const { data: utilisation } = trpc.admin.classUtilisation.useQuery({ limit: 8 });
   const { data: payments } = trpc.payments.all.useQuery({ limit: 10 });
+  const { data: payroll } = trpc.admin.trainerPayroll.useQuery();
+  
+  const { data: settings } = trpc.admin.settings.useQuery();
+  const updateSettings = trpc.admin.updateSettings.useMutation({
+    onSuccess: () => utils.admin.settings.invalidate(),
+  });
+  
+  const [windowMinutes, setWindowMinutes] = useState(30);
+  useEffect(() => {
+    if (settings) setWindowMinutes(settings.checkinWindowMinutes);
+  }, [settings]);
 
   if (isLoading) return <p className="muted">Loading...</p>;
   if (error) return <p className="muted">{error.message}</p>;
@@ -29,7 +42,7 @@ export default function AdminPage() {
     ["Members", String(stats!.totalMembers)],
     ["Active memberships", String(stats!.activeMemberships)],
     ["Upcoming classes", String(stats!.upcomingClasses)],
-    ["Revenue", formatMoney(stats!.revenueCents)],
+    ["MRR", formatMoney(stats!.revenueCents)],
     ["Check-ins", String(stats!.totalCheckins)],
     ["Pending payments", String(stats!.pendingPayments)],
   ];
@@ -102,6 +115,60 @@ export default function AdminPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="font-medium">Trainer Payroll (This Month)</h2>
+        <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
+          {payroll?.length === 0 && (
+            <div className="p-3 text-sm muted">No check-ins recorded this month.</div>
+          )}
+          {payroll?.map((p) => (
+            <div key={p.trainerName} className="flex items-center gap-4 p-3 text-sm">
+              <span className="flex-1 font-medium">{p.trainerName}</span>
+              <span className="muted">{p.totalHeads} check-ins</span>
+              <span style={{ color: "var(--accent)" }}>
+                {formatMoney(p.totalHeads * 2000)} {/* Example rate: $20 per head */}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="font-medium">Studio Settings</h2>
+        <form 
+          className="panel p-4 space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            updateSettings.mutate({ checkinWindowMinutes: windowMinutes });
+          }}
+        >
+          <div className="space-y-1.5 max-w-sm">
+            <label className="text-sm muted">Check-in Window (Minutes before class)</label>
+            <div className="flex gap-2">
+              <input
+                className="input flex-1"
+                type="number"
+                min="5"
+                max="1440"
+                value={windowMinutes}
+                onChange={(e) => setWindowMinutes(parseInt(e.target.value) || 30)}
+                required
+              />
+              <button 
+                type="submit" 
+                className="btn btn-primary"
+                disabled={updateSettings.isPending || windowMinutes === settings?.checkinWindowMinutes}
+              >
+                {updateSettings.isPending ? "Saving..." : "Save"}
+              </button>
+            </div>
+            <p className="text-xs muted">
+              Prevents members and trainers from checking in too early or late.
+            </p>
+          </div>
+        </form>
       </section>
     </div>
   );
