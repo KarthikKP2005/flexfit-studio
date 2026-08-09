@@ -32,6 +32,64 @@ role-based nav) and `trainers.ts` (a validation gap) — those are
 separate, still-undocumented defects, deliberately not backfilled here
 per Rule 4 (one defect per entry); they'll get their own entries if/when
 picked up.
+## 2026-08-09 — FIX(reschedule-modal): reset error/selection state on close and reselect
+
+**Type:** FIX
+**Defect:** RESCH-007
+**Behavior change:** yes — the reschedule modal's `error` message (and
+selected target class) now clears when the modal is closed via the
+overlay or Cancel button, when a different target class is picked, and
+after a successful reschedule. Previously `error` was only ever set, so
+a failed attempt's message stayed visible on the next reopen until
+overwritten. No tRPC procedure input/output/error shape touched — this
+is local `useState` in a client component.
+**Files touched:**
+- `src/components/reschedule-modal.tsx` — added `handleClose()`
+  (resets `selectedClassId` + `error`, then calls `onClose`), routed the
+  overlay `onClick`, Cancel button, and mutation `onSuccess` through it;
+  target-class selection now also clears `error`. Updated the file
+  header and inline comments to reflect the fix instead of flagging it
+  as open (was referencing plan.md item #38).
+- `documents/known-issues.md` — added RESCH-007 entry.
+**Tests:** no tRPC procedure is involved (pure frontend state), so
+there's nothing to characterize at the caller level per Rule 6's scope.
+No headless-browser tool was available this session to verify live the
+way RESCH-005/RESCH-006 were — verified by tracing every `onClose`/
+`onClick` path in the diff against the state-leak mechanism (component
+stays mounted across `isOpen` toggles). `tsc --noEmit` and `next build`
+both show only the same pre-existing, unrelated `auth.ts` and
+`corporate-bookings.ts` errors present before this change — nothing new.
+
+---
+
+## 2026-08-09 — FIX(plans): make subscribe's insert atomic and its payment reference collision-resistant
+
+**Type:** FIX
+**Defect:** PLAN-002, PLAN-003
+**Behavior change:** yes — `subscribe`'s membership insert and payment
+insert now run inside one `ctx.db.transaction`, so a failure on either
+side rolls both back instead of leaving an orphaned membership row.
+Payment `reference` is now `PAY-<uuid>` (`crypto.randomUUID()`) instead
+of `PAY-${Date.now()}`, so two subscriptions resolving in the same
+millisecond no longer produce identical references. `plans.list`,
+`create`, and `setActive` are unchanged; `subscribe`'s input schema,
+success return shape, and existing `NOT_FOUND`/`BAD_REQUEST`/`CONFLICT`
+errors are unchanged.
+**Files touched:**
+- `src/server/routers/plans.ts` — wrapped `subscribe`'s two inserts in a
+  transaction, switched the payment reference to a UUID, updated the
+  function's header comment to mark PLAN-002/PLAN-003 fixed instead of
+  "not fixed here."
+- `documents/known-issues.md` — marked PLAN-002 and PLAN-003 Fixed, kept
+  the original problem description, recorded what changed.
+**Tests:** no automated test harness exists anywhere in this repo
+currently (no `.test.ts` files, no vitest config on this branch) —
+manually verified against the dev server that `subscribe` still returns
+the membership row and creates a matching payment on the happy path, and
+that two back-to-back calls now produce distinct `PAY-<uuid>`
+references. `tsc --noEmit` and `next build` both clean. This follows the
+same manual-verification precedent already used for PLAN-001 and
+PLAN-004 in this log.
 
 ---
 
@@ -969,7 +1027,6 @@ regardless of whether the promotion itself was actually eligible.
 
 ---
 
->>>>>>> 003ae548ce921c509a49800e28b4dc56eebd8add
 ## 2026-08-06 — FIX(bookings): add member-facing UI for corporate booking
 
 **Type:** FIX
