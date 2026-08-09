@@ -44,6 +44,907 @@ diff before it landed; nothing here was auto-applied.
 **AI tool note:** Authored with AI assistance.
 
 ---
+## 2026-08-08 — FIX(memberships): getCurrentMembership rejects a not-yet-started membership
+
+**Type:** FIX
+**Defect:** MEMBER-006
+**Behavior change:** yes — `getCurrentMembership` (used by both
+`bookings.book` and `members.profile`) no longer treats a membership
+with a future `startDate` as the caller's current one. No procedure's
+input schema, output shape, or error codes changed — this only affects
+*which row* is resolved as "current," same shape as the MEMBER-002 fix.
+**Files:** `src/features/memberships/current-membership.ts`
+(`getCurrentMembership`'s `where` clause gained `startDate <= today`;
+docstring updated — the "not yet its own known-issues.md entry" note is
+now resolved)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server, since no UI path can create a future-dated
+membership:
+1. Inserted a membership directly into the dev DB for a member with no
+   other active membership: `startDate` 12 days in the future,
+   `status: "active"`.
+2. `members.profile` → `membership: null` (the future-dated row was not
+   picked) — before this fix it would have been.
+3. `bookings.book` → `FORBIDDEN`, "An active membership is required to
+   book classes." — same rejection a member with no membership at all
+   would get.
+4. Regression check: a different member's normal, already-started
+   active membership still resolved correctly on both `profile` and
+   `bookings.book`.
+5. Deleted the test membership row afterward.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's MEMBER-006 (plan.md item #21). `plans.subscribe`
+itself is untouched — it still only ever creates memberships with
+`startDate: today`, so this fix protects against future-dated rows
+however they come to exist (direct DB access, or a future admin
+membership-creation UI), rather than changing how memberships are
+created today.
+
+---
+
+## 2026-08-08 — DOCUMENT(members): log MEMBER-006 (getCurrentMembership doesn't check startDate)
+
+**Type:** DOCUMENT
+**Defect:** MEMBER-006
+**Behavior change:** no — nothing in the code changed for this entry.
+**Files:** `documents/known-issues.md`
+**Tests:** n/a
+
+plan.md item #21 ("membership start date is not consistently
+considered") was already referenced inline in `current-membership.ts`'s
+docstring since the MEMBER-002 fix, but had no known-issues.md entry of
+its own yet. Logged as **MEMBER-006** so the follow-up FIX has a defect
+id to reference, per Rule 2's checklist and the same DOCUMENT-then-FIX
+pattern used for MEMBER-005.
+
+---
+
+## 2026-08-08 — FIX(members): profile shows the member's actually-current membership
+
+**Type:** FIX
+**Defect:** MEMBER-002
+**Behavior change:** yes — `members.profile`'s `membership` field is now
+whichever row `getCurrentMembership` picks (`status: "active"` AND
+`endDate >= today`), not just whichever row has the latest `endDate`.
+Output *shape* is unchanged (same fields); only *which* membership row
+gets returned changes, for accounts where those two definitions used to
+disagree. `/dashboard` and `/profile` both render this field directly,
+so both now display the same membership `bookings.book` would actually
+charge against.
+**Files:** `src/server/routers/members.ts` (`profile` now calls
+`getCurrentMembership` first, then fetches the plan-joined row for that
+specific membership id instead of its own broader query; file and
+procedure header comments updated), `src/app/kiosk/page.tsx` (comment
+only — corrected a reference that called its own, separate,
+still-unfixed `memberships[0]` gap "the same ambiguity as MEMBER-002,"
+which would now misleadingly imply that gap was also fixed)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server, reproducing the exact disagreement scenario:
+1. `rahul.k@example.com`'s baseline: membership 1, `active`,
+   `endDate: 2026-11-06`.
+2. Refunded that payment as admin (`payments.refund`, unmodified) →
+   membership 1 flipped to `status: "cancelled"`, `endDate` unchanged
+   (still 2026-11-06, the later date).
+3. `plans.subscribe`d to a shorter plan → membership 13, `active`,
+   `endDate: 2026-09-07` (earlier than membership 1's).
+4. `members.profile` → returned membership **13** (active, earlier
+   endDate) — confirming the old "latest endDate wins" pick (which would
+   have returned cancelled membership 1) no longer happens.
+5. Cancelled and rebooked a class → the new booking's `membershipId` was
+   **13**, matching what `profile` now shows — `bookings.book` and
+   `profile` agree.
+6. `/dashboard`, `/profile`, `/kiosk` all still render (200).
+Also ran `tsc --noEmit` and `next build` (both clean). Test bookings
+created during verification were cancelled afterward; seed data was not
+otherwise altered (the refund/resubscribe was to a real seeded member,
+left in its new state as a natural consequence of exercising unmodified
+mutations, same as prior sessions' verification pattern).
+
+Closes known-issues.md's MEMBER-002 (plan.md item #20). Depends on the
+REFACTOR entry immediately below (`getCurrentMembership` extraction),
+without which this commit would have had to duplicate the eligibility
+query a third time. PLAN-001 (this member's active-membership subscribe
+check) and MEMBER-001 (kiosk lookup ambiguity) are unrelated and
+untouched. See `architecture-decisions.md`'s 2026-08-08 entry for the
+full "why two commits, why this folder, what's out of scope" reasoning.
+
+---
+
+## 2026-08-08 — REFACTOR(bookings): extract activeMembershipFor into a shared getCurrentMembership
+
+**Type:** REFACTOR
+**Defect:** n/a (see the FIX(members) entry directly above — MEMBER-002)
+**Behavior change:** no — `bookings.book`'s eligibility check is
+byte-for-byte identical before and after; only the query's location
+moved.
+**Files:** `src/features/memberships/current-membership.ts` (new —
+`getCurrentMembership(db, userId)`, the exact where-clause/orderBy
+copied verbatim from `bookings.ts`'s private `activeMembershipFor`),
+`src/server/routers/bookings.ts` (`activeMembershipFor` removed, its one
+call site now calls the shared function; `desc` dropped from the
+drizzle-orm import since it was only used by the removed function; file
+header comment updated)
+**Tests:** no automated test harness in this branch — verified by direct
+comparison: the moved function's where clause (`userId` match, `status
+= "active"`, `endDate >= today`) and `orderBy(desc(endDate))` tiebreak
+are unchanged, just relocated. `tsc --noEmit` clean.
+
+Sets up the shared resolver that `members.ts`'s `profile` switches to in
+the FIX committed right after this one (see above) — done as a separate
+REFACTOR-then-FIX pair per Rule 3, since this commit alone changes
+nothing about what any procedure returns.
+
+---
+
+## 2026-08-08 — FIX(plans): reject subscribing while an active membership exists
+
+**Type:** FIX
+**Defect:** PLAN-001
+**Behavior change:** yes — `plans.subscribe` now throws `CONFLICT`
+("You already have an active membership. Wait for it to end before
+subscribing again.") if the caller already has a `status: "active"`
+membership, instead of silently inserting a second one. `plans.list`,
+`create`, and `setActive` are unchanged.
+**Files:** `src/server/routers/plans.ts` (`subscribe` gained an
+existence check before the insert; file and procedure header comments
+updated), `src/app/plans/page.tsx` (comment only — it already surfaces
+`subscribe.error.message` in the UI, so no JSX/logic change was needed
+for the new error to reach the member)
+**Policy:** Reject was chosen explicitly with the user after plan.md
+flagged this as a genuine ambiguity with no recommended default (unlike
+COMPANY-001) — full reasoning in `architecture-decisions.md`'s
+2026-08-08 entry.
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server:
+1. Logged in as a seeded member with an active membership (`rahul.k@example.com`)
+   → `plans.subscribe` → `CONFLICT`, new message.
+2. Refunded that member's payment as admin (`payments.refund`,
+   unmodified) → their membership flipped to `status: "cancelled"`
+   (existing, unmodified behavior).
+3. `plans.subscribe` → succeeded, new `status: "active"` membership
+   created.
+4. `plans.subscribe` again immediately → `CONFLICT` again, confirming
+   the check applies to the freshly-created membership too.
+5. `/plans` still renders (200) with the fix in place.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's PLAN-001 (plan.md item #19/#4 depending on
+numbering — "Users can create multiple simultaneous active
+memberships"). PLAN-002 (non-atomic membership+payment insert) and
+PLAN-003 (payment reference collisions) are unrelated and untouched.
+Renewal/extension is explicitly out of scope for this fix — see the
+"Named tradeoff" paragraph in `architecture-decisions.md`.
+## 2026-08-08 — FIX(admin-companies): enforce one company per member
+
+**Type:** FIX
+**Defect:** COMPANY-001
+**Behavior change:** yes — `adminCompanies.linkMember` now rejects
+linking a member who is already linked to *any* company (previously
+only rejected an exact duplicate of the same user+company pair). New
+error message for the new case: `"This member is already linked to a
+different company. Unlink them first."` The existing same-company
+duplicate message is unchanged.
+**Files:** `src/db/schema.ts` (`companyMembers.userId` now `.unique()`),
+`src/server/routers/admin-companies.ts` (`linkMember`'s existence check
+widened from "same user+company" to "any link for this user"; removed
+the now-unused `and` import), `src/server/routers/corporate-bookings.ts`
+(comments only — `getCompanyForMember` and the file header updated to
+reflect that a user can no longer have more than one active-company
+link; no query logic changed)
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server:
+1. Reset the dev DB (`pnpm db:reset`) to apply the new constraint —
+   `drizzle-kit push` can't diff an in-place unique-constraint addition
+   on an existing SQLite table (`LibsqlError: no such index:
+   company_members_user_id_unique`, a drizzle-kit/libsql ordering bug,
+   not an application issue); a fresh `CREATE TABLE` via reset sidesteps
+   it. Confirmed seed data links no user to more than one company before
+   resetting, so nothing was silently dropped.
+2. `adminCompanies.linkMember` for a previously-unlinked member (id 10)
+   to company 1 → succeeds.
+3. Same member to company 2 → `CONFLICT`, new "different company"
+   message.
+4. Same member to company 1 again → `CONFLICT`, original "this company"
+   message, unchanged.
+5. Unlinked the test member afterward to restore clean seed state.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's COMPANY-001 (plan.md item #12). Full reasoning
+for the schema change, and the drizzle-kit/libsql push quirk hit while
+applying it, is in `architecture-decisions.md`'s 2026-08-08 entry.
+`corporate-bookings.ts`'s `getCompanyForMember` query itself is
+untouched — only the comment describing its now-resolved ambiguity
+changed.
+
+---
+
+## 2026-08-08 — FIX(classes): stop leaking the class roster to unauthenticated callers
+
+**Type:** FIX
+**Defect:** CLASS-001
+**Behavior change:** yes — `classes.byId` (renamed `classes.publicById`,
+still `publicProcedure`) no longer returns a `roster` field at all; it
+now returns the class row only. Previously anyone, signed in or not,
+could call it and get every attendee's name and email for that class.
+Confirmed `byId` had no frontend caller, so no UI is affected. Attendee
+info is unaffected for its legitimate (staff) consumers —
+`bookings.rosterFor` and `corporateBookings.rosterFor` (both
+`staffProcedure`, both pre-existing, both unchanged) still return the
+same data they always did.
+**Files:** `src/server/routers/classes.ts` (`byId` → `publicById`,
+roster query removed entirely; file header and the procedure's doc
+comment updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server:
+1. Called `classes.publicById` with no session cookie at all — response
+   contained only class fields, no `roster` key anywhere.
+2. Confirmed the old `classes.byId` path no longer resolves
+   (`NOT_FOUND`, "No procedure found on path").
+3. Confirmed `bookings.rosterFor` still returns full attendee
+   names/emails for a staff (admin) caller, unchanged — and still
+   correctly rejects an unauthenticated caller with
+   `UNAUTHORIZED`/"Sign in required."
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+No new `classes.rosterFor` was added — the staff-only roster capability
+plan.md asks to "keep" already existed in `bookings.rosterFor`/
+`corporateBookings.rosterFor`, in the exact shape needed; duplicating it
+a third time would have worked against the brief's own "pull repeated
+logic into one place instead of four."
+
+Closes plan.md's member-flow item #15 ("classes.byId publicly exposes
+the roster") and known-issues.md's CLASS-001.
+
+---
+
+## 2026-08-08 — FIX(classes): clean up all bookings, credits, and notifications when a class is cancelled
+
+**Type:** FIX
+**Defect:** CLASS-004
+**Behavior change:** yes — cancelling a class now cancels every active
+booking on it (personal AND corporate, `booked` AND `waitlisted`),
+refunds credits for every one that had actually paid (unconditional
+full refund, no free-cancellation-window check — see the Rule 8 note
+below), and notifies every affected member. Previously only `booked`
+personal bookings were cancelled, with no refund and no notification for
+anyone. `classes.cancel`'s return shape changed — it now returns
+`{ cls, summary }` instead of just the class row, per plan.md's
+"structured cancellation summary" ask; `cancel` has no frontend caller
+today, so nothing consumes the old shape.
+**Files:** `src/features/bookings/class-cancellation-service.ts` (new —
+`cancelClass`, all the actual cleanup logic, per Rule 7), `src/server/
+routers/classes.ts` (`cancel` reduced to a thin wrapper; file header and
+`cancel`'s doc comment updated to match), `documents/known-issues.md`
+(CLASS-004 rewritten as fixed; NOTIF-003 and CORP-003's entries updated
+— the latter's cross-reference to CLASS-004 was stale: cancelling a
+class turns out not to need `promoteNextWaitlisted` at all, since the
+whole waitlist is cancelled along with the class, unlike a reschedule or
+a normal cancel which only ever free a single seat)
+**Rule 8 decision (refund policy):** every cancelled `booked` booking
+with `creditsUsed > 0` is refunded in full, unconditionally — no
+`FREE_CANCELLATION_HOURS`/`CORPORATE_FREE_CANCELLATION_HOURS` window,
+unlike member-initiated cancellation. Those windows discourage a member
+from bailing late on their own choice; here the studio cancelled the
+class, so there's no late-notice behavior to discourage. Confirmed with
+the user before implementing — see `known-issues.md`'s CLASS-004 entry
+for the full reasoning.
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded accounts, covering all
+four combinations across two classes: a real personal `booked` booking
+(real charge, refunded on cancel), a real corporate `booked` booking
+(real charge to the company, refunded on cancel), a personal booking
+that waitlisted once full (never charged, correctly just cancelled with
+no refund needed), a corporate booking that waitlisted once full (same),
+and an unlimited-plan personal booking (never actually decremented,
+correctly left alone). Cancelling both test classes confirmed: all 5
+bookings flipped to `cancelled` including the 2 that were `waitlisted`
+(untouched before this fix); the personal membership and company credit
+pool were refunded to their exact pre-test values; the unlimited
+membership was untouched; and all 5 affected members got a
+`class_cancelled` notification, including the 2 who were only ever
+waitlisted (none before this fix). `tsc --noEmit` and `pnpm build` both
+clean.
+
+Closes plan.md's member-flow item #14 ("Class cancellation doesn't clean
+up member bookings properly") and known-issues.md's CLASS-004.
+
+---
+
+## 2026-08-07 — FIX(reschedules): reject rescheduling to a class with a different credit cost
+
+**Type:** FIX
+**Defect:** RESCH-004
+**Behavior change:** yes — rescheduling to a same-named class whose
+`creditCost` differs from the original's is now rejected outright
+(`BAD_REQUEST`, "You can only reschedule to a class with the same
+credit cost.") instead of silently carrying the original's stale
+`creditsUsed` forward. Rescheduling between same-named classes with
+*equal* cost is completely unaffected — same behavior as before, for all
+four transitions. No other tRPC procedure's input, output shape, or
+error codes/messages changed.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: one new
+check, placed right after the existing "same name" check, before any
+transition-specific logic runs; `validateReschedule`: identical check,
+so the preview agrees with the mutation; file header and both
+procedures' JSDoc updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with a real seeded membership:
+1. Case A (mismatched cost): booked a 5-credit class, attempted to
+   reschedule to a same-named 8-credit class → both
+   `validateReschedule` (`valid: false`) and `reschedule`
+   (`BAD_REQUEST`) correctly rejected it, with the original booking
+   completely untouched.
+2. Case B (matching cost): booked a 5-credit class, rescheduled to a
+   same-named 5-credit class → succeeded exactly as before
+   (`booked → booked`, `creditsUsed: 5` carried forward) — confirms the
+   new check doesn't regress the common case.
+3. All test classes/bookings/reschedule records deleted afterward; the
+   member's membership restored to its exact pre-test value (10
+   credits).
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #13 ("Reschedule preserves the wrong
+credit cost") and known-issues.md's RESCH-004 — the last of the four
+RESCH defects in `reschedules.ts` (RESCH-001/002/003 fixed in prior
+commits on this branch lineage); that file is now fully closed out
+against known-issues.md.
+
+---
+
+## 2026-08-07 — FIX(reschedules): promote the original class's waitlist after a confirmed reschedule
+
+**Type:** FIX
+**Defect:** RESCH-003
+**Behavior change:** yes — rescheduling away from a class you were
+`booked` into now promotes that class's own waitlist (same shared logic
+`bookings.ts`'s/`corporate-bookings.ts`'s `cancel` already use) after the
+original booking is cancelled, instead of leaving the freed seat
+unclaimed and anyone waitlisted there stuck indefinitely. Rescheduling
+away from a `waitlisted` original still triggers no promotion (correct
+— no seat was held to free). No tRPC procedure's input, output shape,
+or error codes/messages changed; no change to the promotion mechanics
+themselves.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: added one
+call to the existing, already-fixed `promoteNextWaitlisted`
+(`src/features/bookings/waitlist-service.ts`) right after the original
+booking is cancelled, guarded by `status === "booked"`; file header and
+the mutation's JSDoc updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded accounts:
+1. Filled a capacity-1 class with one member (real confirmed booking,
+   real charge) and had a second member join its waitlist.
+2. Rescheduled the first member away to a different, same-named class →
+   the reschedule itself succeeded normally (new booking `booked`, same
+   `creditsUsed` — a `booked → booked` transition, untouched by
+   RESCH-001/002).
+3. Confirmed the waitlisted member on the *original* class was
+   correctly promoted: `bookings.mine` showed `status: "booked"`,
+   `creditsUsed` matching the class's cost, and a real
+   `waitlist_promotion` notification was created — none of which
+   happened before this fix.
+4. All test classes/bookings/reschedule records/notifications deleted
+   afterward; the rescheduling member's membership restored to its
+   exact pre-test value (10 credits); the promoted member's unlimited
+   membership confirmed untouched.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #12 ("Reschedule never promotes the
+old class's waitlist after freeing a seat") and known-issues.md's
+RESCH-003 — see that entry for what's still explicitly out of scope
+(RESCH-004, a separate defect ID, untouched by this commit).
+
+---
+
+## 2026-08-07 — FIX(reschedules): refund credits when a confirmed reschedule becomes waitlisted
+
+**Type:** FIX
+**Defect:** RESCH-002
+**Behavior change:** yes — rescheduling a paid (confirmed) booking into
+a class that's full now creates the new waitlisted booking with
+`creditsUsed: 0` (matching every other waitlisted booking in the app)
+and refunds the original's already-deducted credits back to the
+membership, instead of silently carrying the nonzero charge forward. A
+later promotion of that booking (via the already-fixed BOOK-004 path)
+now charges exactly once instead of twice. No tRPC procedure's input,
+output shape, or error codes/messages changed. The `booked→booked` and
+`waitlisted→waitlisted` transitions are byte-for-byte unchanged — this
+is the mirror-image fix to RESCH-001's `waitlisted→confirmed` case,
+same file, same invariant, opposite direction.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: added a
+`becomingWaitlisted` branch that zeroes the new booking's `creditsUsed`
+and refunds the original's `creditsUsed` to the membership, using the
+same `membership`/`UNLIMITED_CREDITS` handling already in place for
+RESCH-001; file header and the mutation's JSDoc updated; no change to
+`validateReschedule` — this transition was never rejected, only
+mis-accounted, so the preview needed no new check)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with a real seeded membership:
+1. Booked a class for real (rahul's membership: 10 → 4, a genuine
+   6-credit charge).
+2. Rescheduled that confirmed booking into a same-named, capacity-1
+   class that was already full → the new booking came back
+   `status: "waitlisted"`, `creditsUsed: 0` (not the stale 6), and the
+   membership was correctly refunded back to 10.
+3. Cancelled the booking occupying that full class, triggering
+   promotion (BOOK-004's shared `tryPromotePersonalCandidate`) → the
+   waitlisted booking was promoted to `status: "booked"`,
+   `creditsUsed: 6`, and the membership ended at exactly 4 — charged
+   once for the one continuous booking, not twice.
+4. All test classes/bookings/reschedule records deleted afterward;
+   rahul's membership restored to its exact pre-test value (10
+   credits); vikram's unlimited membership (999) confirmed untouched.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #11 ("Reschedule to a full class can
+double-charge") and known-issues.md's RESCH-002 — see that entry for
+what's still explicitly out of scope (RESCH-003/RESCH-004, both separate
+defect IDs, both untouched by this commit).
+
+---
+
+## 2026-08-07 — FIX(reschedules): charge credits when a waitlisted reschedule becomes confirmed
+
+**Type:** FIX
+**Defect:** RESCH-001
+**Behavior change:** yes — rescheduling a waitlisted (0-credit) booking
+into a class that isn't full now charges the target class's `creditCost`
+against the member's membership (rejecting with `FORBIDDEN`/"Not enough
+class credits remaining." if they can't afford it) instead of silently
+creating a confirmed, unpaid booking. Every other reschedule transition
+(booked→booked, booked→waitlisted, waitlisted→waitlisted) is byte-for-
+byte unchanged — none of them had this bug. No tRPC procedure's input,
+output shape, or other error codes/messages changed.
+**Files:** `src/server/routers/reschedules.ts` (`reschedule`: added a
+credit check + real charge for the waitlisted→confirmed transition only,
+using the booking's existing `membershipId` and the target class's
+`creditCost`; `validateReschedule`: mirrored the same check so the
+preview and the mutation agree; file header and both procedures'
+comments updated)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with a real seeded membership:
+1. Case A (enough credits): rahul (10 credits) joined a capacity-1
+   class's waitlist (booking created with `creditsUsed: 0`, as always).
+   Rescheduled to a same-named, non-full class costing 5 credits →
+   `validateReschedule` previewed valid, the mutation returned the new
+   booking as `status: "booked"`, `creditsUsed: 5` (not the old stale
+   0), and rahul's membership correctly dropped to 5.
+2. Case B (insufficient credits): same setup, but rahul's membership was
+   drained to 0 credits first via a second real booking. Rescheduling
+   into a class costing 8 → `validateReschedule` returned
+   `valid: false`/"Not enough class credits remaining.", and the mutation
+   threw the identical `FORBIDDEN` error. The original waitlisted
+   booking was untouched, no new booking was created, and the membership
+   balance stayed at 0.
+3. All test classes/bookings/reschedule records deleted afterward;
+   rahul's membership restored to its exact pre-test value (10 credits).
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #10 ("Reschedule from a waitlisted
+booking creates a free confirmed booking") and known-issues.md's
+RESCH-001 — see that entry for what's still explicitly out of scope
+(RESCH-002/003/004, all separate defect IDs, all untouched by this
+commit).
+
+---
+
+## 2026-08-07 — FIX(bookings): verify membership credit before promoting a personal waitlist candidate
+
+**Type:** FIX
+**Defect:** BOOK-004
+**Behavior change:** yes — a personal waitlist candidate whose membership
+can no longer afford the class is now correctly skipped (stays
+waitlisted, no charge, no confirmation) instead of being wrongly
+confirmed as `booked` with the deduction floored at zero via
+`Math.max(0, ...)`. The next-oldest eligible candidate (personal or
+corporate) is promoted instead of nobody. No tRPC procedure's input,
+output shape, or error codes/messages changed. A booking with no
+`membershipId`, or one whose membership row can no longer be found, is
+still treated as eligible, exactly as before — that narrower edge case
+is out of scope for this defect.
+**Files:** `src/features/bookings/waitlist-service.ts`
+(`promotePersonalCandidate` renamed to `tryPromotePersonalCandidate` and
+rewritten to verify `creditsRemaining` before promoting, mirroring
+`tryPromoteCorporateCandidate`'s shape exactly; the main loop in
+`promoteNextWaitlisted` made symmetric between the two sources), `src/
+server/routers/bookings.ts` and `src/server/routers/corporate-bookings.ts`
+(comments only, describing the now-fully-fixed promotion behavior)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded accounts, mirroring
+CORP-001's exact test with roles swapped:
+1. Capacity-1 class (cost 9). Filled personally. A personal candidate
+   (rahul, limited membership) joined the waitlist while their
+   membership could afford it (10 credits).
+2. Rahul's membership was then spent down to 1 credit via a second,
+   real personal booking on an unrelated class — so by promotion time,
+   rahul could no longer afford the 9-credit class.
+3. A corporate candidate (meera, TechCorp) joined the same waitlist
+   afterward (newer than rahul).
+4. Cancelled the confirmed booking → rahul was correctly **skipped**
+   (`bookings.mine` still showed `status: "waitlisted"`, no
+   notification sent to him, his membership balance stayed at 1 — not
+   further deducted for a booking that didn't happen), and meera was
+   correctly promoted instead (`status: "booked"`, correct credit
+   deduction from TechCorp, got the `waitlist_promotion` notification).
+5. All test classes/bookings/notifications deleted afterward; rahul's
+   membership and TechCorp's balance restored to their exact pre-test
+   values (10 and 98).
+6. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #9 ("Normal waitlist promotion can
+overdraw a membership") and known-issues.md's BOOK-004 — see that entry
+for the Rule 8 policy decision (skip-and-try-next, reused verbatim from
+CORP-001 rather than re-decided, and why) and for what's still
+explicitly out of scope (the missing-membershipId edge case, and the
+broader check-then-write transactional gap shared with every other
+booking flow).
+
+---
+
+## 2026-08-07 — FIX(bookings): verify company credit before promoting a corporate waitlist candidate
+
+**Type:** FIX
+**Defect:** CORP-001
+**Behavior change:** yes — a corporate waitlist candidate whose company
+can no longer afford the class is now correctly skipped (stays
+waitlisted, no charge, no confirmation) instead of being wrongly
+confirmed as `booked` with the deduction silently omitted. The next-
+oldest eligible candidate (personal or corporate) is promoted instead of
+nobody. No tRPC procedure's input, output shape, or error codes/messages
+changed. BOOK-004 (personal promotion's own missing credit check) is
+untouched — a personal candidate is still promoted unconditionally.
+**Files:** `src/features/bookings/waitlist-service.ts`
+(`promoteNextWaitlisted` rewritten from "peek one candidate per table,
+pick the older" to "merge all waitlisted candidates from both tables
+into one chronological queue, walk it, skip an ineligible corporate
+candidate and continue" — split into two new helpers,
+`promotePersonalCandidate`/`tryPromoteCorporateCandidate`, for
+readability), `src/server/routers/bookings.ts` and
+`src/server/routers/corporate-bookings.ts` (comments only, describing
+the new behavior)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded, company-linked accounts:
+1. Capacity-1 class (cost 10). Filled personally. A corporate candidate
+   (meera, TechCorp) joined the waitlist while TechCorp could afford it
+   (balance 98).
+2. TechCorp's balance was then spent down to 8 via a second, real
+   corporate booking on an unrelated class — so by promotion time,
+   meera's company could no longer afford the 10-credit class.
+3. A personal candidate (vikram) joined the same waitlist afterward
+   (newer than meera).
+4. Cancelled the confirmed booking → meera was correctly **skipped**
+   (`corporateBookings.mine` still showed `status: "waitlisted"`, no
+   notification sent to her, TechCorp's balance stayed at 8 — not
+   further deducted for a booking that didn't happen), and vikram was
+   correctly promoted instead (`status: "booked"`, got the
+   `waitlist_promotion` notification).
+5. All test classes/bookings/notifications deleted afterward; TechCorp's
+   balance restored to its exact pre-test value (98).
+6. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's member-flow item #8 ("Corporate waitlist promotion can
+create a free booking") and known-issues.md's CORP-001 — see that entry
+for the Rule 8 policy decision (skip-and-try-next, chosen explicitly
+over stop-and-leave-waitlisted, and why) and for what's still explicitly
+out of scope (BOOK-004, the transactional/atomicity gap).
+
+---
+
+## 2026-08-07 — FIX(bookings): unify normal and corporate waitlist promotion
+
+**Type:** FIX
+**Defect:** CORP-003
+**Behavior change:** yes — when a confirmed booking is cancelled (personal
+or corporate), the class's waitlist is now promoted from whichever
+candidate has *genuinely* waited longest across both `bookings` and
+`corporateBookings`, not just whichever table the cancellation happened
+to come from. No tRPC procedure's input, output shape, or error
+codes/messages changed. BOOK-004 and CORP-001 (the promotion mechanics'
+own separate, already-documented bugs) are preserved byte-for-byte —
+only candidate *selection* changed.
+**Files:** `src/features/bookings/waitlist-service.ts` (new —
+`promoteNextWaitlisted`, shared by both call sites below),
+`src/server/routers/bookings.ts` (`cancel`'s ~50-line inline promotion
+block replaced with one call), `src/server/routers/corporate-bookings.ts`
+(same, and the now-unused `notifications` import removed)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded, company-linked accounts
+(TechCorp Inc / rahul.k, meera.n, vikram.s), both directions:
+1. Capacity-1 class filled by a personal booking. Queued a *corporate*
+   waitlist candidate, then — after a real ~10s gap — a *newer personal*
+   candidate. Cancelled the personal booking → the older *corporate*
+   candidate was correctly promoted (status: booked), the newer personal
+   one correctly stayed waitlisted, and the promoted member received the
+   existing `waitlist_promotion` notification (NOTIF-002).
+2. Mirror case on a second class: filled by a corporate booking, older
+   *personal* candidate queued first, newer corporate candidate second.
+   Cancelled the corporate booking → the older *personal* candidate was
+   correctly promoted, the newer corporate one correctly stayed
+   waitlisted.
+3. All test classes/bookings/notifications deleted afterward; TechCorp's
+   credit pool balance restored to its pre-test value.
+4. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's critical-problems item #2 ("Waitlists don't coordinate")
+and known-issues.md's CORP-003 — see that entry for exactly which
+adjacent gaps (BOOK-004, CORP-001, transactional promotion, RESCH-003,
+CLASS-004) are explicitly still open and why. CORP-001's and BOOK-004's
+own known-issues.md entries updated to point at the promotion logic's
+new location (`waitlist-service.ts`), since the bugs themselves moved
+with it unchanged. New file follows the same `src/features/bookings/`
+home CORP-002's `capacity-service.ts` established in the previous commit.
+
+---
+
+## 2026-08-07 — FIX(bookings): count both personal and corporate bookings toward class capacity
+
+**Type:** FIX
+**Defect:** CORP-002
+**Behavior change:** yes — a class already at capacity from one booking
+source (personal or corporate) now correctly waitlists a booking or
+reschedule attempted from the *other* source, instead of wrongly
+confirming it and exceeding capacity. No tRPC procedure's input, output
+shape, or error codes/messages changed — only the truth value feeding
+the existing booked-vs-waitlisted branching.
+**Files:** `src/features/bookings/capacity-service.ts` (new —
+`getConfirmedOccupancy`/`isClassFull`, shared by all four call sites
+below), `src/server/routers/bookings.ts` (`book`'s `isFull` check),
+`src/server/routers/corporate-bookings.ts` (`book`'s `isFull` check, and
+the now-unused `sql` import removed), `src/server/routers/reschedules.ts`
+(`reschedule` and `validateReschedule`'s `targetIsFull` checks)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server with real seeded, company-linked accounts
+(TechCorp Inc / rahul.k, meera.n, vikram.s):
+1. Capacity-1 class, personal booking fills it → corporate booking on
+   the same class → `status: "waitlisted"`, `creditsUsed: 0` (previously
+   would have wrongly confirmed with `creditsUsed: 1`).
+2. Same test, reversed: corporate fills → personal booking → correctly
+   waitlisted.
+3. Reschedule: booked a source class personally, filled a same-named
+   target class (capacity 1) via a corporate booking, then rescheduled
+   into it → `validateReschedule` preview correctly showed
+   `targetIsFull: true`, and the actual `reschedule` mutation correctly
+   returned `newStatus: "waitlisted"`, matching the preview.
+4. All test classes/bookings deleted afterward; membership credit
+   balances and the TechCorp credit pool restored to their pre-test
+   values.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Closes plan.md's critical-problems item #1 ("Class capacity can be
+exceeded") and known-issues.md's CORP-002 — see that entry for exactly
+which related gaps (schedule display's spotsLeft, ADMIN-001, trainer
+roster, the check-then-insert race) are explicitly still open and why.
+New file `src/features/bookings/capacity-service.ts` follows
+AGENT_RULES.md Rule 7's own literal filename example; reasoning for
+introducing `src/features/` now (scoped to just this one extraction, not
+a general router rewrite) recorded in `architecture-decisions.md`.
+
+---
+
+## 2026-08-07 — FIX(reschedule-modal): stop the infinite refetch loop in the class picker
+
+**Type:** FIX
+**Defect:** RESCH-006
+**Behavior change:** yes — the reschedule picker now actually loads and
+displays classes; before this fix it never resolved data in the browser
+at all (permanently stuck on "No other classes available"). No tRPC
+procedure changed — `classes.list` is called exactly as before, just
+with a stable `from` value instead of a fresh one every render.
+**Files:** `src/components/reschedule-modal.tsx` (`from` computed via
+`useMemo(() => new Date().toISOString(), [isOpen])` instead of inline
+`new Date().toISOString()` on every render)
+**Tests:** no automated test harness in this branch — verified live via
+Playwright/Chromium (the same session that discovered the bug):
+1. Reopened the "Sunrise Yoga" reschedule modal for the same real
+   booking used to discover RESCH-006.
+2. Polled the `classes.list` request count every 300ms for 6 seconds:
+   steady at 1, not climbing (was 200+ and still climbing).
+3. Picker rendered all 8 other real "Sunrise Yoga" instances and
+   correctly excluded the original (Sat 8 Aug) — confirming RESCH-005
+   alongside this fix, screenshotted as evidence.
+4. Zero browser console errors.
+5. `tsc --noEmit` and `pnpm build` both clean.
+
+Requested explicitly as an immediate follow-up to the previous entry's
+discovery, fixed in this separate commit (not amended into RESCH-005's
+commit) per Rule 4 — one defect, one commit — even though both landed on
+the same branch back to back.
+
+---
+
+## 2026-08-07 — DOCUMENT(reschedule-modal): log a newly-discovered infinite-refetch-loop bug
+
+**Type:** DOCUMENT
+**Defect:** RESCH-006
+**Behavior change:** no — nothing in the code changed for this entry.
+**Tests:** n/a
+
+While verifying RESCH-006's sibling fix (RESCH-005, next entry) in a
+real browser, discovered that `reschedule-modal.tsx`'s `classes.list`
+query never actually resolves usable data — `from: new
+Date().toISOString()` is computed inline on every render, producing a
+new query key every time, which triggers an infinite fetch/re-render
+loop (reproduced: 200+ requests in 6 seconds, climbing with no sign of
+stopping). The picker shows "No other X classes available" permanently,
+regardless of what data actually exists. Confirmed via `git stash`
+against the unmodified code that this predates today's session entirely
+— not introduced by RESCH-005. Logged in `known-issues.md` with full
+repro details rather than silently fixed alongside RESCH-005 (Rule 4 —
+one defect per commit) or left undocumented.
+
+---
+
+## 2026-08-07 — FIX(reschedule-modal): exclude the original class from the reschedule picker
+
+**Type:** FIX
+**Defect:** RESCH-005
+**Behavior change:** yes — the class the member is already booked into no
+longer appears as a pickable target in the reschedule modal. No tRPC
+procedure changed; `reschedules.reschedule` is called exactly as before.
+**Files:** `src/components/reschedule-modal.tsx` (new `fromClassId` prop,
+`sameNameClasses` filter now also excludes it), `src/app/dashboard/page.tsx`
+(the only call site — `rescheduleModal` state gained `classId`, sourced
+from `bookings.mine`'s existing `classId` field, no new fetch)
+**Tests:** no automated test harness in this branch — verified two ways:
+1. Live in a headless Chromium session (Playwright): logged in as
+   rahul.k@example.com, opened the reschedule modal for a real "Sunrise
+   Yoga" booking. Blocked by RESCH-006 (see previous entry) from
+   observing the picker's actual rendered list, since it never resolves
+   in the browser regardless of this fix — documented there rather than
+   claimed as a false pass here.
+2. Direct data-level check: fetched real `classes.list` output (9
+   "Sunrise Yoga" instances) and applied the exact filter expression used
+   in the component with `fromClassId: 700` (the real original booking's
+   class) — confirmed id `700` is excluded and the other 8 instances are
+   not.
+Also ran `tsc --noEmit` and `pnpm build` (clean).
+
+Closes plan.md's member-flow item #5 ("Reschedule modal doesn't truly
+exclude the current class from the picker") and known-issues.md's
+RESCH-005. Deliberately scoped to just this: RESCH-006 (found during
+verification) and plan.md item #38 (stale error state, a separate,
+already-known gap in this same file) are both left untouched.
+
+---
+
+## 2026-08-07 — FIX(members): add profile-edit UI
+
+**Type:** FIX
+**Defect:** MEMBER-004
+**Behavior change:** yes — a new route (`/profile`) now exists and is
+reachable from `NavBar` (clicking your own name). No existing route,
+procedure input/output, error code, or error message changed;
+`members.profile` and `members.updateProfile` were called exactly as
+they already existed, not modified.
+**Files:** `src/app/profile/page.tsx` (new), `src/components/NavBar.tsx`
+(the plain `{user.name}` text is now a link to `/profile`)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server:
+1. `members.profile` before → baseline name/phone recorded.
+2. `members.updateProfile` with a new name/phone → 200, row updated.
+3. `members.profile` after → reflects the new values.
+4. `auth.me` after → also reflects the new name, confirming the
+   NavBar-visible name updates too (NavBar reads `auth.me`, not
+   `members.profile`, hence invalidating both on save).
+5. `members.updateProfile` with `phone: null` → phone cleared correctly.
+6. Restored the test account's original name/phone afterward so
+   `flexfit.db` is unpolluted.
+Also ran `tsc --noEmit` and `pnpm build` (clean, `/profile` compiles as
+a static route).
+
+Closes plan.md's member-flow item #4 ("No profile-edit UI — mutation
+exists, no form") and known-issues.md's MEMBER-004. `updateProfile` was
+read closely before building on top of it — confirmed it only accepts
+name/phone, so no email/password editing was added (that capability
+doesn't exist server-side, and inventing it wasn't asked for or in
+scope). No other files were touched.
+
+---
+
+## 2026-08-07 — FIX(notifications): send membership-expiring reminders via a real daily cron
+
+**Type:** FIX
+**Defect:** NOTIF-004
+**Behavior change:** yes — a new standalone background process (`pnpm
+cron`) inserts `membership_expiring` notifications once daily; a new
+admin-only mutation and button let staff trigger the same job on demand.
+No existing procedure's input/output/error shape changed.
+**Files:** `src/server/jobs/membership-expiry.ts` (new — the shared job
+function), `src/server/cron.ts` (new — standalone process that schedules
+it via `node-cron` at 08:00 daily), `src/server/routers/admin.ts` (new
+`runMembershipExpiryCheck` mutation, reuses the same function),
+`src/app/admin/reports/page.tsx` (new "Send expiry reminders now"
+button), `src/server/routers/notifications.ts` and
+`src/app/notifications/page.tsx` (header comments corrected — no longer
+claim this type is never inserted), `package.json`/`pnpm-lock.yaml`
+(added `node-cron`, new `pnpm cron` script)
+
+**Discovered and reverted mid-fix:** the first version of this scheduled
+the job from `src/instrumentation.ts` (Next's server-startup hook), which
+seemed like the more idiomatic choice. It was wrong: Next's dev-mode
+webpack also compiles `instrumentation.ts` for the edge runtime, and
+`node-cron`'s internal `node:crypto` import isn't handled there — the
+failure wasn't a harmless log line, it 500'd unrelated API routes
+(`auth.login` included) during manual verification. Adding `node-cron` to
+`serverExternalPackages` in `next.config.mjs` (the standard fix for this
+class of problem, already used for `@libsql/client`) didn't resolve it,
+since that only covers the nodejs bundle target, not the edge one Next
+separately builds for `instrumentation.ts`. Deleted `instrumentation.ts`
+and moved the schedule into `server/cron.ts`, a plain script run via
+`tsx` outside Next's build entirely — confirmed clean afterward.
+
+**Tests:** no automated test harness in this branch — verified manually:
+1. Seeded a membership with `endDate` inside the 14-day window (already
+   present via seed data / `admin.expiringMemberships`).
+2. Called `admin.runMembershipExpiryCheck` directly against the running
+   dev server → returned `{notified: N}` matching
+   `expiringMemberships`'s count.
+3. Queried that member's `notifications.list` → new `membership_expiring`
+   row present with the correct plan name and expiry date.
+4. Ran `pnpm cron` standalone → confirmed the "job scheduled" log line
+   and no errors, independent of `pnpm dev`.
+5. `tsc --noEmit` and `pnpm build` both clean; `pnpm dev` no longer shows
+   the `node:crypto` error and ordinary requests (`auth.login` etc.) work
+   normally again.
+
+Closes plan.md's member-flow item #3 (the `membership_expiring` third of
+it) and known-issues.md's NOTIF-004. The dedup policy (once per run, not
+once per membership ever — see the "Chosen policy" paragraph in that
+known-issues.md entry) was made explicit rather than silently decided,
+per Rule 8.
+
+---
+
+## 2026-08-07 — FIX(classes): notify members when their booking is cancelled
+
+**Type:** FIX
+**Defect:** NOTIF-003
+**Behavior change:** yes — members whose `booked` personal booking gets
+cancelled by an admin now receive a `class_cancelled` notification.
+`classes.cancel`'s own return value/shape is unchanged.
+**Files:** `src/server/routers/classes.ts` (`cancel`'s bookings update
+now uses `.returning()` to know who to notify; one notification inserted
+per affected member)
+**Tests:** no automated test harness in this branch — verified manually
+against the running dev server: booked a class as a member, cancelled
+the class as admin via `classes.cancel`, confirmed the booking flipped
+to `cancelled` (unchanged existing behavior) and the member's
+`notifications.list` gained a `class_cancelled` row referencing the
+right class name/time. Also confirmed a *waitlisted* booking on the same
+class received no notification (matches CLASS-004's untouched scope).
+
+Closes plan.md's member-flow item #3 (the `class_cancelled` third) and
+known-issues.md's NOTIF-003. Does not expand CLASS-004 — waitlisted and
+corporate bookings on a cancelled class are still not cancelled, still
+not refunded, and (since nothing touches them) still not notified.
+
+---
+
+## 2026-08-07 — FIX(bookings): notify members on waitlist promotion
+
+**Type:** FIX
+**Defect:** NOTIF-002
+**Behavior change:** yes — a member (personal or corporate) promoted off
+a waitlist now receives a `waitlist_promotion` notification. Both
+`cancel` mutations' return values/shapes are unchanged.
+**Files:** `src/server/routers/bookings.ts` (`cancel`'s promotion block),
+`src/server/routers/corporate-bookings.ts` (`cancel`'s promotion block)
+**Tests:** no automated test harness in this branch — verified manually:
+filled a class to capacity, added a second booking (waitlisted),
+cancelled the confirmed one, confirmed the waitlisted booking was
+promoted (unchanged existing behavior, credit deduction included) and
+the promoted member's `notifications.list` gained a `waitlist_promotion`
+row naming the right class. Repeated the same sequence for
+`corporateBookings.cancel`/`corporateBookings.book`.
+
+Closes plan.md's member-flow item #3 (the `waitlist_promotion` third)
+and known-issues.md's NOTIF-002. BOOK-004 and CORP-001 (the promotion
+logic's own pre-existing bugs) are untouched — the notification fires
+regardless of whether the promotion itself was actually eligible.
+
+---
+
+>>>>>>> 003ae548ce921c509a49800e28b4dc56eebd8add
 ## 2026-08-06 — FIX(bookings): add member-facing UI for corporate booking
 
 **Type:** FIX

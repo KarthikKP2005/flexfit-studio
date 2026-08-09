@@ -1,15 +1,23 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { bookings, classes, memberships, checkins, users } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
+import { isClassFull } from "@/features/bookings/capacity-service";
+import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
+import { getCurrentMembership } from "@/features/memberships/current-membership";
 
 /**
  * Personal (membership-credit-funded) class bookings: browse, book,
  * cancel, check-in, and waitlist. Not responsible for: corporate
  * bookings — corporate-bookings.ts is a structurally parallel but
- * entirely separate table/flow, not reconciled against this one for
- * capacity or waitlist order (see plan.md's capacity/waitlist findings).
+ * entirely separate table/flow. Capacity and waitlist order *are* now
+ * reconciled with it — `book` shares `isClassFull` (CORP-002, fixed) and
+ * `cancel` shares `promoteNextWaitlisted` (CORP-003, fixed), both in
+ * src/features/bookings/. Which membership a member is currently
+ * eligible to book against is resolved by the shared
+ * `getCurrentMembership` (MEMBER-002, fixed) in
+ * src/features/memberships/ — this file no longer keeps its own copy.
  */
 
 /**
@@ -24,32 +32,6 @@ export const UNLIMITED_CREDITS = 999;
 /** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
 function hoursUntil(iso: string, now = new Date()): number {
   return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
-
-/**
- * The membership this user should book/pay against right now: status
- * "active" and endDate >= today, most-distant endDate first if somehow
- * more than one qualifies. Does not check startDate (see MEMBER-002-
- * adjacent gap: members.ts's `profile` uses a different, less strict
- * query and the two can disagree on which membership is "current").
- */
-async function activeMembershipFor(
-  db: typeof import("@/db").db,
-  userId: number,
-) {
-  const today = new Date().toISOString().slice(0, 10);
-  return db
-    .select()
-    .from(memberships)
-    .where(
-      and(
-        eq(memberships.userId, userId),
-        eq(memberships.status, "active"),
-        sql`${memberships.endDate} >= ${today}`,
-      ),
-    )
-    .orderBy(desc(memberships.endDate))
-    .get();
 }
 
 export const bookingsRouter = router({
@@ -84,7 +66,10 @@ export const bookingsRouter = router({
   /**
    * Books the caller into a class, or waitlists them if it's full.
    * Waitlisted bookings always have creditsUsed: 0 — credit is only
-   * spent once a confirmed spot exists.
+   * spent once a confirmed spot exists. "Full" is judged from combined
+   * personal + corporate confirmed bookings (CORP-002, fixed — see
+   * features/bookings/capacity-service.ts) — a class already filled by
+   * corporate bookings now correctly waitlists here too.
    *
    * @throws NOT_FOUND if the class doesn't exist
    * @throws BAD_REQUEST if the class is cancelled or has already started
@@ -137,7 +122,7 @@ export const bookingsRouter = router({
         });
       }
 
-      const membership = await activeMembershipFor(ctx.db, ctx.user.id);
+      const membership = await getCurrentMembership(ctx.db, ctx.user.id);
       if (!membership) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -153,14 +138,7 @@ export const bookingsRouter = router({
         });
       }
 
-      const [{ count }] = await ctx.db
-        .select({ count: sql<number>`count(*)` })
-        .from(bookings)
-        .where(
-          and(eq(bookings.classId, cls.id), eq(bookings.status, "booked")),
-        );
-
-      const isFull = Number(count) >= cls.capacity;
+      const isFull = await isClassFull(ctx.db, cls.id, cls.capacity);
 
       const created = await ctx.db
         .insert(bookings)
@@ -186,15 +164,16 @@ export const bookingsRouter = router({
 
   /**
    * Cancels a member's booking and, if eligible, refunds the credit.
-   * Also promotes the longest-waiting waitlisted booking into the freed
-   * seat, if the cancelled booking was a confirmed one.
+   * Also promotes the longest-waiting ELIGIBLE candidate into the freed
+   * seat, if the cancelled booking was a confirmed one — checking BOTH
+   * the personal and corporate waitlists together (CORP-003, fixed), and
+   * verifying a personal candidate's own membership credit before
+   * promoting them, skipping to the next-oldest candidate if they can't
+   * afford it (BOOK-004, fixed) — see features/bookings/waitlist-service.ts.
    *
-   * Behavior notes (do not "fix" silently — see BOOK-004 in
-   * known-issues.md):
-   * - Refund only applies if cancelled >= FREE_CANCELLATION_HOURS before
-   *   class start, and only if the booking had actually spent a credit.
-   * - Promotion does not currently re-check the promoted member's
-   *   credit balance — see BOOK-004.
+   * Behavior note: refund only applies if cancelled
+   * >= FREE_CANCELLATION_HOURS before class start, and only if the
+   * booking had actually spent a credit.
    *
    * @throws NOT_FOUND if the booking doesn't exist
    * @throws FORBIDDEN if the caller doesn't own the booking and isn't staff
@@ -254,49 +233,11 @@ export const bookingsRouter = router({
         }
       }
 
-      // Freeing a confirmed spot promotes the member who has waited
-      // longest — find the single oldest waitlisted booking for this
-      // class (see BOOK-004: this does not check whether that member's
-      // membership still has enough credits before promoting them).
+      // Freeing a confirmed spot promotes whoever has waited longest and
+      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
+      // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
       if (row.booking.status === "booked") {
-        const next = await ctx.db
-          .select()
-          .from(bookings)
-          .where(
-            and(
-              eq(bookings.classId, row.cls.id),
-              eq(bookings.status, "waitlisted"),
-            ),
-          )
-          .orderBy(asc(bookings.bookedAt))
-          .get();
-
-        if (next) {
-          await ctx.db
-            .update(bookings)
-            .set({ status: "booked", creditsUsed: row.cls.creditCost })
-            .where(eq(bookings.id, next.id));
-
-          if (next.membershipId) {
-            const ms = await ctx.db
-              .select()
-              .from(memberships)
-              .where(eq(memberships.id, next.membershipId))
-              .get();
-
-            if (ms && ms.creditsRemaining < UNLIMITED_CREDITS) {
-              await ctx.db
-                .update(memberships)
-                .set({
-                  creditsRemaining: Math.max(
-                    0,
-                    ms.creditsRemaining - row.cls.creditCost,
-                  ),
-                })
-                .where(eq(memberships.id, ms.id));
-            }
-          }
-        }
+        await promoteNextWaitlisted(ctx.db, row.cls);
       }
 
       return { ok: true, refunded: refundable };

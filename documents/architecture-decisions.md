@@ -204,3 +204,193 @@ layout from the original plan is still the target — it just needs either
 a session with browser/screenshot access, or the app owner manually
 verifying each extracted page against its current behavior before that
 commit lands.
+
+---
+
+## 2026-08-07 — `src/features/bookings/capacity-service.ts`: first file under `src/features/`
+
+**Decision:** introduced `src/features/bookings/capacity-service.ts`
+(the CORP-002 fix — see EDIT_LOG.md/known-issues.md) as the very first
+file under `src/features/`, ahead of the broader frontend/backend
+restructuring this branch's earlier entries deferred. Only the one piece
+of logic needed for this fix (confirmed-occupancy counting) was
+extracted — `bookings.ts`, `corporate-bookings.ts`, and `reschedules.ts`
+were **not** otherwise restructured into thin routers; they still
+contain all their other business logic in place.
+
+**Why:** AGENT_RULES.md Rule 7 gives `src/features/bookings/
+capacity-service.ts` as its own literal worked example for exactly this
+kind of shared, cross-router concern — following it directly rather than
+inventing a different location (e.g. `src/server/services/`) for what
+the constitution already named. Scoping the extraction to only the
+capacity check (not a full router rewrite) matches Rule 4: this commit
+fixes one defect (CORP-002), not "start the general refactor."
+
+**What this means for next steps:** `src/features/bookings/` now exists
+as a real directory with one file in it. Future extractions
+(`booking-service.ts`, `waitlist-service.ts`, etc., per Rule 7's
+example) have a home to land in without a fresh structural decision —
+though each should still get its own entry here when it happens, per
+Rule 7's "no single correct layout, only one you can defend."
+
+**Note on the earlier "no browser/screenshot tool" entries above:** that
+constraint no longer holds — a later session in this repo (the
+`reschedule-modal-member` branch) got Playwright/Chromium working via
+`npx playwright install chromium`, and used it for live browser
+verification. Recorded here so this file doesn't quietly contradict
+itself for a future reader; the deferred `src/features/**` frontend
+extraction from the entry above could now be done with real
+before/after screenshot verification if picked back up.
+
+---
+
+## 2026-08-08 — PLAN-001 policy: reject a second subscription instead of allowing multiple active memberships
+
+**Decision:** `plans.ts`'s `subscribe` now rejects (`CONFLICT`) a
+subscription attempt while the caller already has a `status: "active"`
+membership, instead of silently inserting a second one. No
+renewal/extension/queueing support was added.
+
+**Why this needed a decision, not just a fix:** plan.md's own PLAN-001
+writeup lists four plausible policies (reject / extend / queue /
+stack-with-explicit-charge) and says explicitly the choice "should not
+be guessed during refactoring" — unlike COMPANY-001, where plan.md
+itself named one option as "the simpler and safer rule." This one had no
+stated preference, so per Rule 8 it was put to the user directly rather
+than picked silently.
+
+**Why Reject over the other three:**
+- **Pure subtraction of the bad behavior.** Reject requires no new
+  status values, no rule for how credits combine across two plans, and
+  no "who flips it to active later" logic — Extend and Queue both need
+  new concepts the schema/code don't have today.
+- **Precedent already set in this codebase.** COMPANY-001 (fixed earlier
+  this session) took the identical shape for a structurally similar
+  problem: "one X per user, reject a second." Reject is the direct
+  analogue, not a new pattern to justify separately.
+- **Actually closes the defect.** The core problem is "two simultaneous
+  active memberships, and downstream code (MEMBER-002's resolution,
+  `bookings.ts`'s separate lookup) can disagree about which one is
+  current." Reject makes that state unreachable via `subscribe`. Stack
+  would leave the ambiguity in place, just labeled; Extend/Queue still
+  allow a transient multi-row state while switching over.
+
+**Named tradeoff, not hidden:** a member who wants to renew before their
+current membership expires has no self-serve path — they must wait for
+it to end, or have staff cancel/refund it first (e.g. via
+`payments.refund`, unmodified). This is a real, narrower UX gap,
+recorded here and in known-issues.md's PLAN-001 entry as a deliberate
+scope boundary of this fix, not solved by it.
+
+**Verification note:** confirming the fix required actually clearing a
+seeded member's active membership to exercise the "success after no
+active membership" path — done via the existing (unmodified)
+`payments.refund` against the dev server, not by editing the database
+directly, so the verification exercised real application code end to
+end.
+## 2026-08-08 — `companyMembers.userId` made unique (COMPANY-001 fix)
+
+**Decision:** added `.unique()` to `companyMembers.userId` in
+`schema.ts`, enforcing "one company per member" at the database level,
+per plan.md's own recommendation for COMPANY-001 ("the simpler, safer
+rule" vs. supporting multiple companies per member with an explicit
+company-selector in the UI). `admin-companies.ts`'s `linkMember` was
+updated to check for *any* existing link for the user (not just an
+exact user+company duplicate) and reject it with a clear `CONFLICT`
+before the insert would otherwise hit the new DB constraint.
+
+**Why a schema change instead of just an application-level check:**
+Rule 1.2 permits schema changes when a migration and a recorded reason
+exist, and plan.md's own COMPANY-001 writeup treats the DB constraint as
+the actual fix, not the application-level pre-check alone — a
+check-then-insert without a backing constraint is exactly the kind of
+race-prone pattern flagged separately in plan.md's DB-integrity section
+(#43). `linkMember`'s pre-check exists for a *clean error message*, not
+as the sole enforcement.
+
+**Migration mechanics:** this repo has no versioned migration files —
+`drizzle.config.ts` is push-based (`out: "./drizzle"` is configured but
+unused; `pnpm db:push` diffs the live schema directly). Attempting
+`drizzle-kit push` to *add* a unique constraint to the existing
+`company_members` table in place failed with `LibsqlError: SQLITE_ERROR:
+no such index: company_members_user_id_unique` — a drizzle-kit/libsql
+ordering bug in the generated `ALTER TABLE` batch when adding a unique
+index to an already-populated table (not an application bug; the same
+class of drizzle/libsql driver quirk already noted in the
+`ADMIN-001`-adjacent test-infra entry above). Since `flexfit.db` is the
+disposable dev database (already reset earlier in this session, no real
+user data), the constraint was applied via `pnpm db:reset`
+(drop file → fresh `db:push`, a plain `CREATE TABLE` with the constraint
+inline, not an `ALTER` → `db:seed`) instead of an in-place push. Seed
+data was checked first and confirmed to link no user to more than one
+company, so the reset+reseed didn't hide a real conflict.
+
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md) against the reset dev server: linking a
+previously-unlinked member to a company succeeds; linking that same
+member to a *second, different* company now returns `CONFLICT` with
+"This member is already linked to a different company. Unlink them
+first."; re-linking to the *same* company still returns the original
+"This member is already linked to this company." message unchanged.
+`tsc --noEmit` and `next build` both clean.
+
+**Not in scope:** `corporate-bookings.ts`'s `getCompanyForMember` was
+left functionally identical (its `.get()` call and `companies.active`
+filter are unchanged) — only its comment was updated, since the
+ambiguity it previously documented (arbitrary pick among multiple
+active companies) can no longer occur once the constraint is live.
+
+---
+
+## 2026-08-08 — `src/features/memberships/` folder + `getCurrentMembership`, shared between bookings.ts and members.ts (MEMBER-002)
+
+**Decision:** created `src/features/memberships/current-membership.ts`
+exporting `getCurrentMembership(db, userId)`, alongside the existing
+`src/features/bookings/`. `bookings.ts`'s private `activeMembershipFor`
+was moved there verbatim (Commit 1, REFACTOR, no behavior change), then
+`members.ts`'s `profile` was switched to call the same function instead
+of its own looser query (Commit 2, FIX — see the entry below and
+EDIT_LOG.md for the split reasoning).
+
+**Why a new top-level feature folder instead of putting this in
+`src/features/bookings/`:** a membership's "is this the one the caller
+should book/pay against right now" resolution is used by both
+`bookings.ts` (booking eligibility) and `members.ts` (profile/dashboard
+display) — it's a membership concern that bookings.ts happens to need,
+not a bookings concern. Nesting it under `src/features/bookings/` would
+make `members.ts` import from a folder named after a different domain,
+which is exactly the kind of misplaced-responsibility Rule 7 warns
+against. A sibling `src/features/memberships/` folder is the direct
+parallel to the existing `src/features/bookings/` and gives future
+membership-resolution logic (e.g. if PLAN-001's renewal gap or the
+startDate-check gap from plan.md item #21 get picked up later) an
+obvious home.
+
+**Why split into two commits (REFACTOR then FIX), not one:** the Prime
+Directive and Rule 3 both say refactor and fix must never be hidden
+inside the same change. Moving `bookings.ts`'s query verbatim into a
+shared module is a pure extraction — `bookings.book`'s behavior is
+byte-for-byte identical before and after (same where clause, same
+orderBy, same tiebreak). Changing `members.ts`'s `profile` to use that
+same resolver *is* a real behavior change (a member whose latest-endDate
+membership is cancelled will now see their actual active one instead, or
+nothing if they have none) — that's MEMBER-002's actual fix and needs
+its own commit, defect reference, and before/after documentation per
+Rule 3's FIX row.
+
+**Not in scope:** `reschedules.ts` has a third, near-identical copy of
+this same query — but it's dead code (declared, never called anywhere in
+that file, already noted as such by its own comment and confirmed by
+grep). Left untouched; resurrecting or removing dead code isn't part of
+this defect and would be its own separate, unrequested change.
+`getCurrentMembership` does not check `startDate` (plan.md item #21) —
+carried forward unchanged from `bookings.ts`'s pre-extraction behavior,
+not fixed here, and not yet its own numbered entry in known-issues.md.
+Full consistency across all six call sites plan.md's MEMBER-002 writeup
+names (Profile, Dashboard, Booking, Kiosk, Plan subscription, Admin
+member details) is not attempted here — Dashboard and Profile both
+render `members.profile` directly so they're covered by this fix
+automatically, and Booking already used the correct definition before
+this change; Kiosk's and Admin's membership-history display are a
+different shape of problem (they show a full list, not a single "current"
+pick) and are already flagged separately in their own file comments.

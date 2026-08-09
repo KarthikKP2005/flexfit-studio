@@ -5,10 +5,12 @@ import { formatDateTime } from "@/lib/format";
 
 /**
  * Notification inbox with mark-all-read. Not responsible for:
- * generating notifications — in practice this list is only ever
- * populated by admin broadcasts (notifications.ts's `broadcast`);
- * waitlist-promotion, class-cancellation, and membership-expiry
- * notifications are defined in the schema but never inserted anywhere.
+ * generating notifications — populated by admin broadcasts
+ * (notifications.ts's `broadcast`), waitlist promotion
+ * (bookings.ts/corporate-bookings.ts, NOTIF-002), class cancellation
+ * (classes.ts, NOTIF-003), and the membership-expiry cron
+ * (server/jobs/membership-expiry.ts, NOTIF-004) — this page just
+ * displays whatever any of those inserted, generically by title/message.
  */
 export default function NotificationsPage() {
   const { data: notifications, isLoading, error } = trpc.notifications.list.useQuery(

@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatMoney, formatDate } from "@/lib/format";
 
 /**
- * Revenue and membership-expiry reports.
+ * Revenue and membership-expiry reports, plus a manual trigger for the
+ * membership_expiring notification job (NOTIF-004).
  *
  * Behavior note: "Total Revenue" and the by-month/by-method breakdowns
  * only ever reflect `payments` rows — corporate credit pool top-ups
@@ -12,6 +14,7 @@ import { formatMoney, formatDate } from "@/lib/format";
  * understates real money movement for gyms using corporate accounts.
  */
 export default function AdminReportsPage() {
+  const utils = trpc.useUtils();
   const { data: revenueByMonth, isLoading: monthLoading } =
     trpc.admin.revenueByMonth.useQuery();
   const { data: revenueByMethod, isLoading: methodLoading } =
@@ -20,6 +23,18 @@ export default function AdminReportsPage() {
     trpc.admin.expiringMemberships.useQuery();
   const { data: refundData, isLoading: refundLoading } =
     trpc.admin.refundCount.useQuery();
+
+  // NOTIF-004: manual trigger for the same job the standalone daily
+  // cron process runs (see server/cron.ts) — sends a
+  // membership_expiring notification to everyone currently in
+  // `expiringMembers` below, without needing `pnpm cron` running.
+  const [notifySent, setNotifySent] = useState<number | null>(null);
+  const runExpiryCheck = trpc.admin.runMembershipExpiryCheck.useMutation({
+    onSuccess: async (result) => {
+      setNotifySent(result.notified);
+      await utils.admin.expiringMemberships.invalidate();
+    },
+  });
 
   const isLoading = monthLoading || methodLoading || expiringLoading || refundLoading;
 
@@ -95,7 +110,26 @@ export default function AdminReportsPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-medium">Memberships Expiring in 14 Days</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">Memberships Expiring in 14 Days</h2>
+          <button
+            className="btn text-sm"
+            disabled={runExpiryCheck.isPending || !expiringMembers?.length}
+            onClick={() => {
+              setNotifySent(null);
+              runExpiryCheck.mutate();
+            }}
+          >
+            {runExpiryCheck.isPending ? "Sending..." : "Send expiry reminders now"}
+          </button>
+        </div>
+
+        {notifySent !== null && (
+          <p className="panel p-3 text-sm" style={{ color: "#4ade80" }}>
+            Sent {notifySent} reminder{notifySent === 1 ? "" : "s"}.
+          </p>
+        )}
+
         {expiringMembers && expiringMembers.length > 0 ? (
           <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
             {expiringMembers.map((member) => (

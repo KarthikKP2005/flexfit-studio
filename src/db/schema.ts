@@ -273,15 +273,17 @@ export const companies = sqliteTable("companies", {
 });
 
 /**
- * Links a user to a company. The schema does not enforce one active
- * company per user — nothing here prevents a user from being linked to
- * more than one company at once (see admin-companies.ts's linkMember,
- * which only rejects a duplicate of the same user+company pair).
+ * Links a user to a company — at most one company per user. `userId` is
+ * unique (see COMPANY-001 in known-issues.md): a member must be unlinked
+ * from their current company before being linked to a different one;
+ * `admin-companies.ts`'s `linkMember` surfaces a violation of this as a
+ * clean CONFLICT rather than a raw DB error.
  */
 export const companyMembers = sqliteTable("company_members", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
     .notNull()
+    .unique()
     .references(() => users.id),
   companyId: integer("company_id")
     .notNull()
