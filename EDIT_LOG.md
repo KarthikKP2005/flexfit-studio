@@ -10,6 +10,36 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-09 — FIX(reschedule-modal): reset error/selection state on close and reselect
+
+**Type:** FIX
+**Defect:** RESCH-007
+**Behavior change:** yes — the reschedule modal's `error` message (and
+selected target class) now clears when the modal is closed via the
+overlay or Cancel button, when a different target class is picked, and
+after a successful reschedule. Previously `error` was only ever set, so
+a failed attempt's message stayed visible on the next reopen until
+overwritten. No tRPC procedure input/output/error shape touched — this
+is local `useState` in a client component.
+**Files touched:**
+- `src/components/reschedule-modal.tsx` — added `handleClose()`
+  (resets `selectedClassId` + `error`, then calls `onClose`), routed the
+  overlay `onClick`, Cancel button, and mutation `onSuccess` through it;
+  target-class selection now also clears `error`. Updated the file
+  header and inline comments to reflect the fix instead of flagging it
+  as open (was referencing plan.md item #38).
+- `documents/known-issues.md` — added RESCH-007 entry.
+**Tests:** no tRPC procedure is involved (pure frontend state), so
+there's nothing to characterize at the caller level per Rule 6's scope.
+No headless-browser tool was available this session to verify live the
+way RESCH-005/RESCH-006 were — verified by tracing every `onClose`/
+`onClick` path in the diff against the state-leak mechanism (component
+stays mounted across `isOpen` toggles). `tsc --noEmit` and `next build`
+both show only the same pre-existing, unrelated `auth.ts` and
+`corporate-bookings.ts` errors present before this change — nothing new.
+
+---
+
 ## 2026-08-09 — FIX(plans): make subscribe's insert atomic and its payment reference collision-resistant
 
 **Type:** FIX
@@ -975,7 +1005,6 @@ regardless of whether the promotion itself was actually eligible.
 
 ---
 
->>>>>>> 003ae548ce921c509a49800e28b4dc56eebd8add
 ## 2026-08-06 — FIX(bookings): add member-facing UI for corporate booking
 
 **Type:** FIX

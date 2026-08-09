@@ -1511,6 +1511,52 @@ console errors. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
+### RESCH-007 — Reschedule modal's `error` state was never reset
+
+**Severity:** Low (cosmetic/confusing, not a correctness or data-safety
+bug — a stale error message displayed until overwritten, nothing was
+mis-booked or mis-charged because of it)
+**Status:** Fixed on branch `fix/resch-007-modal-error-reset`
+**Area:** Rescheduling / Frontend
+**File:** `src/components/reschedule-modal.tsx`
+
+**Original behavior:** the modal's `error` state was only ever set (in
+the mutation's `onError`), never cleared — see plan.md item #38. Because
+the component is always mounted at its call site
+(`dashboard/page.tsx:234`) and only toggles a `if (!isOpen) return null`
+internally, its `useState` survives across opens/closes: reopening the
+modal, picking a different target class, or dismissing it via the
+overlay all left a previous failed attempt's error message visible on
+screen until the next failed submit happened to overwrite it.
+
+**Fix:** added one `handleClose()` that resets `selectedClassId` and
+`error` before calling the `onClose` prop, and routed every way the
+modal can go away through it — the overlay's `onClick`, the Cancel
+button, and the mutation's `onSuccess` (which previously reset only
+`selectedClassId`, not `error`). Also clears `error` the moment a
+different target class is clicked, so a stale message doesn't linger
+while browsing other options. This matches the shape plan.md's audit
+suggested for this exact defect.
+
+**Not in scope for this fix:** RESCH-005/RESCH-006 (picker
+exclusion/infinite-refetch, both already fixed) and the underlying
+reschedule eligibility rules in `reschedules.ts` are untouched — this is
+purely local component state, no tRPC procedure input/output/error
+shape changed.
+
+**Verification:** `tsc --noEmit` shows no new errors (confirmed the only
+pre-existing errors — `auth.ts`'s untyped `ctx.req` and
+`corporate-bookings.ts`'s `creditsRemaining` — are unrelated and were
+already present before this change). `next build` compiles this
+component successfully; the build's later type-check stage fails only on
+that same pre-existing, unrelated `auth.ts` issue. No headless-browser
+tool (Playwright) was available in this session to reproduce the fix
+live the way RESCH-005/006 were — verified instead by tracing every
+`onClose`/`onClick` path in the diff by hand against the state-leak
+mechanism described above.
+
+---
+
 ### AUTH-001 through NOTIF-001 note
 
 Both entries above were found while writing characterization tests, not
