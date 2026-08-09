@@ -42,7 +42,11 @@ export function NavBar() {
           Schedule
         </Link>
 
-        {user && (
+        {/* 
+          WHY IT'S IMPLEMENTED: NavBar Cleanup.
+          Trainers/admins shouldn't see member-specific links.
+        */}
+        {user?.role === "member" && (
           <>
             <Link href="/dashboard" className="text-sm muted hover:text-white">
               My bookings
