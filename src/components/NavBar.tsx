@@ -42,7 +42,12 @@ export function NavBar() {
           Schedule
         </Link>
 
-        {user && (
+        {/* 
+          WHY IT'S IMPLEMENTED: NavBar Cleanup.
+          Previously, staff saw member-specific links ("My bookings", "Waitlist").
+          We now check for role === "member" so trainers/admins only see links relevant to them.
+        */}
+        {user?.role === "member" && (
           <>
             <Link href="/dashboard" className="text-sm muted hover:text-white">
               My bookings

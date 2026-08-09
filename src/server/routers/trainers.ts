@@ -88,6 +88,14 @@ export const trainersRouter = router({
         });
       }
 
+      // WHY IT'S IMPLEMENTED: Validation ensuring trainers cannot set an invalid time block.
+      if (input.startTime >= input.endTime) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Start time must be before end time.",
+        });
+      }
+
       const existing = await ctx.db
         .select()
         .from(trainerAvailability)
