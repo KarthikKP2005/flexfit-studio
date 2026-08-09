@@ -80,6 +80,45 @@ defects.
 
 ---
 
+### AUTH-003 — Every role was redirected to `/dashboard` after login
+
+**Severity:** Low (member-only UX friction for trainers/admins, not a
+security or data-correctness issue — the destination page still
+enforces its own role gate)
+**Status:** Fixed — landed in commit `0b0ca11` ("fix: recover lost
+trainer improvements (redirects, navbar, validation)"), already on
+`development`. This entry backfills the defect ID and log record that
+commit should have carried per Rule 7/8 but didn't (no `known-issues.md`
+entry, no `FIX(...)`-formatted `EDIT_LOG.md` entry at the time).
+**Area:** Authentication / Frontend
+**File:** `src/app/login/page.tsx`
+
+**Original behavior:** `login`'s `onSuccess` unconditionally called
+`router.push("/dashboard")`, regardless of the signed-in user's role —
+see plan.md item #39 (first flagged in the 2026-08-06 comment-only pass,
+`EDIT_LOG.md`). Trainers and admins landed on the member dashboard first
+and had to navigate away to reach `/trainer/schedule` or `/admin`.
+
+**Fix (as landed):** `onSuccess` now branches on `data.role` — `trainer`
+→ `/trainer/schedule`, `admin` → `/admin`, anything else (`member`) →
+`/dashboard`, same as before. `auth.login`'s input schema, output shape,
+and error codes/messages are unchanged; this only changes what the
+*client* does with an already-successful response.
+
+**Not in scope for this entry:** the same commit also fixed NavBar
+showing member-only links to trainers/admins (plan.md #40) and a
+trainer-validation gap in `trainers.ts` — those are separate defects,
+documented separately if/when picked up, per Rule 4 (one defect per
+entry).
+
+**Verification:** read `src/app/login/page.tsx` directly on
+`development` — the three-way branch matches the fix description above,
+with an inline comment ("WHY IT'S IMPLEMENTED: Role-Aware Login
+Redirect.") already present at the call site. `tsc --noEmit` shows no
+errors attributable to this file.
+
+---
+
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
 
 **Severity:** Low (a deactivated user can't sign in to read it, so the
