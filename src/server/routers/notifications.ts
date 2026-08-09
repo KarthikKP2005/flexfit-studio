@@ -64,10 +64,9 @@ export const notificationsRouter = router({
    * "member". Title/message have no length validation beyond zod's
    * default string type (any length, including empty, is accepted).
    *
-   * Behavior note (see NOTIF-001 in known-issues.md — not fixed here):
-   * despite the `activeMembers` variable name, the query only filters on
-   * `role`, not `active` — deactivated members are still sent the
-   * notification.
+   * Behavior note (FIX: NOTIF-001):
+   * Modified to only send to active members, matching what the variable
+   * name implies.
    *
    * @throws FORBIDDEN if the caller isn't an admin
    */
@@ -82,7 +81,7 @@ export const notificationsRouter = router({
       const activeMembers = await ctx.db
         .select({ id: users.id })
         .from(users)
-        .where(eq(users.role, "member"));
+        .where(and(eq(users.role, "member"), eq(users.active, true)));
 
       if (activeMembers.length === 0) {
         return { ok: true, count: 0 };

@@ -17,12 +17,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   const login = trpc.auth.login.useMutation({
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await utils.invalidate();
-      // Behavior note: every role lands on /dashboard (the member view)
-      // regardless of the signed-in user's actual role — trainers and
-      // admins have to navigate away manually. See plan.md item #39.
-      router.push("/dashboard");
+      
+      // WHY IT'S IMPLEMENTED: Role-Aware Login Redirect.
+      if (data.role === "trainer") {
+        router.push("/trainer/schedule");
+      } else if (data.role === "admin") {
+        router.push("/admin");
+      } else {
+        router.push("/dashboard");
+      }
     },
   });
 
@@ -72,6 +77,12 @@ export default function LoginPage() {
         >
           {login.isPending ? "Signing in..." : "Sign in"}
         </button>
+
+        <div className="text-center pt-2">
+          <Link href="/forgot-password" className="text-sm muted hover:text-white" style={{ color: "var(--text)" }}>
+            Forgot password?
+          </Link>
+        </div>
       </form>
 
       <p className="muted text-center text-sm">

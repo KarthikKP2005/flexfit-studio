@@ -19,8 +19,15 @@ export default function SchedulePage() {
   const { data: myCompany } = trpc.corporateBookings.myCompany.useQuery(undefined, {
     enabled: !!user,
   });
+  // FIX: Stabilize the "from" date so React Query gets a consistent query key.
+  // Previously `new Date().toISOString()` was called on every render, producing
+  // a slightly different timestamp each time (milliseconds apart). React Query
+  // treats each unique input as a new query → re-fetches → re-render → new
+  // timestamp → infinite loop. useState(() => ...) runs once on mount only.
+  const [now] = useState(() => new Date().toISOString());
+
   const { data: classes, isLoading } = trpc.classes.list.useQuery({
-    from: new Date().toISOString(),
+    from: now,
   });
 
   const book = trpc.bookings.book.useMutation({

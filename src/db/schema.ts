@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, real } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
 
 /**
  * Drizzle table definitions for the whole app — the single source of
@@ -106,7 +106,10 @@ export const classes = sqliteTable("classes", {
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [
+  // PERF-01: Index on startsAt to optimize the public schedule date-range query.
+  index("classes_starts_at_idx").on(table.startsAt)
+]);
 
 /**
  * A member's personal booking, paid from their own membership credits.
@@ -134,7 +137,11 @@ export const bookings = sqliteTable("bookings", {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
   cancelledAt: text("cancelled_at"),
-});
+}, (table) => [
+  // PERF-01: Index on classId to optimize the O(N) table scan in `classes.list`.
+  // Converts the `spotsLeft` correlated subquery into an instant O(1) lookup.
+  index("bookings_class_id_idx").on(table.classId)
+]);
 
 /**
  * Attendance record. `bookingId` only foreign-keys to `bookings`
@@ -152,7 +159,7 @@ export const checkins = sqliteTable("checkins", {
   checkedInAt: text("checked_in_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
-  source: text("source", { enum: ["front_desk", "kiosk", "app"] })
+  source: text("source", { enum: ["front_desk", "kiosk", "app", "trainer"] })
     .notNull()
     .default("front_desk"),
 });

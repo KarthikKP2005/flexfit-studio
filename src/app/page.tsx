@@ -5,6 +5,9 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       <section className="space-y-3">
+        <p className="text-sm font-medium uppercase tracking-[0.24em] text-green-400">
+          Welcome to FlexStudio
+        </p>
         <h1 className="text-3xl font-semibold tracking-tight">
           FlexFit Studio
         </h1>

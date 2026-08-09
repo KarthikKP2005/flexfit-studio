@@ -33,11 +33,14 @@ export const plansRouter = router({
    * Creates a new active membership for the caller and an accompanying
    * "paid" payment row — there is no payment gateway, this is instant.
    *
-   * Behavior notes (see known-issues.md, not fixed here):
-   * - PLAN-002: the membership insert and payment insert are two
-   *   separate statements, not wrapped in a transaction.
-   * - PLAN-003: payment `reference` is `PAY-${Date.now()}`, which can
-   *   collide across two subscriptions in the same millisecond.
+   * Behavior notes (see known-issues.md):
+   * - PLAN-002 (fixed): the membership insert and payment insert now run
+   *   inside one `ctx.db.transaction`, so a failure on either side rolls
+   *   both back instead of leaving an orphaned membership.
+   * - PLAN-003 (fixed): payment `reference` is now `PAY-<uuid>`
+   *   (crypto.randomUUID()) instead of `PAY-${Date.now()}`, so two
+   *   subscriptions resolving in the same millisecond no longer produce
+   *   identical references.
    *
    * @throws NOT_FOUND if planId doesn't exist
    * @throws BAD_REQUEST if the plan exists but is inactive
@@ -91,26 +94,35 @@ export const plansRouter = router({
 
       const today = new Date().toISOString().slice(0, 10);
 
-      const membership = await ctx.db
-        .insert(memberships)
-        .values({
-          userId: ctx.user.id,
-          planId: plan.id,
-          startDate: today,
-          endDate: addDays(today, plan.durationDays),
-          creditsRemaining: plan.classCredits,
-          status: "active",
-        })
-        .returning()
-        .get();
+      // PLAN-002 fix: membership + payment must be created together or not
+      // at all — without a transaction, a failure on the payment insert
+      // left a membership row with no matching payment record.
+      const membership = await ctx.db.transaction(async (tx) => {
+        const created = await tx
+          .insert(memberships)
+          .values({
+            userId: ctx.user.id,
+            planId: plan.id,
+            startDate: today,
+            endDate: addDays(today, plan.durationDays),
+            creditsRemaining: plan.classCredits,
+            status: "active",
+          })
+          .returning()
+          .get();
 
-      await ctx.db.insert(payments).values({
-        userId: ctx.user.id,
-        membershipId: membership.id,
-        amountCents: plan.priceCents,
-        method: input.method,
-        status: "paid",
-        reference: `PAY-${Date.now()}`,
+        await tx.insert(payments).values({
+          userId: ctx.user.id,
+          membershipId: created.id,
+          amountCents: plan.priceCents,
+          method: input.method,
+          status: "paid",
+          // PLAN-003 fix: was `PAY-${Date.now()}`, which collided when two
+          // subscriptions resolved in the same millisecond.
+          reference: `PAY-${crypto.randomUUID()}`,
+        });
+
+        return created;
       });
 
       return membership;
@@ -138,18 +150,26 @@ export const plansRouter = router({
   /**
    * Toggles a plan's active flag.
    *
-   * Behavior note (see PLAN-004 in known-issues.md — not fixed here):
-   * if `id` doesn't match any plan, this silently returns undefined
-   * instead of throwing NOT_FOUND like most other update procedures do.
+   * Behavior note (FIX: PLAN-004):
+   * Now throws NOT_FOUND if the plan id doesn't match any row, consistent
+   * with other mutations.
+   *
+   * @throws NOT_FOUND if the plan doesn't exist
    */
   setActive: adminProcedure
     .input(z.object({ id: z.number(), active: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db
+      const updated = await ctx.db
         .update(membershipPlans)
         .set({ active: input.active })
         .where(eq(membershipPlans.id, input.id))
         .returning()
         .get();
+        
+      if (!updated) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Plan not found." });
+      }
+      
+      return updated;
     }),
 });

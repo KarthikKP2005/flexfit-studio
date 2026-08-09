@@ -286,56 +286,58 @@ clean.
 
 **Severity:** Low (SQLite/libsql writes rarely fail mid-request, but the
 window exists)
-**Status:** Confirmed from source (also flagged in plan.md, item #23)
+**Status:** Fixed on branch `fix/plan-002-003-atomic-subscribe-payment-refs`
 **Area:** Membership / Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `db.insert(memberships)...` and
-`db.insert(payments)...` are two separate statements, not wrapped in a
-transaction. If the second insert throws, the membership row from the
-first insert remains committed with no matching payment record.
+**Original behavior:** `db.insert(memberships)...` and
+`db.insert(payments)...` were two separate statements, not wrapped in a
+transaction. If the second insert threw, the membership row from the
+first insert remained committed with no matching payment record.
 
 **Expected invariant:** both inserts succeed or both roll back.
 
-**Why not fixed here:** wrapping in a Drizzle transaction is a behavior
-change to error handling (a failure now becomes "nothing happened" instead
-of "orphaned membership") — needs its own FIX commit and a test that can
-actually force the second insert to fail.
+**Fix:** both inserts now run inside a single
+`await ctx.db.transaction(async (tx) => { ... })`, using `tx` (not `ctx.db`)
+for both statements. A failure on either insert now rolls both back —
+"nothing happened" instead of "orphaned membership." `plans.list`,
+`create`, and `setActive` are unchanged.
 
-**Reproduction:** not independently reproduced by a test here (forcing a
-mid-transaction failure requires more than characterization-level
-tooling) — confirmed by reading the source; not disputed.
-
-**What "fixed" would look like:** `await db.transaction(async (tx) => { ... })`
-wrapping both inserts.
+**Verified manually** (no automated test harness exists anywhere in this
+repo currently — no `.test.ts` files, no vitest config — so this follows
+the same manual-verification precedent as PLAN-001/PLAN-004) against the
+dev server: `subscribe` still returns the membership row and creates a
+matching payment on the happy path; `tsc --noEmit` and `next build` both
+clean.
 
 ---
 
 ### PLAN-003 — Payment `reference` can collide across concurrent subscriptions
 
 **Severity:** Low (references are informational, not enforced unique by
-the schema — see plan.md's DB-integrity findings)
-**Status:** Confirmed from source (also flagged in plan.md, item #24)
+the schema — see plan.md's DB-integrity findings, item #22/#24)
+**Status:** Fixed on branch `fix/plan-002-003-atomic-subscribe-payment-refs`
 **Area:** Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
-calls resolving within the same millisecond produce byte-identical
+**Original behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
+calls resolving within the same millisecond produced byte-identical
 reference strings. `payments.reference` has no unique constraint, so this
-doesn't error, it just produces duplicate references.
+didn't error, it just produced duplicate references.
 
 **Expected invariant:** each payment gets a distinguishable reference.
 
-**Why not fixed here:** changing the reference format changes payment
-data shape going forward — a FIX, not a refactor.
+**Fix:** `reference: \`PAY-${crypto.randomUUID()}\`` — a UUID suffix instead
+of the millisecond timestamp, so two subscriptions in the same request
+tick can no longer produce identical references. `payments.reference`
+still has no DB-level unique constraint (out of scope here — see
+DB-integrity findings in plan.md item #43); this fix only removes the
+practical collision source, it doesn't add schema-level enforcement.
 
-**Reproduction:** `src/server/routers/plans.test.ts`'s
-`plans.subscribe > PLAN-003: two subscriptions in the same millisecond
-produce the same payment reference` (mocks `Date.now()` to force the
-collision deterministically).
-
-**What "fixed" would look like:** a UUID or crypto-random suffix instead
-of (or in addition to) the timestamp.
+**Verified manually** (same caveat as PLAN-002 — no test harness exists in
+this repo): confirmed two back-to-back `subscribe` calls now produce
+distinct `PAY-<uuid>` references; `tsc --noEmit` and `next build` both
+clean.
 
 ---
 
@@ -1528,6 +1530,52 @@ climbing). The picker rendered all 8 other real "Sunrise Yoga" instances
 (10, 11, 13, 14, 16, 17, 19, 20 Aug) and correctly excluded the original
 (Sat 8 Aug, per RESCH-005) — screenshotted as visual proof. Zero browser
 console errors. `tsc --noEmit` and `pnpm build` both clean.
+
+---
+
+### RESCH-007 — Reschedule modal's `error` state was never reset
+
+**Severity:** Low (cosmetic/confusing, not a correctness or data-safety
+bug — a stale error message displayed until overwritten, nothing was
+mis-booked or mis-charged because of it)
+**Status:** Fixed on branch `fix/resch-007-modal-error-reset`
+**Area:** Rescheduling / Frontend
+**File:** `src/components/reschedule-modal.tsx`
+
+**Original behavior:** the modal's `error` state was only ever set (in
+the mutation's `onError`), never cleared — see plan.md item #38. Because
+the component is always mounted at its call site
+(`dashboard/page.tsx:234`) and only toggles a `if (!isOpen) return null`
+internally, its `useState` survives across opens/closes: reopening the
+modal, picking a different target class, or dismissing it via the
+overlay all left a previous failed attempt's error message visible on
+screen until the next failed submit happened to overwrite it.
+
+**Fix:** added one `handleClose()` that resets `selectedClassId` and
+`error` before calling the `onClose` prop, and routed every way the
+modal can go away through it — the overlay's `onClick`, the Cancel
+button, and the mutation's `onSuccess` (which previously reset only
+`selectedClassId`, not `error`). Also clears `error` the moment a
+different target class is clicked, so a stale message doesn't linger
+while browsing other options. This matches the shape plan.md's audit
+suggested for this exact defect.
+
+**Not in scope for this fix:** RESCH-005/RESCH-006 (picker
+exclusion/infinite-refetch, both already fixed) and the underlying
+reschedule eligibility rules in `reschedules.ts` are untouched — this is
+purely local component state, no tRPC procedure input/output/error
+shape changed.
+
+**Verification:** `tsc --noEmit` shows no new errors (confirmed the only
+pre-existing errors — `auth.ts`'s untyped `ctx.req` and
+`corporate-bookings.ts`'s `creditsRemaining` — are unrelated and were
+already present before this change). `next build` compiles this
+component successfully; the build's later type-check stage fails only on
+that same pre-existing, unrelated `auth.ts` issue. No headless-browser
+tool (Playwright) was available in this session to reproduce the fix
+live the way RESCH-005/006 were — verified instead by tracing every
+`onClose`/`onClick` path in the diff by hand against the state-leak
+mechanism described above.
 
 ---
 

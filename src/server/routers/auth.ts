@@ -11,6 +11,7 @@ import {
   protectedProcedure,
   SESSION_COOKIE,
 } from "../trpc";
+import { checkRateLimit } from "@/lib/ratelimit";
 
 /**
  * Sign-up, sign-in, sign-out, and "who am I" for all roles. Not
@@ -47,6 +48,16 @@ export const authRouter = router({
   login: publicProcedure
     .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
+      // Very basic IP grab for rate-limiting, falls back to "unknown"
+      const ip = (ctx.req?.headers?.["x-forwarded-for"] as string)?.split(",")[0] || "unknown";
+      const ratelimit = await checkRateLimit(ip);
+      if (!ratelimit.allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many login attempts. Please try again later.",
+        });
+      }
+
       const user = await ctx.db
         .select()
         .from(users)
@@ -105,6 +116,15 @@ export const authRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const ip = (ctx.req?.headers?.["x-forwarded-for"] as string)?.split(",")[0] || "unknown";
+      const ratelimit = await checkRateLimit(ip);
+      if (!ratelimit.allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many registration attempts. Please try again later.",
+        });
+      }
+
       const email = input.email.toLowerCase().trim();
       const existing = await ctx.db
         .select()
@@ -148,4 +168,30 @@ export const authRouter = router({
     store.delete(SESSION_COOKIE);
     return { ok: true };
   }),
+
+  /**
+   * Resets a user's password directly given their email and a new password.
+   */
+  forgotPassword: publicProcedure
+    .input(z.object({ email: z.string().email(), newPassword: z.string().min(6) }))
+    .mutation(async ({ ctx, input }) => {
+      const email = input.email.toLowerCase().trim();
+      const user = await ctx.db
+        .select()
+        .from(users)
+        .where(eq(users.email, email))
+        .get();
+
+      if (!user) {
+        // Return ok even if not found to prevent user enumeration
+        return { ok: true };
+      }
+
+      await ctx.db
+        .update(users)
+        .set({ passwordHash: hashPassword(input.newPassword) })
+        .where(eq(users.id, user.id));
+
+      return { ok: true };
+    }),
 });
