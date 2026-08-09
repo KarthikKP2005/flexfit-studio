@@ -243,6 +243,64 @@ export const bookingsRouter = router({
       return { ok: true, refunded: refundable };
     }),
 
+  // WHY IT'S IMPLEMENTED: Waitlist "Walk-In" Admitting.
+  // Trainers can manually admit someone from the waitlist who physically shows up.
+  // We STRICTLY enforce the credit check here. If they have 0 credits, this blocks them.
+  admitFromWaitlist: staffProcedure
+    .input(z.object({ bookingId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const booking = await ctx.db
+        .select()
+        .from(bookings)
+        .where(eq(bookings.id, input.bookingId))
+        .get();
+
+      if (!booking || booking.status !== "waitlisted") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Booking is not waitlisted.",
+        });
+      }
+
+      const cls = await ctx.db
+        .select()
+        .from(classes)
+        .where(eq(classes.id, booking.classId))
+        .get();
+
+      if (!cls) throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+
+      let ms: typeof memberships.$inferSelect | undefined;
+      if (booking.membershipId) {
+        ms = await ctx.db
+          .select()
+          .from(memberships)
+          .where(eq(memberships.id, booking.membershipId))
+          .get();
+
+        if (ms && ms.creditsRemaining < 999 && ms.creditsRemaining < cls.creditCost) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Member has insufficient credits to be admitted.",
+          });
+        }
+      }
+
+      await ctx.db
+        .update(bookings)
+        .set({ status: "booked", creditsUsed: cls.creditCost })
+        .where(eq(bookings.id, booking.id));
+
+      if (ms && ms.creditsRemaining < 999) {
+        await ctx.db
+          .update(memberships)
+          .set({ creditsRemaining: ms.creditsRemaining - cls.creditCost })
+          .where(eq(memberships.id, ms.id));
+      }
+
+      return { ok: true };
+    }),
+
   /**
    * Checks a member in: marks the booking attended and records a
    * checkin row. Two separate writes, not wrapped in a transaction.
@@ -257,7 +315,7 @@ export const bookingsRouter = router({
     .input(
       z.object({
         bookingId: z.number(),
-        source: z.enum(["front_desk", "kiosk", "app"]).default("front_desk"),
+        source: z.enum(["front_desk", "kiosk", "app", "trainer"]).default("front_desk"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -274,6 +332,28 @@ export const bookingsRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Only confirmed bookings can be checked in.",
+        });
+      }
+
+      const cls = await ctx.db
+        .select()
+        .from(classes)
+        .where(eq(classes.id, booking.classId))
+        .get();
+
+      if (!cls) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+      }
+
+      // WHY IT'S IMPLEMENTED: Infinite Check-in Window boundary. Check-ins are only allowed 
+      // from 30 mins before the class starts until the class ends.
+      const now = Date.now();
+      const startMs = new Date(cls.startsAt).getTime();
+      const endMs = startMs + cls.durationMin * 60000;
+      if (now < startMs - 30 * 60000 || now > endMs) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Check-in is only allowed from 30 minutes before class starts until it ends.",
         });
       }
 
@@ -295,7 +375,7 @@ export const bookingsRouter = router({
   rosterFor: staffProcedure
     .input(z.object({ classId: z.number() }))
     .query(async ({ ctx, input }) => {
-      return ctx.db
+      const roster = await ctx.db
         .select({
           bookingId: bookings.id,
           status: bookings.status,
@@ -308,6 +388,20 @@ export const bookingsRouter = router({
         .innerJoin(users, eq(bookings.userId, users.id))
         .where(eq(bookings.classId, input.classId))
         .orderBy(asc(bookings.bookedAt));
+
+      // WHY IT'S IMPLEMENTED: First-Timer Badges.
+      // We check if this member has ever attended any class (0 checkins)
+      // to flag them to the trainer so they can be welcomed.
+      return await Promise.all(
+        roster.map(async (r) => {
+          const pastCheckins = await ctx.db
+            .select({ count: sql<number>`count(*)` })
+            .from(checkins)
+            .where(eq(checkins.userId, r.memberId))
+            .get();
+          return { ...r, isFirstClass: pastCheckins?.count === 0 };
+        })
+      );
     }),
 
   /**

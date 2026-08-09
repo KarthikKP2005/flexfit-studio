@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   corporateBookings,
   classes,
@@ -272,6 +272,57 @@ export const corporateBookingsRouter = router({
       return { ok: true, refunded: refundable };
     }),
 
+  // WHY IT'S IMPLEMENTED: Waitlist "Walk-In" Admitting.
+  admitFromWaitlist: staffProcedure
+    .input(z.object({ bookingId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const booking = await ctx.db
+        .select()
+        .from(corporateBookings)
+        .where(eq(corporateBookings.id, input.bookingId))
+        .get();
+
+      if (!booking || booking.status !== "waitlisted") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Booking is not waitlisted.",
+        });
+      }
+
+      const cls = await ctx.db
+        .select()
+        .from(classes)
+        .where(eq(classes.id, booking.classId))
+        .get();
+
+      if (!cls) throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+
+      const company = await ctx.db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, booking.companyId))
+        .get();
+
+      if (!company || company.creditsRemaining < cls.creditCost) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Company has insufficient credits to be admitted.",
+        });
+      }
+
+      await ctx.db
+        .update(corporateBookings)
+        .set({ status: "booked", creditsUsed: cls.creditCost })
+        .where(eq(corporateBookings.id, booking.id));
+
+      await ctx.db
+        .update(companies)
+        .set({ creditsRemaining: company.creditsRemaining - cls.creditCost })
+        .where(eq(companies.id, company.id));
+
+      return { ok: true };
+    }),
+
   /**
    * Checks a corporate booking's member in: marks the booking attended
    * and records a checkin row.
@@ -288,7 +339,7 @@ export const corporateBookingsRouter = router({
     .input(
       z.object({
         bookingId: z.number(),
-        source: z.enum(["front_desk", "kiosk", "app"]).default("front_desk"),
+        source: z.enum(["front_desk", "kiosk", "app", "trainer"]).default("front_desk"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -305,6 +356,26 @@ export const corporateBookingsRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Only confirmed bookings can be checked in.",
+        });
+      }
+
+      const cls = await ctx.db
+        .select()
+        .from(classes)
+        .where(eq(classes.id, booking.classId))
+        .get();
+
+      if (!cls) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+      }
+
+      const now = Date.now();
+      const startMs = new Date(cls.startsAt).getTime();
+      const endMs = startMs + cls.durationMin * 60000;
+      if (now < startMs - 30 * 60000 || now > endMs) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Check-in is only allowed from 30 minutes before class starts until it ends.",
         });
       }
 
@@ -341,7 +412,16 @@ export const corporateBookingsRouter = router({
         .where(eq(corporateBookings.classId, input.classId))
         .orderBy(asc(corporateBookings.bookedAt));
 
-      return bookingRows;
+      return await Promise.all(
+        bookingRows.map(async (r) => {
+          const pastCheckins = await ctx.db
+            .select({ count: sql<number>`count(*)` })
+            .from(checkins)
+            .where(eq(checkins.userId, r.memberId))
+            .get();
+          return { ...r, isFirstClass: pastCheckins?.count === 0 };
+        })
+      );
     }),
 
   /**

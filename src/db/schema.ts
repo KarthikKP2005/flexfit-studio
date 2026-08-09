@@ -159,7 +159,7 @@ export const checkins = sqliteTable("checkins", {
   checkedInAt: text("checked_in_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
-  source: text("source", { enum: ["front_desk", "kiosk", "app"] })
+  source: text("source", { enum: ["front_desk", "kiosk", "app", "trainer"] })
     .notNull()
     .default("front_desk"),
 });
