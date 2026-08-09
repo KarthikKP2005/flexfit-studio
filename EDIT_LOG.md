@@ -10,6 +10,28 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-09 — CHORE(docs): backfill AUTH-003 for the login role-redirect fix
+
+**Type:** CHORE
+**Defect:** AUTH-003
+**Behavior change:** no — the code fix already exists on `development`
+(commit `0b0ca11`, "fix: recover lost trainer improvements (redirects,
+navbar, validation)"); this entry only adds the defect ID and log record
+that commit should have carried under Rule 7/8 at the time but didn't.
+**Files touched:**
+- `documents/known-issues.md` — added AUTH-003 (login redirect was
+  hardcoded to `/dashboard` for every role; commit `0b0ca11` made it
+  role-aware: trainer → `/trainer/schedule`, admin → `/admin`, member →
+  `/dashboard`).
+**Tests:** none added — no code changed in this commit. Verified the
+fix is actually present by reading `src/app/login/page.tsx` on
+`development` directly (the three-way role branch and its inline
+comment are already there). `tsc --noEmit` clean.
+**Note:** commit `0b0ca11` also touched `NavBar.tsx` (plan.md #40,
+role-based nav) and `trainers.ts` (a validation gap) — those are
+separate, still-undocumented defects, deliberately not backfilled here
+per Rule 4 (one defect per entry); they'll get their own entries if/when
+picked up.
 ## 2026-08-08 — FIX(payments): refund cancels dependent bookings and promotes freed seats
 
 **Type:** FIX
