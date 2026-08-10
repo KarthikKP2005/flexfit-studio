@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { formatMoney } from "@/lib/format";
 
@@ -12,6 +13,7 @@ import { formatMoney } from "@/lib/format";
  * rather than duplicating the "do they already have one" check client-side.
  */
 export default function PlansPage() {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();
   const { data: plans, isLoading } = trpc.plans.list.useQuery({});
@@ -41,32 +43,62 @@ export default function PlansPage() {
         </p>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {plans?.map((p) => (
-          <div key={p.id} className="panel flex flex-col gap-3 p-5">
-            <div>
-              <h2 className="font-medium">{p.name}</h2>
-              <p className="muted mt-1 text-sm">{p.description}</p>
-            </div>
-
-            <div className="text-2xl font-semibold">
-              {formatMoney(p.priceCents)}
-            </div>
-
-            <p className="muted text-sm">
-              {p.durationDays} days &middot;{" "}
-              {p.classCredits >= 999 ? "Unlimited classes" : `${p.classCredits} credits`}
-            </p>
-
-            <button
-              className="btn btn-primary mt-auto"
-              disabled={!user || subscribe.isPending}
-              onClick={() => subscribe.mutate({ planId: p.id, method: "card" })}
+      <div className="grid gap-6 sm:grid-cols-2">
+        {plans?.map((p) => {
+          const isUnlimited = p.classCredits >= 999;
+          
+          return (
+            <div 
+              key={p.id} 
+              className={`panel flex flex-col gap-4 p-6 relative overflow-hidden transition-all hover:border-green-500/50 ${
+                isUnlimited ? "border-green-500/30 shadow-[0_0_15px_rgba(74,222,128,0.05)]" : ""
+              }`}
             >
-              {user ? "Subscribe" : "Sign in to subscribe"}
-            </button>
-          </div>
-        ))}
+              {isUnlimited && (
+                <div className="absolute top-0 right-0 bg-green-500 text-green-950 text-[10px] font-bold px-3 py-1 uppercase tracking-wider rounded-bl-lg">
+                  Best Value
+                </div>
+              )}
+              
+              <div>
+                <h2 className="text-xl font-semibold">{p.name}</h2>
+                <p className="muted mt-1 text-sm leading-relaxed">{p.description}</p>
+              </div>
+
+              <div className="text-3xl font-bold flex items-baseline gap-1">
+                {formatMoney(p.priceCents)}
+                <span className="text-sm font-normal muted">
+                  / {p.durationDays} days
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-green-400">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                {isUnlimited ? "Unlimited classes" : `${p.classCredits} class credits`}
+              </div>
+
+              <button
+                className={`btn mt-auto py-2.5 ${isUnlimited ? 'btn-primary' : ''}`}
+                disabled={user && subscribe.isPending}
+                onClick={() => {
+                  if (!user) {
+                    router.push("/login?redirect=/plans");
+                  } else {
+                    subscribe.mutate({ planId: p.id, method: "card" });
+                  }
+                }}
+              >
+                {!user 
+                  ? "Sign in to subscribe" 
+                  : subscribe.isPending 
+                    ? "Subscribing..." 
+                    : "Subscribe Now"}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

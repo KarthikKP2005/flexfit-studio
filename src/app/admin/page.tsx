@@ -48,39 +48,33 @@ export default function AdminPage() {
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10 py-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-        <div className="flex gap-2 flex-wrap justify-end">
-          <Link href="/admin/classes" className="btn btn-sm">
-            Manage Schedule
-          </Link>
-          <Link href="/admin/members" className="btn btn-sm">
-            Members CRM
-          </Link>
-          <Link href="/admin/plans" className="btn btn-sm">
-            Membership Plans
-          </Link>
-          <Link href="/admin/staff" className="btn btn-sm">
-            Manage Staff
-          </Link>
-          <Link href="/admin/companies" className="btn btn-sm">
-            Corporate Memberships
-          </Link>
-          <Link href="/admin/reports" className="btn btn-sm">
-            Reports
-          </Link>
-          <Link href="/admin/announcements" className="btn btn-sm">
-            Send announcement
-          </Link>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Admin Dashboard</h1>
+          <p className="muted mt-1 text-sm">Studio performance and management</p>
         </div>
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-3">
-        {tiles.map(([label, value]) => (
-          <div key={label} className="panel p-4">
-            <div className="muted text-xs uppercase tracking-wide">{label}</div>
-            <div className="mt-1 text-xl font-semibold">{value}</div>
+      {/* Quick Action Management Bar */}
+      <section className="panel p-3 overflow-x-auto border-t-2 border-t-blue-500/50">
+        <div className="flex items-center gap-2 whitespace-nowrap min-w-max">
+          <Link href="/admin/classes" className="btn text-xs bg-[#12141a] hover:bg-[#1a1e28] px-4 py-2 border-transparent">Schedule</Link>
+          <Link href="/admin/members" className="btn text-xs bg-[#12141a] hover:bg-[#1a1e28] px-4 py-2 border-transparent">CRM</Link>
+          <Link href="/admin/plans" className="btn text-xs bg-[#12141a] hover:bg-[#1a1e28] px-4 py-2 border-transparent">Plans</Link>
+          <Link href="/admin/staff" className="btn text-xs bg-[#12141a] hover:bg-[#1a1e28] px-4 py-2 border-transparent">Staff</Link>
+          <Link href="/admin/companies" className="btn text-xs bg-[#12141a] hover:bg-[#1a1e28] px-4 py-2 border-transparent">Corporate</Link>
+          <Link href="/admin/reports" className="btn text-xs bg-[#12141a] hover:bg-[#1a1e28] px-4 py-2 border-transparent">Reports</Link>
+          <Link href="/admin/announcements" className="btn text-xs bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 px-4 py-2 ml-auto">Send Announcement</Link>
+        </div>
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-3">
+        {tiles.map(([label, value], i) => (
+          <div key={label} className={`panel p-6 flex flex-col justify-center ${i === 3 ? "bg-gradient-to-br from-[#171a21] to-[#12141a] border-t-2 border-t-green-500/50" : ""}`}>
+            <div className="muted text-xs font-semibold uppercase tracking-wider mb-2">{label}</div>
+            <div className={`text-3xl font-bold ${i === 3 ? "text-green-400" : ""}`}>{value}</div>
           </div>
         ))}
       </section>
