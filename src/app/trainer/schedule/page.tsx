@@ -386,7 +386,8 @@ export default function TrainerSchedulePage() {
       )}
 
       {activeSection === "availability" && (
-        <div className="space-y-2">
+        <section className="space-y-3">
+          <div className="space-y-2">
           {DAYS.map((day, idx) => {
             const avail = availabilityMap.get(idx);
             const isEditing = editingDay === idx;
