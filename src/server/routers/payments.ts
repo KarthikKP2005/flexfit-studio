@@ -1,15 +1,18 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { desc, eq } from "drizzle-orm";
-import { payments, users, memberships, membershipPlans } from "@/db/schema";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { payments, users, memberships, membershipPlans, bookings, classes } from "@/db/schema";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
 
 /**
  * Payment records: a member's own history, the admin-facing full list,
  * and admin mark-paid/refund actions. Not responsible for: actually
  * processing a payment (there's no gateway — plans.ts's subscribe
- * inserts a "paid" row directly) or reconciling bookings/credits when a
- * payment is refunded (see PAY-001 in known-issues.md).
+ * inserts a "paid" row directly). `refund` reconciles bookings made
+ * against the cancelled membership (PAY-001, fixed) via the shared
+ * `promoteNextWaitlisted` in src/features/bookings/ — this file does not
+ * duplicate that promotion logic.
  */
 
 export const paymentsRouter = router({
@@ -89,13 +92,25 @@ export const paymentsRouter = router({
     }),
 
   /**
-   * Sets a payment's status to "refunded" and, if it's linked to a
-   * membership, cancels that membership.
+   * Sets a payment's status to "refunded", cancels the linked membership
+   * (if any), and cancels every booking still `booked` or `waitlisted`
+   * against that membership (PAY-001, fixed — chosen policy, see Rule 8:
+   * a refund revokes what was paid for, so a member keeps classes
+   * they've already attended but not ones they haven't gone to yet).
    *
-   * Behavior note (see PAY-001 in known-issues.md — not fixed here):
-   * does not touch any bookings already made against the cancelled
-   * membership, and does not adjust its remaining credits — a member
-   * keeps classes they were refunded for.
+   * Behavior notes:
+   * - Membership `creditsRemaining` is left untouched — moot once the
+   *   membership is `cancelled`, since `getCurrentMembership` (MEMBER-002/
+   *   MEMBER-006, fixed) never selects a cancelled membership again
+   *   regardless of its credit balance.
+   * - Each cancelled `booked` (confirmed) row frees a seat, so it
+   *   promotes the next eligible waitlisted candidate for that class —
+   *   the same shared `promoteNextWaitlisted` a normal `bookings.cancel`
+   *   uses, run once per freed seat, not batched.
+   * - Corporate bookings are untouched — `payments.membershipId` only
+   *   ever links to a personal `memberships` row, never a company's
+   *   credit pool, so there is nothing corporate for a membership refund
+   *   to reconcile.
    *
    * @throws NOT_FOUND if the payment doesn't exist
    * @throws BAD_REQUEST if the payment isn't currently "paid"
@@ -131,6 +146,32 @@ export const paymentsRouter = router({
           .update(memberships)
           .set({ status: "cancelled" })
           .where(eq(memberships.id, row.membershipId));
+
+        const dependentBookings = await ctx.db
+          .select({ booking: bookings, cls: classes })
+          .from(bookings)
+          .innerJoin(classes, eq(bookings.classId, classes.id))
+          .where(
+            and(
+              eq(bookings.membershipId, row.membershipId),
+              inArray(bookings.status, ["booked", "waitlisted"]),
+            ),
+          );
+
+        // Cancel every still-active booking under the refunded
+        // membership, oldest first; a confirmed one being cancelled
+        // frees a seat, so it promotes whoever's next on that class's
+        // waitlist (same shared logic bookings.cancel uses).
+        for (const dep of dependentBookings) {
+          await ctx.db
+            .update(bookings)
+            .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+            .where(eq(bookings.id, dep.booking.id));
+
+          if (dep.booking.status === "booked") {
+            await promoteNextWaitlisted(ctx.db, dep.cls);
+          }
+        }
       }
 
       return updated;

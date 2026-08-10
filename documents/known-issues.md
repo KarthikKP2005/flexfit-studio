@@ -80,6 +80,45 @@ defects.
 
 ---
 
+### AUTH-003 — Every role was redirected to `/dashboard` after login
+
+**Severity:** Low (member-only UX friction for trainers/admins, not a
+security or data-correctness issue — the destination page still
+enforces its own role gate)
+**Status:** Fixed — landed in commit `0b0ca11` ("fix: recover lost
+trainer improvements (redirects, navbar, validation)"), already on
+`development`. This entry backfills the defect ID and log record that
+commit should have carried per Rule 7/8 but didn't (no `known-issues.md`
+entry, no `FIX(...)`-formatted `EDIT_LOG.md` entry at the time).
+**Area:** Authentication / Frontend
+**File:** `src/app/login/page.tsx`
+
+**Original behavior:** `login`'s `onSuccess` unconditionally called
+`router.push("/dashboard")`, regardless of the signed-in user's role —
+see plan.md item #39 (first flagged in the 2026-08-06 comment-only pass,
+`EDIT_LOG.md`). Trainers and admins landed on the member dashboard first
+and had to navigate away to reach `/trainer/schedule` or `/admin`.
+
+**Fix (as landed):** `onSuccess` now branches on `data.role` — `trainer`
+→ `/trainer/schedule`, `admin` → `/admin`, anything else (`member`) →
+`/dashboard`, same as before. `auth.login`'s input schema, output shape,
+and error codes/messages are unchanged; this only changes what the
+*client* does with an already-successful response.
+
+**Not in scope for this entry:** the same commit also fixed NavBar
+showing member-only links to trainers/admins (plan.md #40) and a
+trainer-validation gap in `trainers.ts` — those are separate defects,
+documented separately if/when picked up, per Rule 4 (one defect per
+entry).
+
+**Verification:** read `src/app/login/page.tsx` directly on
+`development` — the three-way branch matches the fix description above,
+with an inline comment ("WHY IT'S IMPLEMENTED: Role-Aware Login
+Redirect.") already present at the call site. `tsc --noEmit` shows no
+errors attributable to this file.
+
+---
+
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
 
 **Severity:** Low (a deactivated user can't sign in to read it, so the
@@ -286,56 +325,58 @@ clean.
 
 **Severity:** Low (SQLite/libsql writes rarely fail mid-request, but the
 window exists)
-**Status:** Confirmed from source (also flagged in plan.md, item #23)
+**Status:** Fixed on branch `fix/plan-002-003-atomic-subscribe-payment-refs`
 **Area:** Membership / Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `db.insert(memberships)...` and
-`db.insert(payments)...` are two separate statements, not wrapped in a
-transaction. If the second insert throws, the membership row from the
-first insert remains committed with no matching payment record.
+**Original behavior:** `db.insert(memberships)...` and
+`db.insert(payments)...` were two separate statements, not wrapped in a
+transaction. If the second insert threw, the membership row from the
+first insert remained committed with no matching payment record.
 
 **Expected invariant:** both inserts succeed or both roll back.
 
-**Why not fixed here:** wrapping in a Drizzle transaction is a behavior
-change to error handling (a failure now becomes "nothing happened" instead
-of "orphaned membership") — needs its own FIX commit and a test that can
-actually force the second insert to fail.
+**Fix:** both inserts now run inside a single
+`await ctx.db.transaction(async (tx) => { ... })`, using `tx` (not `ctx.db`)
+for both statements. A failure on either insert now rolls both back —
+"nothing happened" instead of "orphaned membership." `plans.list`,
+`create`, and `setActive` are unchanged.
 
-**Reproduction:** not independently reproduced by a test here (forcing a
-mid-transaction failure requires more than characterization-level
-tooling) — confirmed by reading the source; not disputed.
-
-**What "fixed" would look like:** `await db.transaction(async (tx) => { ... })`
-wrapping both inserts.
+**Verified manually** (no automated test harness exists anywhere in this
+repo currently — no `.test.ts` files, no vitest config — so this follows
+the same manual-verification precedent as PLAN-001/PLAN-004) against the
+dev server: `subscribe` still returns the membership row and creates a
+matching payment on the happy path; `tsc --noEmit` and `next build` both
+clean.
 
 ---
 
 ### PLAN-003 — Payment `reference` can collide across concurrent subscriptions
 
 **Severity:** Low (references are informational, not enforced unique by
-the schema — see plan.md's DB-integrity findings)
-**Status:** Confirmed from source (also flagged in plan.md, item #24)
+the schema — see plan.md's DB-integrity findings, item #22/#24)
+**Status:** Fixed on branch `fix/plan-002-003-atomic-subscribe-payment-refs`
 **Area:** Payments
 **File:** `src/server/routers/plans.ts` — `subscribe`
 
-**Current behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
-calls resolving within the same millisecond produce byte-identical
+**Original behavior:** `reference: \`PAY-${Date.now()}\`` — two `subscribe`
+calls resolving within the same millisecond produced byte-identical
 reference strings. `payments.reference` has no unique constraint, so this
-doesn't error, it just produces duplicate references.
+didn't error, it just produced duplicate references.
 
 **Expected invariant:** each payment gets a distinguishable reference.
 
-**Why not fixed here:** changing the reference format changes payment
-data shape going forward — a FIX, not a refactor.
+**Fix:** `reference: \`PAY-${crypto.randomUUID()}\`` — a UUID suffix instead
+of the millisecond timestamp, so two subscriptions in the same request
+tick can no longer produce identical references. `payments.reference`
+still has no DB-level unique constraint (out of scope here — see
+DB-integrity findings in plan.md item #43); this fix only removes the
+practical collision source, it doesn't add schema-level enforcement.
 
-**Reproduction:** `src/server/routers/plans.test.ts`'s
-`plans.subscribe > PLAN-003: two subscriptions in the same millisecond
-produce the same payment reference` (mocks `Date.now()` to force the
-collision deterministically).
-
-**What "fixed" would look like:** a UUID or crypto-random suffix instead
-of (or in addition to) the timestamp.
+**Verified manually** (same caveat as PLAN-002 — no test harness exists in
+this repo): confirmed two back-to-back `subscribe` calls now produce
+distinct `PAY-<uuid>` references; `tsc --noEmit` and `next build` both
+clean.
 
 ---
 
@@ -369,32 +410,54 @@ throw `NOT_FOUND` when the updated row comes back empty.
 
 ### PAY-001 — `refund` cancels the membership but leaves bookings and credits untouched
 
-**Severity:** Medium (member keeps classes they were refunded for, and
-keeps whatever credits they still had)
-**Status:** Confirmed from source (also flagged in plan.md, item #22)
+**Severity:** Medium (member kept classes they were refunded for, and
+kept whatever credits they still had)
+**Status:** Fixed on branch `fix/pay-001-refund-cancels-bookings`
 **Area:** Payments / Membership
 **File:** `src/server/routers/payments.ts` — `refund`
 
-**Current behavior:** `refund` sets the payment to `status: "refunded"`
-and, if the payment has a `membershipId`, sets that membership's `status`
-to `"cancelled"`. Nothing else changes: existing `bookings` rows made
-against that membership stay `"booked"` (the member can still attend),
-and `creditsRemaining` is untouched.
+**Original behavior:** `refund` set the payment to `status: "refunded"`
+and, if the payment had a `membershipId`, set that membership's `status`
+to `"cancelled"`. Nothing else changed: existing `bookings` rows made
+against that membership stayed `"booked"` (the member could still
+attend), and `creditsRemaining` was untouched.
 
-**Expected invariant:** undefined by the current code — plan.md lists
-several plausible policies (cancel future bookings / keep them valid /
-restore or remove credits / remove waitlist entries) and says explicitly
-this "should not be guessed during refactoring."
+**Policy decision (Rule 8 — this was an explicit choice, not a silent
+guess):** plan.md lists several plausible policies (cancel future
+bookings / keep them valid / restore or remove credits / remove waitlist
+entries) and says explicitly this "should not be guessed during
+refactoring." Asked the user directly; chose **cancel dependent
+bookings/waitlist entries, leave already-attended bookings alone,
+promote freed seats** — the "you didn't pay for it, you don't keep it"
+interpretation. Full reasoning in `architecture-decisions.md`.
 
-**Why not fixed here:** needs a product decision on what a refund should
-mean for already-committed bookings before this is a FIX, not a guess.
+**Fix:** `refund` now cancels every `booked` or `waitlisted` row under
+the refunded membership (`bookings.membershipId`) in addition to
+cancelling the membership itself. Each cancelled `booked` (confirmed)
+row frees a seat, so it promotes the next eligible waitlisted candidate
+for that class via the existing shared `promoteNextWaitlisted` (same
+logic `bookings.cancel` already uses) — no new promotion logic invented.
+`creditsRemaining` on the membership is deliberately left untouched: it's
+moot once the membership is `cancelled`, since `getCurrentMembership`
+(MEMBER-002/MEMBER-006, both fixed) never selects a cancelled membership
+again regardless of its credit balance.
 
-**Reproduction:** `src/server/routers/payments.test.ts`'s
-`payments.refund > PAY-001: does not touch bookings or credits already
-made against the cancelled membership`.
+**Verified manually** (no test harness in this branch — see the CHORE
+removal entry in EDIT_LOG.md): refunded a seeded member's payment who had
+~50 active `booked`/`waitlisted` bookings and 8 already-`attended` ones.
+Confirmed: their membership flipped to `null` on `members.profile`; all
+`booked`/`waitlisted` bookings became `cancelled`; `classesAttended`
+stayed at 8 (unchanged — the fix's `WHERE status IN (booked, waitlisted)`
+structurally cannot touch `attended` rows). Separately manufactured a
+waitlisted booking for another member on a class the refunded member was
+confirmed into, and confirmed that candidate was promoted to `booked`
+by the refund's cancellation, exactly as a normal `bookings.cancel`
+would promote them. `tsc --noEmit` and `next build` both clean.
 
-**What "fixed" would look like:** depends on the chosen policy — not
-specified here.
+**Not in scope for this fix:** corporate bookings are untouched —
+`payments.membershipId` only ever links to a personal `memberships` row,
+never a company's credit pool, so a membership refund has nothing
+corporate to reconcile. `markPaid` is unrelated and untouched.
 
 ---
 
@@ -1043,6 +1106,55 @@ candidate instead. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
+### KIOSK-001 — Kiosk wrongly blocked check-in for a member at zero credits
+
+**Severity:** Medium (member-facing — front desk staff physically could
+not check in a member who had already paid for and confirmed the exact
+class they were standing in front of, if that booking spent their last
+credit)
+**Status:** Fixed on branch `fix/kiosk-001-zero-credits-checkin`
+**Area:** Kiosk / Frontend
+**File:** `src/app/kiosk/page.tsx`
+
+**Original behavior:** `hasNoCredits` (computed from
+`memberDetails.data.memberships[0].creditsRemaining === 0`) was included
+in the Check-in button's `disabled` condition — see plan.md item #25 (role
+list item #26). Credits are spent at *booking* time (`bookings.book`
+deducts them when the booking is created), not at check-in time — so a
+member who booked a class with their last remaining credit already holds
+a valid, confirmed booking; their credit balance being zero afterward
+says nothing about whether that specific booking is legitimate.
+
+**Server-side check (unchanged, already correct):** `bookings.ts`'s
+`markAttended` never checked credits — only `booking.status === "booked"`
+and the 30-minutes-before-to-end-of-class check-in window. So the bug
+was purely a client-side false block; nothing server-side needed to
+change, and no tRPC procedure's input/output/error shape changed.
+
+**Fix:** removed `hasNoCredits` from the button's `disabled` list. The
+button now disables only on `markAttended.isPending` or
+`isMembershipExpired`. The "⚠ No credits remaining" banner is unchanged
+and still displays — it's informational only now, not a gate.
+
+**Not in scope for this fix:** `isMembershipExpired` still disables the
+button, untouched — whether an *expired* membership should also be
+allowed to check into a booking made while it was still active is a
+separate, undecided question (not what plan.md item #25/role-list #26
+asked about), left alone per Rule 8 rather than guessed. Also untouched:
+`hasNoCredits`/`isMembershipExpired` are still computed from
+`memberships[0]` (most-recent-startDate, not necessarily the active
+one) — the same MEMBER-002-shaped gap noted in the file's existing
+header comment, out of scope here since it affects which membership is
+looked at, not whether credits should gate check-in at all.
+
+**Verification:** traced `markAttended`'s server-side checks directly
+(`src/server/routers/bookings.ts:314-353`) — confirms it only checks
+booking status and the check-in window, never credits, so removing the
+client-side credit gate doesn't let the UI diverge from what the server
+already allows. `tsc --noEmit` shows no new errors.
+
+---
+
 ### CORP-002 — Corporate booking capacity is judged independently of personal bookings on the same class
 
 **Severity:** High (a class could be overbooked: full on personal
@@ -1506,6 +1618,52 @@ climbing). The picker rendered all 8 other real "Sunrise Yoga" instances
 (10, 11, 13, 14, 16, 17, 19, 20 Aug) and correctly excluded the original
 (Sat 8 Aug, per RESCH-005) — screenshotted as visual proof. Zero browser
 console errors. `tsc --noEmit` and `pnpm build` both clean.
+
+---
+
+### RESCH-007 — Reschedule modal's `error` state was never reset
+
+**Severity:** Low (cosmetic/confusing, not a correctness or data-safety
+bug — a stale error message displayed until overwritten, nothing was
+mis-booked or mis-charged because of it)
+**Status:** Fixed on branch `fix/resch-007-modal-error-reset`
+**Area:** Rescheduling / Frontend
+**File:** `src/components/reschedule-modal.tsx`
+
+**Original behavior:** the modal's `error` state was only ever set (in
+the mutation's `onError`), never cleared — see plan.md item #38. Because
+the component is always mounted at its call site
+(`dashboard/page.tsx:234`) and only toggles a `if (!isOpen) return null`
+internally, its `useState` survives across opens/closes: reopening the
+modal, picking a different target class, or dismissing it via the
+overlay all left a previous failed attempt's error message visible on
+screen until the next failed submit happened to overwrite it.
+
+**Fix:** added one `handleClose()` that resets `selectedClassId` and
+`error` before calling the `onClose` prop, and routed every way the
+modal can go away through it — the overlay's `onClick`, the Cancel
+button, and the mutation's `onSuccess` (which previously reset only
+`selectedClassId`, not `error`). Also clears `error` the moment a
+different target class is clicked, so a stale message doesn't linger
+while browsing other options. This matches the shape plan.md's audit
+suggested for this exact defect.
+
+**Not in scope for this fix:** RESCH-005/RESCH-006 (picker
+exclusion/infinite-refetch, both already fixed) and the underlying
+reschedule eligibility rules in `reschedules.ts` are untouched — this is
+purely local component state, no tRPC procedure input/output/error
+shape changed.
+
+**Verification:** `tsc --noEmit` shows no new errors (confirmed the only
+pre-existing errors — `auth.ts`'s untyped `ctx.req` and
+`corporate-bookings.ts`'s `creditsRemaining` — are unrelated and were
+already present before this change). `next build` compiles this
+component successfully; the build's later type-check stage fails only on
+that same pre-existing, unrelated `auth.ts` issue. No headless-browser
+tool (Playwright) was available in this session to reproduce the fix
+live the way RESCH-005/006 were — verified instead by tracing every
+`onClose`/`onClick` path in the diff by hand against the state-leak
+mechanism described above.
 
 ---
 

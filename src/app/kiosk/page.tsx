@@ -14,14 +14,22 @@ import { formatDateTime } from "@/lib/format";
  * Behavior notes:
  * - `selectedMember` is typed `any` (see plan.md item #42), losing the
  *   type safety tRPC would otherwise provide end-to-end.
- * - The expired-membership/no-credits warnings below are computed
+ * - The expired-membership/no-credits banners below are computed
  *   client-side from `memberDetails.data.memberships[0]` (`members.byId`'s
  *   full membership history, most-recent-startDate first — the first
  *   entry isn't necessarily the currently-active one; a different, still-
  *   open gap from MEMBER-002, which only covered `members.profile` and
- *   is fixed) and only disable the button in the UI; `markAttended`
- *   itself does not re-verify either condition server-side, so a direct
- *   API call bypasses both checks entirely.
+ *   is fixed). Neither is re-verified server-side by `markAttended` — it
+ *   only checks booking status and the check-in time window (see
+ *   bookings.ts) — so this UI is display-only, not a security boundary.
+ * - `hasNoCredits` no longer disables the Check-in button (KIOSK-001,
+ *   fixed): credits are spent at *booking* time, not check-in time, so a
+ *   member who spent their last credit booking this exact class still
+ *   holds a valid confirmed booking regardless of their credit balance
+ *   now. `isMembershipExpired` still disables it — untouched, out of
+ *   scope for KIOSK-001, a separate question about whether an expired
+ *   membership should also be allowed to check into a booking made while
+ *   it was still active.
  */
 export default function KioskPage() {
   const { data: user } = trpc.auth.me.useQuery();
@@ -152,6 +160,11 @@ export default function KioskPage() {
                 </div>
               )}
               {hasNoCredits && (
+                // Informational only (KIOSK-001) — doesn't disable Check-in
+                // below. A member can be at zero credits and still hold a
+                // valid confirmed booking for the class they spent their
+                // last credit on; this just flags that they have none left
+                // for booking anything further.
                 <div className="rounded border p-3 text-sm" style={{ borderColor: "#dc2626", background: "#7f1d1d", color: "#fca5a5" }}>
                   ⚠ No credits remaining
                 </div>
@@ -184,7 +197,7 @@ export default function KioskPage() {
                           source: "kiosk",
                         })
                       }
-                      disabled={markAttended.isPending || isMembershipExpired || hasNoCredits}
+                      disabled={markAttended.isPending || isMembershipExpired}
                       className="btn btn-primary btn-sm ml-4"
                     >
                       Check in

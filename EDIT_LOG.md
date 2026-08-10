@@ -10,6 +10,158 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-09 — CHORE(docs): backfill AUTH-003 for the login role-redirect fix
+
+**Type:** CHORE
+**Defect:** AUTH-003
+**Behavior change:** no — the code fix already exists on `development`
+(commit `0b0ca11`, "fix: recover lost trainer improvements (redirects,
+navbar, validation)"); this entry only adds the defect ID and log record
+that commit should have carried under Rule 7/8 at the time but didn't.
+**Files touched:**
+- `documents/known-issues.md` — added AUTH-003 (login redirect was
+  hardcoded to `/dashboard` for every role; commit `0b0ca11` made it
+  role-aware: trainer → `/trainer/schedule`, admin → `/admin`, member →
+  `/dashboard`).
+**Tests:** none added — no code changed in this commit. Verified the
+fix is actually present by reading `src/app/login/page.tsx` on
+`development` directly (the three-way role branch and its inline
+comment are already there). `tsc --noEmit` clean.
+**Note:** commit `0b0ca11` also touched `NavBar.tsx` (plan.md #40,
+role-based nav) and `trainers.ts` (a validation gap) — those are
+separate, still-undocumented defects, deliberately not backfilled here
+per Rule 4 (one defect per entry); they'll get their own entries if/when
+picked up.
+## 2026-08-08 — FIX(payments): refund cancels dependent bookings and promotes freed seats
+
+**Type:** FIX
+**Defect:** PAY-001
+**Behavior change:** yes — `payments.refund` now cancels every `booked`/
+`waitlisted` booking under the refunded membership (previously left
+untouched), and promotes the next eligible waitlisted candidate for each
+freed confirmed seat. Already-`attended` bookings and `creditsRemaining`
+are unchanged. `refund`'s input schema, output shape, and error codes
+are unchanged — same payment row returned, same `NOT_FOUND`/`BAD_REQUEST`
+conditions as before.
+**Files:** `src/server/routers/payments.ts` (`refund` gained a loop over
+dependent bookings after cancelling the membership; reuses the existing
+`promoteNextWaitlisted` from `src/features/bookings/waitlist-service.ts`
+— no new promotion logic; file and procedure header comments updated)
+**Policy:** cancel dependent bookings/waitlist, leave attended bookings
+and credits alone — chosen explicitly with the user after plan.md
+flagged this as a genuine ambiguity with no recommended default (same
+shape as PLAN-001's decision). Full reasoning in
+`architecture-decisions.md`'s 2026-08-08 entry.
+**Tests:** no automated test harness in this branch — verified manually
+against the dev server:
+1. Refunded a seeded member's payment (`rahul.k@example.com`, ~50 active
+   `booked`/`waitlisted` bookings, 8 already-`attended`).
+2. `members.profile` → `membership: null` (correctly cancelled and no
+   longer resolved as current).
+3. All ~50 active bookings flipped to `cancelled`; `classesAttended`
+   stayed at 8 — unchanged, since the fix's query only ever selects
+   `status IN (booked, waitlisted)`, structurally excluding `attended`
+   rows.
+4. Manufactured a waitlisted booking for a second member on a class the
+   refunded member was confirmed into; confirmed that candidate was
+   promoted to `booked` by the refund's cancellation loop, the same way
+   a normal `bookings.cancel` would promote them.
+5. Test data reset afterward (`pnpm db:reset`) since the refund can't be
+   reversed through any existing mutation.
+Also ran `tsc --noEmit` and `next build` (both clean).
+
+Closes known-issues.md's PAY-001 (plan.md item #22). `payments.markPaid`
+is unrelated and untouched. Corporate bookings are untouched —
+`payments.membershipId` never references a company, so there's nothing
+corporate for a membership refund to reconcile.
+
+---
+
+## 2026-08-09 — FIX(kiosk): stop blocking check-in on zero credits
+
+**Type:** FIX
+**Defect:** KIOSK-001
+**Behavior change:** yes — the kiosk's Check-in button no longer
+disables when the member's current membership has zero credits
+remaining; it now disables only on a pending mutation or an expired
+membership. No tRPC procedure touched — `markAttended` already never
+checked credits server-side (only booking status + check-in window), so
+this only removes a client-side false block that didn't match what the
+server actually allowed.
+**Files touched:**
+- `src/app/kiosk/page.tsx` — removed `hasNoCredits` from the Check-in
+  button's `disabled` list; the "No credits remaining" banner stays but
+  is now informational only. Updated the file header and banner comments
+  to reflect the fix instead of describing it as open.
+- `documents/known-issues.md` — added KIOSK-001 (new prefix, first
+  kiosk-specific entry).
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope — verified by reading
+`bookings.ts:markAttended` directly and confirming it never checked
+credits (only `status === "booked"` and the check-in window), so the
+client-side fix can't diverge from server behavior. `tsc --noEmit` shows
+no new errors.
+## 2026-08-09 — FIX(reschedule-modal): reset error/selection state on close and reselect
+
+**Type:** FIX
+**Defect:** RESCH-007
+**Behavior change:** yes — the reschedule modal's `error` message (and
+selected target class) now clears when the modal is closed via the
+overlay or Cancel button, when a different target class is picked, and
+after a successful reschedule. Previously `error` was only ever set, so
+a failed attempt's message stayed visible on the next reopen until
+overwritten. No tRPC procedure input/output/error shape touched — this
+is local `useState` in a client component.
+**Files touched:**
+- `src/components/reschedule-modal.tsx` — added `handleClose()`
+  (resets `selectedClassId` + `error`, then calls `onClose`), routed the
+  overlay `onClick`, Cancel button, and mutation `onSuccess` through it;
+  target-class selection now also clears `error`. Updated the file
+  header and inline comments to reflect the fix instead of flagging it
+  as open (was referencing plan.md item #38).
+- `documents/known-issues.md` — added RESCH-007 entry.
+**Tests:** no tRPC procedure is involved (pure frontend state), so
+there's nothing to characterize at the caller level per Rule 6's scope.
+No headless-browser tool was available this session to verify live the
+way RESCH-005/RESCH-006 were — verified by tracing every `onClose`/
+`onClick` path in the diff against the state-leak mechanism (component
+stays mounted across `isOpen` toggles). `tsc --noEmit` and `next build`
+both show only the same pre-existing, unrelated `auth.ts` and
+`corporate-bookings.ts` errors present before this change — nothing new.
+
+---
+
+## 2026-08-09 — FIX(plans): make subscribe's insert atomic and its payment reference collision-resistant
+
+**Type:** FIX
+**Defect:** PLAN-002, PLAN-003
+**Behavior change:** yes — `subscribe`'s membership insert and payment
+insert now run inside one `ctx.db.transaction`, so a failure on either
+side rolls both back instead of leaving an orphaned membership row.
+Payment `reference` is now `PAY-<uuid>` (`crypto.randomUUID()`) instead
+of `PAY-${Date.now()}`, so two subscriptions resolving in the same
+millisecond no longer produce identical references. `plans.list`,
+`create`, and `setActive` are unchanged; `subscribe`'s input schema,
+success return shape, and existing `NOT_FOUND`/`BAD_REQUEST`/`CONFLICT`
+errors are unchanged.
+**Files touched:**
+- `src/server/routers/plans.ts` — wrapped `subscribe`'s two inserts in a
+  transaction, switched the payment reference to a UUID, updated the
+  function's header comment to mark PLAN-002/PLAN-003 fixed instead of
+  "not fixed here."
+- `documents/known-issues.md` — marked PLAN-002 and PLAN-003 Fixed, kept
+  the original problem description, recorded what changed.
+**Tests:** no automated test harness exists anywhere in this repo
+currently (no `.test.ts` files, no vitest config on this branch) —
+manually verified against the dev server that `subscribe` still returns
+the membership row and creates a matching payment on the happy path, and
+that two back-to-back calls now produce distinct `PAY-<uuid>`
+references. `tsc --noEmit` and `next build` both clean. This follows the
+same manual-verification precedent already used for PLAN-001 and
+PLAN-004 in this log.
+
+---
+
 ## 2026-08-07 — FIX(admin): fix broadcast deactivated members and plan setActive errors
 
 **Type:** FIX
@@ -944,7 +1096,6 @@ regardless of whether the promotion itself was actually eligible.
 
 ---
 
->>>>>>> 003ae548ce921c509a49800e28b4dc56eebd8add
 ## 2026-08-06 — FIX(bookings): add member-facing UI for corporate booking
 
 **Type:** FIX

@@ -7,9 +7,10 @@ import { formatDateTime } from "@/lib/format";
 /**
  * Modal for picking a same-named class to reschedule an existing
  * booking into. Excludes the original class itself from the picker (see
- * RESCH-005 in known-issues.md) — not responsible for resetting `error`
- * on reopen/reselect/overlay-close, a separate, still-open gap (plan.md
- * item #38).
+ * RESCH-005 in known-issues.md), and resets its own `error`/selection
+ * state on close/reselect (RESCH-007) — not responsible for the actual
+ * reschedule eligibility rules, those live server-side in
+ * `reschedules.ts`.
  */
 interface RescheduleModalProps {
   isOpen: boolean;
@@ -69,8 +70,7 @@ export function RescheduleModal({
       await utils.bookings.waitlisted.invalidate();
       await utils.reschedules.history.invalidate();
       await utils.classes.list.invalidate();
-      setSelectedClassId(null);
-      onClose();
+      handleClose();
       onSuccess();
     },
     onError: (err) => {
@@ -78,10 +78,19 @@ export function RescheduleModal({
     },
   });
 
-  // Behavior note: `error` is only ever set (in onError above), never
-  // reset — reopening the modal, picking a different target class, or
-  // closing via the overlay all leave a previous error message visible
-  // until the next failed submit overwrites it. See plan.md item #38.
+  // RESCH-007 fix: the component never unmounts between opens (`isOpen`
+  // just toggles an early `return null` below), so its `useState` stays
+  // alive across opens. Without this, `error` from a failed attempt was
+  // only ever set (in onError above) and never cleared, so it stayed
+  // visible on the next reopen until a new failed submit overwrote it.
+  // Route every way the modal can go away — success, Cancel, overlay
+  // click — through this one resetter instead of `onClose` directly.
+  function handleClose() {
+    setSelectedClassId(null);
+    setError(null);
+    onClose();
+  }
+
   if (!isOpen) return null;
 
   return (
@@ -95,7 +104,7 @@ export function RescheduleModal({
         justifyContent: "center",
         zIndex: 50,
       }}
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="panel space-y-4 p-6"
@@ -121,7 +130,14 @@ export function RescheduleModal({
               <button
                 key={cls.id}
                 className={`panel w-full p-3 text-left`}
-                onClick={() => setSelectedClassId(cls.id)}
+                onClick={() => {
+                  // Selecting a different target clears any error from a
+                  // previous failed attempt (RESCH-007) — otherwise a
+                  // stale message from one class stays displayed while
+                  // browsing to another.
+                  setSelectedClassId(cls.id);
+                  setError(null);
+                }}
                 style={{
                   border:
                     selectedClassId === cls.id
@@ -157,7 +173,7 @@ export function RescheduleModal({
           <button
             className="btn"
             disabled={reschedule.isPending}
-            onClick={onClose}
+            onClick={handleClose}
           >
             Cancel
           </button>
