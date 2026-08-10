@@ -25,6 +25,9 @@ export default function SchedulePage() {
   // treats each unique input as a new query → re-fetches → re-render → new
   // timestamp → infinite loop. useState(() => ...) runs once on mount only.
   const [now] = useState(() => new Date().toISOString());
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   const { data: classes, isLoading } = trpc.classes.list.useQuery({
     from: now,
@@ -64,8 +67,38 @@ export default function SchedulePage() {
         </p>
       )}
 
+      {/* Day Filter */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        <button
+          onClick={() => setSelectedDay(null)}
+          className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+            selectedDay === null 
+              ? "bg-green-500/10 text-green-400 border border-green-500/20" 
+              : "bg-[#12141a] text-gray-400 border border-transparent hover:text-gray-200"
+          }`}
+        >
+          All Days
+        </button>
+        {DAYS.map((day, idx) => (
+          <button
+            key={day}
+            onClick={() => setSelectedDay(idx)}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+              selectedDay === idx 
+                ? "bg-green-500/10 text-green-400 border border-green-500/20" 
+                : "bg-[#12141a] text-gray-400 border border-transparent hover:text-gray-200"
+            }`}
+          >
+            {day}
+          </button>
+        ))}
+      </div>
+
       <div className="space-y-2">
-        {classes?.map((c) => (
+        {classes?.filter(c => selectedDay === null || new Date(c.startsAt).getDay() === selectedDay).length === 0 && (
+          <p className="muted text-sm py-4">No classes scheduled for this day.</p>
+        )}
+        {classes?.filter(c => selectedDay === null || new Date(c.startsAt).getDay() === selectedDay).map((c) => (
           <div
             key={c.id}
             className="panel flex items-center gap-4 p-4"

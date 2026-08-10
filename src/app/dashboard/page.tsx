@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { RescheduleModal } from "@/components/reschedule-modal";
+import { motion, AnimatePresence } from "framer-motion";
 
 /**
  * Member-facing home: membership summary, upcoming personal and
@@ -126,28 +127,36 @@ export default function DashboardPage() {
           </p>
         )}
 
-        {bookings?.length ? (
+        {bookings && bookings.length > 0 ? (
           <div className="grid gap-3 sm:grid-cols-2">
-            {bookings.map((b) => (
-              <div key={b.id} className="panel p-5 flex flex-col gap-4">
-                <div className="flex justify-between items-start gap-4">
-                  <div>
-                    <h3 className="font-semibold text-lg">{b.className}</h3>
-                    <p className="muted text-sm mt-1">
-                      {formatDateTime(b.startsAt)} &middot; {b.room}
-                    </p>
+            <AnimatePresence>
+              {bookings.filter(b => b.status !== "cancelled").map((b) => (
+                <motion.div 
+                  key={b.id} 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.3 }}
+                  className="panel p-5 flex flex-col gap-4"
+                >
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <h3 className="font-semibold text-lg">{b.className}</h3>
+                      <p className="muted text-sm mt-1">
+                        {formatDateTime(b.startsAt)} &middot; {b.room}
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded ${
+                      b.status === "booked" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
+                      b.status === "waitlisted" ? "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20" :
+                      "bg-gray-500/10 text-gray-400"
+                    }`}>
+                      {b.status}
+                    </span>
                   </div>
-                  <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded ${
-                    b.status === "booked" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
-                    b.status === "waitlisted" ? "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20" :
-                    "bg-gray-500/10 text-gray-400"
-                  }`}>
-                    {b.status}
-                  </span>
-                </div>
 
-                {(b.status === "booked" || b.status === "waitlisted") && (
-                  <div className="flex gap-2 w-full sm:w-auto">
+                  {(b.status === "booked" || b.status === "waitlisted") && (
+                    <div className="flex gap-2 w-full sm:w-auto">
                     {b.status === "booked" && (
                       <button
                         className="btn text-sm flex-1 sm:flex-none"
@@ -174,8 +183,9 @@ export default function DashboardPage() {
                     </button>
                   </div>
                 )}
-              </div>
-            ))}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         ) : (
           <p className="muted text-sm">No upcoming bookings.</p>
@@ -193,31 +203,40 @@ export default function DashboardPage() {
           )}
 
           <div className="space-y-2">
-            {corporateBookings.map((b) => (
-              <div key={b.id} className="panel flex items-center gap-2 p-4 flex-wrap sm:flex-nowrap">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-medium">{b.className}</h3>
-                    <span className="muted text-xs uppercase tracking-wide">
-                      {b.status}
-                    </span>
+            <AnimatePresence>
+              {corporateBookings.filter(b => b.status !== "cancelled").map((b) => (
+                <motion.div 
+                  key={b.id} 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.3 }}
+                  className="panel flex items-center gap-2 p-4 flex-wrap sm:flex-nowrap"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium">{b.className}</h3>
+                      <span className="muted text-xs uppercase tracking-wide">
+                        {b.status}
+                      </span>
+                    </div>
+                    <p className="muted mt-0.5 text-sm">
+                      {formatDateTime(b.startsAt)} &middot; {b.room} &middot; {b.companyName}
+                    </p>
                   </div>
-                  <p className="muted mt-0.5 text-sm">
-                    {formatDateTime(b.startsAt)} &middot; {b.room} &middot; {b.companyName}
-                  </p>
-                </div>
 
-                {(b.status === "booked" || b.status === "waitlisted") && (
-                  <button
-                    className="btn text-sm flex-1 sm:flex-none"
-                    disabled={cancelCorporate.isPending}
-                    onClick={() => cancelCorporate.mutate({ bookingId: b.id })}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            ))}
+                  {(b.status === "booked" || b.status === "waitlisted") && (
+                    <button
+                      className="btn text-sm flex-1 sm:flex-none"
+                      disabled={cancelCorporate.isPending}
+                      onClick={() => cancelCorporate.mutate({ bookingId: b.id })}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         </section>
       )}
