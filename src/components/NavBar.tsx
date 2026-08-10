@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 
 /**
@@ -17,12 +17,18 @@ import { trpc } from "@/lib/trpc";
  */
 export function NavBar() {
   const router = useRouter();
+  const pathname = usePathname();
   const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();
   const { data: unreadCount } = trpc.notifications.unreadCount.useQuery(undefined, {
     enabled: !!user,
     refetchInterval: 30000,
   });
+
+  const navLinkClass = (path: string) => {
+    const isActive = pathname === path || (path !== "/" && pathname.startsWith(path + "/"));
+    return `text-sm ${isActive ? "text-white font-medium" : "muted hover:text-white"}`;
+  };
 
   const logout = trpc.auth.logout.useMutation({
     onSuccess: async () => {
@@ -40,7 +46,7 @@ export function NavBar() {
               FlexFit<span style={{ color: "var(--accent)" }}>.</span>
             </Link>
 
-            <Link href="/schedule" className="text-sm muted hover:text-white">
+            <Link href="/schedule" className={navLinkClass("/schedule")}>
               Schedule
             </Link>
           </>
@@ -52,34 +58,34 @@ export function NavBar() {
         */}
         {user?.role === "member" && (
           <>
-            <Link href="/dashboard" className="text-sm muted hover:text-white">
+            <Link href="/dashboard" className={navLinkClass("/dashboard")}>
               My bookings
             </Link>
-            <Link href="/waitlist" className="text-sm muted hover:text-white">
+            <Link href="/waitlist" className={navLinkClass("/waitlist")}>
               Waitlist
             </Link>
           </>
         )}
 
         {user?.role === "trainer" && (
-          <Link href="/trainer/schedule" className="text-sm muted hover:text-white">
+          <Link href="/trainer/schedule" className={navLinkClass("/trainer/schedule")}>
             My schedule
           </Link>
         )}
 
         {user?.role === "admin" && (
           <>
-            <Link href="/admin" className="text-sm muted hover:text-white">
+            <Link href="/admin" className={navLinkClass("/admin")}>
               Admin
             </Link>
-            <Link href="/admin/attendance" className="text-sm muted hover:text-white">
+            <Link href="/admin/attendance" className={navLinkClass("/admin/attendance")}>
               Attendance
             </Link>
           </>
         )}
 
         {(user?.role === "admin" || user?.role === "trainer") && (
-          <Link href="/kiosk" className="text-sm muted hover:text-white">
+          <Link href="/kiosk" className={navLinkClass("/kiosk")}>
             Kiosk
           </Link>
         )}

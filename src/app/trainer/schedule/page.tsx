@@ -239,6 +239,10 @@ export default function TrainerSchedulePage() {
   const [editingDay, setEditingDay] = useState<number | null>(null);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  
+  const [activeSection, setActiveSection] = useState<"upcoming" | "availability">("upcoming");
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
 
   const setAvailability = trpc.trainers.setAvailability.useMutation({
     onSuccess: async () => {
@@ -316,21 +320,72 @@ export default function TrainerSchedulePage() {
         </div>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="font-medium">Upcoming Classes</h2>
-        {classes && classes.length > 0 ? (
-          <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
-            {classes.map((cls) => (
-              <ClassCard key={cls.id} classId={cls.id} className={cls.name} startsAt={cls.startsAt} room={cls.room} durationMin={cls.durationMin} cancelled={cls.cancelled} />
-            ))}
-          </div>
-        ) : (
-          <p className="muted text-sm">No upcoming classes.</p>
-        )}
-      </section>
+      <div className="border-b" style={{ borderColor: "var(--border)" }}>
+        <nav className="-mb-px flex gap-6">
+          <button
+            onClick={() => { setActiveSection("upcoming"); setPage(1); }}
+            className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeSection === "upcoming"
+                ? "border-green-500 text-green-400"
+                : "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600"
+            }`}
+          >
+            Upcoming Classes
+          </button>
+          <button
+            onClick={() => setActiveSection("availability")}
+            className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeSection === "availability"
+                ? "border-green-500 text-green-400"
+                : "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600"
+            }`}
+          >
+            Weekly Availability
+          </button>
+        </nav>
+      </div>
 
-      <section className="space-y-3">
-        <h2 className="font-medium">Weekly Availability</h2>
+      {activeSection === "upcoming" && (
+        <section className="space-y-4">
+          {classes && classes.length > 0 ? (
+            <>
+              <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
+                {classes.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE).map((cls) => (
+                  <ClassCard key={cls.id} classId={cls.id} className={cls.name} startsAt={cls.startsAt} room={cls.room} durationMin={cls.durationMin} cancelled={cls.cancelled} />
+                ))}
+              </div>
+              
+              {classes.length > ITEMS_PER_PAGE && (
+                <div className="flex items-center justify-between panel p-4">
+                  <p className="text-sm muted">
+                    Showing {((page - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(page * ITEMS_PER_PAGE, classes.length)} of {classes.length}
+                  </p>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={page === 1}
+                      className="btn btn-sm"
+                    >
+                      Previous
+                    </button>
+                    <button 
+                      onClick={() => setPage(p => p + 1)}
+                      disabled={page * ITEMS_PER_PAGE >= classes.length}
+                      className="btn btn-sm"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="muted text-sm">No upcoming classes.</p>
+          )}
+        </section>
+      )}
+
+      {activeSection === "availability" && (
         <div className="space-y-2">
           {DAYS.map((day, idx) => {
             const avail = availabilityMap.get(idx);
@@ -426,6 +481,7 @@ export default function TrainerSchedulePage() {
           })}
         </div>
       </section>
+      )}
     </div>
   );
 }

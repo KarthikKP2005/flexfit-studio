@@ -1,7 +1,12 @@
-import Link from "next/link";
+"use client";
 
-/** Public marketing/landing page — static content, no data fetching. */
+import Link from "next/link";
+import { trpc } from "@/lib/trpc";
+
+/** Public marketing/landing page. */
 export default function HomePage() {
+  const { data: user } = trpc.auth.me.useQuery();
+  const isMemberOrTrainer = user?.role === "member" || user?.role === "trainer";
   return (
     <div className="space-y-16 py-8">
       {/* Hero Section */}
@@ -17,9 +22,12 @@ export default function HomePage() {
           Experience twelve world-class formats a week across yoga, strength, spin, and boxing.
         </p>
         <div className="flex gap-4 pt-4">
-          <Link href="/schedule" className="btn btn-primary text-base px-6 py-3 shadow-lg shadow-green-500/20">
-            View Schedule
-          </Link>
+          {/* Schedule button only visible for trainers and members per request */}
+          {isMemberOrTrainer && (
+            <Link href="/schedule" className="btn btn-primary text-base px-6 py-3 shadow-lg shadow-green-500/20">
+              View Schedule
+            </Link>
+          )}
           <Link href="/plans" className="btn text-base px-6 py-3">
             Explore Memberships
           </Link>
