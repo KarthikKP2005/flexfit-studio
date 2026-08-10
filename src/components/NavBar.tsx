@@ -34,13 +34,17 @@ export function NavBar() {
   return (
     <header className="border-b" style={{ borderColor: "var(--border)" }}>
       <nav className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-4">
-        <Link href="/" className="font-semibold tracking-tight">
-          FlexFit<span style={{ color: "var(--accent)" }}>.</span>
-        </Link>
+        {user?.role !== "admin" && (
+          <>
+            <Link href="/" className="font-semibold tracking-tight">
+              FlexFit<span style={{ color: "var(--accent)" }}>.</span>
+            </Link>
 
-        <Link href="/schedule" className="text-sm muted hover:text-white">
-          Schedule
-        </Link>
+            <Link href="/schedule" className="text-sm muted hover:text-white">
+              Schedule
+            </Link>
+          </>
+        )}
 
         {/* 
           WHY IT'S IMPLEMENTED: NavBar Cleanup.
