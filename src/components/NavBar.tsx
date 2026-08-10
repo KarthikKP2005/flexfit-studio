@@ -40,16 +40,18 @@ export function NavBar() {
   return (
     <header className="border-b" style={{ borderColor: "var(--border)" }}>
       <nav className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-4">
+        {/* Home link visible for everyone except admin */}
         {user?.role !== "admin" && (
-          <>
-            <Link href="/" className="font-semibold tracking-tight">
-              FlexFit<span style={{ color: "var(--accent)" }}>.</span>
-            </Link>
+          <Link href="/" className="font-semibold tracking-tight">
+            FlexFit<span style={{ color: "var(--accent)" }}>.</span>
+          </Link>
+        )}
 
-            <Link href="/schedule" className={navLinkClass("/schedule")}>
-              Schedule
-            </Link>
-          </>
+        {/* Schedule link only visible for members and trainers */}
+        {(user?.role === "member" || user?.role === "trainer") && (
+          <Link href="/schedule" className={navLinkClass("/schedule")}>
+            Schedule
+          </Link>
         )}
 
         {/* 
