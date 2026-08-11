@@ -1,0 +1,40 @@
+<svg width="1920" height="1200" viewBox="0 0 1920 1200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="glow1" cx="78%" cy="30%" r="55%">
+      <stop offset="0%" stop-color="#4ade80" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#4ade80" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="15%" cy="85%" r="45%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="base" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0d11"/>
+      <stop offset="55%" stop-color="#12151b"/>
+      <stop offset="100%" stop-color="#0b0d11"/>
+    </linearGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M 64 0 L 0 0 0 64" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1920" height="1200" fill="url(#base)"/>
+  <rect width="1920" height="1200" fill="url(#grid)"/>
+  <rect width="1920" height="1200" fill="url(#glow1)"/>
+  <rect width="1920" height="1200" fill="url(#glow2)"/>
+
+  <!-- abstract ring / spotlight motif -->
+  <circle cx="1450" cy="380" r="340" fill="none" stroke="#4ade80" stroke-opacity="0.12" stroke-width="2"/>
+  <circle cx="1450" cy="380" r="260" fill="none" stroke="#4ade80" stroke-opacity="0.18" stroke-width="1.5"/>
+  <circle cx="1450" cy="380" r="180" fill="none" stroke="#4ade80" stroke-opacity="0.25" stroke-width="1"/>
+
+  <!-- diagonal energy streaks -->
+  <g stroke="#4ade80" stroke-opacity="0.15" stroke-width="3" stroke-linecap="round">
+    <line x1="1150" y1="1200" x2="1650" y2="200"/>
+    <line x1="1250" y1="1200" x2="1750" y2="200"/>
+    <line x1="1350" y1="1200" x2="1850" y2="200"/>
+  </g>
+
+  <!-- corner vignette -->
+  <rect width="1920" height="1200" fill="#000000" fill-opacity="0.15"/>
+</svg>
