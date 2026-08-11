@@ -81,7 +81,7 @@ export default function PlansPage() {
 
               <button
                 className={`btn mt-auto py-2.5 ${isUnlimited ? 'btn-primary' : ''}`}
-                disabled={user && subscribe.isPending}
+                disabled={!!user && subscribe.isPending}
                 onClick={() => {
                   if (!user) {
                     router.push("/login?redirect=/plans");

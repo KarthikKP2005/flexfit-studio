@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { eq, desc } from "drizzle-orm";
 import { classes, users } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
+import { isTrainerAvailable } from "@/features/trainers/availability-service";
 
 /**
  * Admin Classes Router
@@ -63,6 +64,11 @@ export const adminClassesRouter = router({
           code: "BAD_REQUEST",
           message: "Selected user is not a valid trainer.",
         });
+      }
+
+      const check = await isTrainerAvailable(ctx.db, input.trainerId, input.startsAt, input.durationMin);
+      if (!check.available) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: check.reason });
       }
 
       await ctx.db.insert(classes).values({

@@ -19,7 +19,7 @@ import { bookings, corporateBookings } from "@/db/schema";
  * source, plus the combined total.
  */
 export async function getConfirmedOccupancy(
-  db: typeof import("@/db").db,
+  db: typeof import("@/db").db | any, // CHANGED: Accept `tx` (transaction) or global `db` to prevent race conditions
   classId: number,
 ): Promise<{ personalBooked: number; corporateBooked: number; total: number }> {
   const [{ count: personalCount }] = await db
@@ -46,7 +46,7 @@ export async function getConfirmedOccupancy(
  * broader "no transactions" findings, out of scope here).
  */
 export async function isClassFull(
-  db: typeof import("@/db").db,
+  db: typeof import("@/db").db | any, // CHANGED: Accept `tx` (transaction) or global `db`
   classId: number,
   capacity: number,
 ): Promise<boolean> {

@@ -60,7 +60,7 @@ type Candidate =
  * made worse by this fix.
  */
 export async function promoteNextWaitlisted(
-  db: typeof import("@/db").db,
+  db: typeof import("@/db").db | any, // CHANGED: Accept `tx` (transaction) or global `db` to prevent race conditions during promotions
   cls: PromotionClass,
 ): Promise<void> {
   const personalCandidates = await db
@@ -81,8 +81,8 @@ export async function promoteNextWaitlisted(
   // CORP-003 established. Walked oldest-first below; a skipped corporate
   // candidate just falls through to the next entry, not a separate table.
   const queue: Candidate[] = [
-    ...personalCandidates.map((row): Candidate => ({ source: "personal", row })),
-    ...corporateCandidates.map((row): Candidate => ({ source: "corporate", row })),
+    ...personalCandidates.map((row: PersonalCandidate): Candidate => ({ source: "personal", row })),
+    ...corporateCandidates.map((row: CorporateCandidate): Candidate => ({ source: "corporate", row })),
   ].sort((a, b) => (a.row.bookedAt < b.row.bookedAt ? -1 : a.row.bookedAt > b.row.bookedAt ? 1 : 0));
 
   for (const candidate of queue) {
@@ -118,7 +118,7 @@ export async function promoteNextWaitlisted(
  * either; changing that is outside BOOK-004's scope.
  */
 async function tryPromotePersonalCandidate(
-  db: typeof import("@/db").db,
+  db: typeof import("@/db").db | any, // CHANGED: Accept `tx` (transaction)
   candidate: PersonalCandidate,
   cls: PromotionClass,
 ): Promise<boolean> {
@@ -169,7 +169,7 @@ async function tryPromotePersonalCandidate(
  * been promoted and deducted.
  */
 async function tryPromoteCorporateCandidate(
-  db: typeof import("@/db").db,
+  db: typeof import("@/db").db | any, // CHANGED: Accept `tx` (transaction)
   candidate: CorporateCandidate,
   cls: PromotionClass,
 ): Promise<boolean> {

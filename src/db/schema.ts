@@ -336,3 +336,11 @@ export type Company = typeof companies.$inferSelect;
 export type CompanyMember = typeof companyMembers.$inferSelect;
 export type CorporateBooking = typeof corporateBookings.$inferSelect;
 export type Reschedule = typeof reschedules.$inferSelect;
+
+/** Global configuration settings for the studio (e.g. check-in windows) */
+export const studioSettings = sqliteTable("studio_settings", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  checkinWindowMinutes: integer("checkin_window_minutes").notNull().default(30),
+});
+
+export type StudioSettings = typeof studioSettings.$inferSelect;

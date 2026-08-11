@@ -166,7 +166,7 @@ export const adminRouter = router({
    */
   trainerPayroll: adminProcedure.query(async ({ ctx }) => {
     // Current month filter
-    const rows = await ctx.db.execute(sql`
+    const rows = await ctx.db.all(sql`
       SELECT u.name as trainerName, 
              (COUNT(DISTINCT b.id) + COUNT(DISTINCT cb.id)) as totalHeads
       FROM ${classes} c
@@ -178,7 +178,7 @@ export const adminRouter = router({
       ORDER BY totalHeads DESC
     `);
 
-    return rows.rows.map(r => ({
+    return rows.map((r: any) => ({
       trainerName: String(r.trainerName),
       totalHeads: Number(r.totalHeads),
     }));
