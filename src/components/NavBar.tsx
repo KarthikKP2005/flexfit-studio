@@ -55,7 +55,7 @@ export function NavBar() {
       }`
     : "border-b";
   const headerStyle = isHome ? undefined : { borderColor: "var(--border)" };
-  const logoClass = `font-semibold tracking-tight ${
+  const logoClass = `text-lg font-semibold tracking-tight ${
     isHome ? (scrolled ? "text-black" : "text-white") : ""
   }`;
   const linkClass = isHome

@@ -103,6 +103,11 @@ signed-in Subscribe flow are untouched. No tRPC procedure touched.
 Verified: `tsc --noEmit` shows only the same pre-existing, unrelated
 errors as every prior entry in this log — nothing new.
 
+**Follow-up 5 (same session):** `src/components/NavBar.tsx` — bumped the
+"FlexFit." logo from the default (unset, ~1rem) size to `text-lg`, one
+class added to the existing `logoClass` string. Purely cosmetic, no
+other class/behavior touched.
+
 **Incident (same session, self-inflicted, not a code defect):** while
 verifying the scrollbar fix, a second `pnpm dev` was started in the
 background (on a spare port) while the user's own `pnpm dev` was already
