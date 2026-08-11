@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
 
@@ -14,6 +15,7 @@ import { formatDateTime } from "@/lib/format";
  * before (see CORP-002 in known-issues.md, not changed here).
  */
 export default function SchedulePage() {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();
   const { data: myCompany } = trpc.corporateBookings.myCompany.useQuery(undefined, {
@@ -94,12 +96,22 @@ export default function SchedulePage() {
               </div>
             </div>
 
+            {/* Signed-out visitors get a clickable Book button that sends
+                them to sign in, instead of a disabled button — they no
+                longer have to notice the small "Sign in to book a class"
+                line below to know what to do. Signed-in behavior
+                (book/waitlist, personal vs. company credits) is
+                unchanged. */}
             <BookButton
               full={c.full}
-              disabled={!user || isBooking}
+              disabled={isBooking}
               company={myCompany ?? null}
-              onBookPersonal={() => book.mutate({ classId: c.id })}
-              onBookCompany={() => bookCorporate.mutate({ classId: c.id })}
+              onBookPersonal={() =>
+                user ? book.mutate({ classId: c.id }) : router.push("/login")
+              }
+              onBookCompany={() =>
+                user ? bookCorporate.mutate({ classId: c.id }) : router.push("/login")
+              }
             />
           </div>
         ))}

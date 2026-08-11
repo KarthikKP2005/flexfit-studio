@@ -80,6 +80,29 @@ requested directly:
   wording, so the white section doesn't just repeat the hero.
 No tRPC/backend touched.
 
+**Follow-up 3 (same session):** `src/app/schedule/page.tsx` — a signed-
+out visitor's "Book"/"Join waitlist" button now redirects to `/login`
+(`router.push`) on click, instead of just being disabled with a small
+"Sign in to book a class" line as the only hint. Scoped entirely to this
+one file: `BookButton` is a local, unexported function defined in
+`schedule/page.tsx` only (confirmed via grep — no other file imports or
+duplicates it), so this can't affect any other page. Signed-in behavior
+(personal vs. company credits, full-class waitlisting, `bookings.book`/
+`corporateBookings.book` themselves) is completely unchanged — only the
+disabled-vs-clickable branching for `!user` changed. No tRPC procedure
+touched. Verified: `tsc --noEmit` shows only the same pre-existing,
+unrelated `auth.ts`/`corporate-bookings.ts` errors as every prior entry
+in this log — nothing new.
+
+**Follow-up 4 (same session):** `src/app/plans/page.tsx` — same fix as
+Follow-up 3, applied to the "Sign in to subscribe" button: a signed-out
+visitor clicking it now redirects to `/login` instead of doing nothing
+(button was `disabled`). Scoped entirely to this one file — only the
+button's `disabled`/`onClick` logic changed; `plans.subscribe` and the
+signed-in Subscribe flow are untouched. No tRPC procedure touched.
+Verified: `tsc --noEmit` shows only the same pre-existing, unrelated
+errors as every prior entry in this log — nothing new.
+
 **Incident (same session, self-inflicted, not a code defect):** while
 verifying the scrollbar fix, a second `pnpm dev` was started in the
 background (on a spare port) while the user's own `pnpm dev` was already

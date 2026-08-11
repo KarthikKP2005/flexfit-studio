@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { formatMoney } from "@/lib/format";
 
@@ -12,6 +13,7 @@ import { formatMoney } from "@/lib/format";
  * rather than duplicating the "do they already have one" check client-side.
  */
 export default function PlansPage() {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const { data: user } = trpc.auth.me.useQuery();
   const { data: plans, isLoading } = trpc.plans.list.useQuery({});
@@ -58,10 +60,18 @@ export default function PlansPage() {
               {p.classCredits >= 999 ? "Unlimited classes" : `${p.classCredits} credits`}
             </p>
 
+            {/* Signed-out visitor: clickable button that sends them to
+                sign in, same pattern as schedule/page.tsx's Book button,
+                instead of a disabled button. Signed-in Subscribe flow is
+                unchanged. */}
             <button
               className="btn btn-primary mt-auto"
-              disabled={!user || subscribe.isPending}
-              onClick={() => subscribe.mutate({ planId: p.id, method: "card" })}
+              disabled={!!user && subscribe.isPending}
+              onClick={() =>
+                user
+                  ? subscribe.mutate({ planId: p.id, method: "card" })
+                  : router.push("/login")
+              }
             >
               {user ? "Subscribe" : "Sign in to subscribe"}
             </button>
