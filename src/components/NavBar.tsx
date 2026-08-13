@@ -58,11 +58,15 @@ export function NavBar() {
   const logoClass = `text-lg font-semibold tracking-tight ${
     isHome ? (scrolled ? "text-black" : "text-white") : ""
   }`;
-  const linkClass = isHome
-    ? `text-sm transition-colors ${
-        scrolled ? "text-neutral-600 hover:text-black" : "text-white/80 hover:text-white"
-      }`
-    : "text-sm muted hover:text-green-400";
+  const linkClass = (path: string) => {
+    const isActive = pathname === path || (path !== "/" && pathname.startsWith(path + "/"));
+    if (isActive) return "text-sm font-medium text-green-400";
+    return isHome
+      ? `text-sm transition-colors ${
+          scrolled ? "text-neutral-600 hover:text-black" : "text-white/80 hover:text-white"
+        }`
+      : "text-sm muted hover:text-green-400";
+  };
 
   return (
     <header className={headerClass} style={headerStyle}>
@@ -77,37 +81,37 @@ export function NavBar() {
         */}
         {user?.role === "member" && (
           <>
-            <Link href="/dashboard" className={linkClass}>
+            <Link href="/dashboard" className={linkClass("/dashboard")}>
               My bookings
             </Link>
-            <Link href="/schedule" className={linkClass}>
+            <Link href="/schedule" className={linkClass("/schedule")}>
               Schedule
             </Link>
-            <Link href="/waitlist" className={linkClass}>
+            <Link href="/waitlist" className={linkClass("/waitlist")}>
               Waitlist
             </Link>
           </>
         )}
 
         {user?.role === "trainer" && (
-          <Link href="/trainer/schedule" className={linkClass}>
+          <Link href="/trainer/schedule" className={linkClass("/trainer/schedule")}>
             My schedule
           </Link>
         )}
 
         {user?.role === "admin" && (
           <>
-            <Link href="/admin" className={linkClass}>
+            <Link href="/admin" className={linkClass("/admin")}>
               Admin
             </Link>
-            <Link href="/admin/attendance" className={linkClass}>
+            <Link href="/admin/attendance" className={linkClass("/admin/attendance")}>
               Attendance
             </Link>
           </>
         )}
 
         {(user?.role === "admin" || user?.role === "trainer") && (
-          <Link href="/kiosk" className={linkClass}>
+          <Link href="/kiosk" className={linkClass("/kiosk")}>
             Kiosk
           </Link>
         )}
@@ -130,7 +134,7 @@ export function NavBar() {
           )}
           {user ? (
             <>
-              <Link href="/profile" className={linkClass}>
+              <Link href="/profile" className={linkClass("/profile")}>
                 {user.name}
               </Link>
               <button
