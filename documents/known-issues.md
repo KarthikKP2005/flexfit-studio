@@ -1002,6 +1002,64 @@ constraint is enforced.
 
 ---
 
+### COMPANY-002 — Dashboard shows no visibility into a member's corporate credit pool
+
+**Severity:** Low (cosmetic/UX gap — no incorrect data, no security issue;
+a company-linked member simply has no way to see their employer's credit
+pool status without asking staff)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Corporate accounts / Dashboard
+**File:** `src/app/dashboard/page.tsx`
+
+**Original behavior:** `/dashboard` ("My bookings") only ever called
+`trpc.members.profile` for personal membership data and rendered a
+"Your Membership" card from it. It never called
+`corporateBookings.myCompany` (an existing, unmodified query — already
+used by `/schedule`'s book-button credit-source selector, see CORP-005),
+so a member linked to a company had zero on-dashboard indication of
+their company name, pool balance, or link status. They could still book
+against the pool from `/schedule` and see corporate bookings in the
+"Corporate bookings" section below — only the *membership-style summary
+card* was missing.
+
+**Data model note (checked before fixing, not guessed):** `companies`
+(`src/db/schema.ts`) has `name`, `contactEmail`, `creditPoolBalance`,
+`active`, `createdAt` — no renewal/expiry date field exists for a
+corporate credit pool, unlike a personal membership's `endDate`. The fix
+below does not display a "renews on" row for the corporate card, since
+there is no real date to show — confirmed with the user rather than
+fabricating one.
+
+**Existing behavior reused, not changed:** `corporateBookings.myCompany`
+returns `null` both when a member was never linked to a company *and*
+when they're linked to a company an admin has since deactivated (it
+filters on `companies.active`, see COMPANY-001's `getCompanyForMember`
+note above) — these two cases are indistinguishable from this query.
+The new card shows the same "not linked" message for both, matching the
+query's existing, documented behavior exactly; this fix does not query
+around it or otherwise change what `myCompany` resolves.
+
+**Fix:** Added a `trpc.corporateBookings.myCompany.useQuery()` call to
+`/dashboard` and a new card, placed directly below the personal "Your
+Membership" section and above "Upcoming bookings": when linked, shows
+company name, credit pool balance, and a static "Active" status pill
+(safe as static since `myCompany` only ever returns companies where
+`active = true` — no separate status field needed). When not linked
+(`null`), shows "Not part of any corporate account." No tRPC procedure,
+schema, or other route was touched — purely additive, read-only UI
+reusing an existing query.
+
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually against the dev
+server: a company-linked seeded member (`rahul.k@example.com`, TechCorp
+Inc) shows the new card with the correct company name and pool balance;
+an unlinked seeded member (`karthik.p@example.com` — confirmed via
+`seed.ts`'s `companyMemberLinks`, which only links the first 5 of 12
+seeded members) shows "Not part of any corporate account" instead.
+`tsc --noEmit` clean.
+
+---
+
 ### BOOK-004 — Waitlist promotion on cancel does not re-check the promoted member's credit balance
 
 **Severity:** High (a member could be promoted into a paid class while

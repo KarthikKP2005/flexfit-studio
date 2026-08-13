@@ -10,6 +10,124 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — FIX(dashboard): show corporate credit pool on the member dashboard
+
+**Type:** FIX
+**Defect:** COMPANY-002
+**Behavior change:** yes — `/dashboard` now shows a "Corporate
+Membership" card (company name, credit pool balance, Active status) for
+a company-linked member, or "Not part of any corporate account" if not.
+No tRPC procedure was touched — `corporateBookings.myCompany` is called
+exactly as `/schedule` already calls it; only a new read and new JSX
+were added.
+**Files touched:**
+- `src/app/dashboard/page.tsx` — added
+  `trpc.corporateBookings.myCompany.useQuery()`; new section placed
+  directly below "Your Membership", above "Upcoming bookings", styled to
+  match the existing personal-membership card grid. Deliberately no
+  "Renews on" row — `companies` has no renewal/expiry date field (see
+  known-issues.md's data-model note); confirmed with the user rather
+  than fabricating one.
+- `documents/known-issues.md` — added COMPANY-002.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified against the real dev database
+directly (not just `seed.ts`'s intent) with a one-off script querying
+`companyMembers`/`companies`: `rahul.k@example.com` → linked to
+TechCorp Inc, balance 95 — matches what the new card renders.
+`karthik.p@example.com` → not linked (seed only links the first 5 of 12
+members) — matches the "Not part of any corporate account" empty state.
+Script deleted after use, no DB rows modified. `tsc --noEmit` clean.
+
+Closes known-issues.md's COMPANY-002. `corporateBookings.myCompany`,
+`members.profile`, and every other query/mutation this page calls are
+unchanged.
+
+---
+
+## 2026-08-13 — CHORE(docs): backfill 6 undocumented NavBar/plans commits (branch `member-page-updates` + `feature/password-visibility-toggle`)
+
+**Type:** CHORE
+**Defect:** n/a — these were all direct user-requested UI tweaks; no
+`known-issues.md` defect ID applies to any of them
+**Behavior change:** no — this entry only adds the log record Rule 7
+required at commit time but didn't get. No code changes here.
+
+The following 6 commits landed this session without an `EDIT_LOG.md`
+entry and without the `<TYPE>(<area>): <summary>` message format Rule 8
+requires. Backfilled here, same precedent as the 2026-08-09 AUTH-003
+backfill entry above.
+
+1. **`54c672e` — "feat: add show/hide toggle for password fields on
+   login and signup"** (branch `feature/password-visibility-toggle`,
+   merged via PR #30/`bbc843a`). Added a click-to-toggle eye icon on the
+   password `<input>` in `src/app/login/page.tsx` and
+   `src/app/signup/page.tsx` (local `showPassword` state, toggles
+   `type="password"`/`type="text"`). No tRPC procedure touched — pure
+   client state. **Files:** both password-field pages.
+
+2. **`c50385a` — "fix: resolve leftover merge-conflict remnants in
+   NavBar and plans page"**. A merge of `main` into `landing-page-one`
+   (`e51f101`) had been resolved badly upstream, leaving duplicate JSX
+   blocks, a duplicate `import`, and a mismatched closing brace committed
+   directly to `main`. `src/components/NavBar.tsx`: removed the
+   duplicated `navLinkClass`/Schedule-link/admin-hide-Home fragment
+   stacked on top of the working `isHome`/`scrolled`/`logoClass` hero-nav
+   code (this later turned out to have deleted a real feature — see
+   entry 5 below, which restored it correctly). `src/app/plans/page.tsx`:
+   fixed a missing `}` that broke the `.map((p) => { ... })` callback's
+   closing (`))}`→ `);\n})}`), a straight syntax fix, no JSX content
+   changed. **Behavior change:** unintentional regression (Schedule link
+   lost), corrected in entry 5. **Files:** `NavBar.tsx`, `plans/page.tsx`.
+
+3. **`9ee7a56` — "style: hover navbar links to neon green on non-home
+   pages"**. One line: non-home nav links (`linkClass`) now
+   `hover:text-green-400` instead of `hover:text-white`, matching the
+   `--accent` neon-green already used elsewhere. **Files:** `NavBar.tsx`.
+
+4. **`878b1dc` — "style: place notification badge inline next to bell
+   icon"**. Replaced the 🔔 emoji with an outline SVG bell icon
+   (`currentColor`), and changed the unread-count badge from an
+   `absolute -right-2 -top-2` corner overlay (rendering incorrectly,
+   wrapping to its own line) to a normal inline badge beside the icon
+   (`inline-flex items-center gap-1.5`). **Files:** `NavBar.tsx`.
+
+5. **`6fe17d2` — "style: reorder member nav links to My bookings,
+   Schedule, Waitlist"** + the Schedule-link restoration that preceded
+   it in the same conversation turn. Restored the member-only "Schedule"
+   nav link (`/schedule`) that commit 2 above had accidentally deleted —
+   confirmed via `git log -S` that it originated from a real, deliberate
+   commit (`d5791a2` on `feature/ui-ux-polishes`, with its own
+   logged-out/admin edge-case fixes) on a third branch that got tangled
+   into the bad merge, not leftover noise. Scoped to **members only**
+   (not trainers, who already have their own "My schedule" link) per
+   explicit instruction, then reordered to My bookings → Schedule →
+   Waitlist. Login's post-auth redirect to `/dashboard` for members was
+   already correct (no change needed there). **Files:** `NavBar.tsx`.
+
+6. **`4ec18ad` — "feat: highlight active navbar link in green"**.
+   `linkClass` changed from a static string to a function taking a
+   `path`, comparing it against `usePathname()` (exact match, or a
+   `startsWith(path + "/")` prefix match for nested routes — same
+   formula `d5791a2`'s original `navLinkClass` used) and returning
+   `text-green-400 font-medium` when active, else falling back to the
+   existing hero-aware styling. Applied to every nav link including the
+   profile-name link. **Files:** `NavBar.tsx`.
+
+**Tests:** none of the 6 touch a tRPC procedure, schema, or server route
+— all client-side JSX/styling/state in `NavBar.tsx`, `login/page.tsx`,
+`signup/page.tsx`, `plans/page.tsx`. Each was verified with `tsc --noEmit`
+(clean) at the time and confirmed scoped via `git diff --stat` (each
+commit touched only the file(s) listed above) before being committed.
+No automated test harness exists in this branch for frontend-only
+changes, consistent with every other frontend-only entry in this log.
+
+**Process note going forward:** every commit from this point on will be
+classified (REFACTOR/FIX/DOCUMENT/CHORE/TEST) and get its `EDIT_LOG.md`
+entry in the same commit, per Rule 7 — this backfill should not need to
+happen again.
+
+---
+
 ## 2026-08-11 — CHORE(frontend): redesign landing page hero + navbar (branch `landing-page-one`)
 
 **Type:** CHORE
