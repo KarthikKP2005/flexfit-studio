@@ -77,6 +77,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      <div className="rounded-xl border p-6 space-y-10" style={{ borderColor: "var(--border)" }}>
       <section className="space-y-4">
         <h2 className="text-xl font-semibold tracking-tight">Your Membership</h2>
         {ms ? (
@@ -150,6 +151,7 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+      </div>
 
       <section className="space-y-3">
         <h2 className="font-medium">Upcoming bookings</h2>

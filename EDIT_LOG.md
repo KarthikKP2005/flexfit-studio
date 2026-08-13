@@ -10,6 +10,23 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — CHORE(dashboard): add a border around the membership cards
+
+**Type:** CHORE
+**Defect:** n/a — cosmetic, requested directly by the user
+**Behavior change:** yes, visual only — wrapped the existing "Your
+Membership" and "Corporate Membership" sections in one container `<div>`
+with a border (`var(--border)`, matching the color already used
+elsewhere for borders) and rounded corners. No content, spacing inside
+each section, query, or logic touched — purely an outer wrapper.
+**Files touched:** `src/app/dashboard/page.tsx` (2 lines: one opening
+`<div>`, one closing `</div>`)
+**Tests:** no tRPC procedure touched, nothing to characterize. `tsc
+--noEmit` clean; confirmed via `git diff --stat` that only these 2 lines
+changed.
+
+---
+
 ## 2026-08-13 — FIX(dashboard): show corporate credit pool on the member dashboard
 
 **Type:** FIX
