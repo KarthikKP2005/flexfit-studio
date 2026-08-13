@@ -21,6 +21,12 @@ interface BookingConfirmModalProps {
   source: "personal" | "corporate";
   companyName?: string;
   isPending: boolean;
+  // SCHED-001: if the confirm mutation fails (e.g. already booked,
+  // insufficient credits), this modal stays open (no onSuccess fires) —
+  // without surfacing the error here too, the failure was previously
+  // invisible, since the page's own error banner renders behind this
+  // modal's overlay.
+  errorMessage?: string;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -35,6 +41,7 @@ export function BookingConfirmModal({
   source,
   companyName,
   isPending,
+  errorMessage,
   onConfirm,
   onClose,
 }: BookingConfirmModalProps) {
@@ -78,6 +85,12 @@ export function BookingConfirmModal({
         </div>
 
         <p className="text-sm">{creditLine}</p>
+
+        {errorMessage && (
+          <p style={{ color: "#f87171", fontSize: "0.875rem" }}>
+            {errorMessage}
+          </p>
+        )}
 
         <div className="flex gap-2 justify-end">
           <button className="btn" disabled={isPending} onClick={onClose}>

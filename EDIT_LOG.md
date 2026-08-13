@@ -10,6 +10,50 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — FIX(schedule): surface booking-confirm errors inside the popup instead of hiding them behind it
+
+**Type:** FIX
+**Defect:** SCHED-001
+**Behavior change:** yes — when a booking fails after clicking OK in the
+confirm popup (e.g. `CONFLICT` for an already-booked class), the error
+message now renders inside the still-open popup. Previously it only
+rendered on the page behind the modal's overlay, invisible until the
+popup was closed. Also resets the mutation's error state whenever the
+popup opens/closes (`closeConfirm` now calls `book.reset()`/
+`bookCorporate.reset()`), so a stale error can't leak into a differently
+-targeted reopen — same shape as `RESCH-007`'s fix in
+`reschedule-modal.tsx`. No tRPC procedure, error code, or error message
+string changed.
+**Files touched:**
+- `src/components/booking-confirm-modal.tsx` — new `errorMessage` prop,
+  rendered in the same red-text style `reschedule-modal.tsx` uses.
+- `src/app/schedule/page.tsx` — passes `bookingError?.message` through;
+  `closeConfirm` resets both mutations' error state.
+- `documents/known-issues.md` — added SCHED-001.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Found and verified by actually driving
+the app — launched headless Chromium (Playwright) against the running
+dev server, logged in as a real seeded member, and exercised the full
+flow live rather than assuming it worked from reading the diff:
+1. Picked a specific class instance confirmed via direct DB query to
+   have zero prior bookings for the test account, so the happy path is
+   provably clean.
+2. Cancel → no booking, spots-left unchanged.
+3. OK → booking succeeds, spots-left drops by exactly one, popup closes,
+   booking appears on `/dashboard`.
+4. Re-attempted booking the same class → `CONFLICT` as expected, and
+   (this fix) the error is now visible inside the popup.
+5. Repeated 2-3 for the corporate-credit path (a company-linked test
+   account) — same result, correct "TechCorp Inc's pool" wording.
+6. `tsc --noEmit` clean.
+
+This is a genuine bug I introduced in the same session's earlier
+"confirm popup before booking a class" CHORE — found by actually testing
+the feature end-to-end rather than assuming it worked from the diff, per
+the user's direct request to verify the pipeline.
+
+---
+
 ## 2026-08-13 — CHORE(schedule): widen the expanded book-button row so longer company names don't clip
 
 **Type:** CHORE

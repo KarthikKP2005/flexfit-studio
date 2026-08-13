@@ -69,8 +69,16 @@ export default function SchedulePage() {
     source: "personal" | "corporate";
   } | null>(null);
 
+  // SCHED-001: clears any leftover error from a previous failed attempt
+  // (react-query only resets a mutation's own error on its *next*
+  // .mutate() call) — without this, closing the popup after a failure
+  // and reopening it for a different class could still show the old
+  // error message. Same reset-on-every-exit-path shape as RESCH-007's
+  // fix in reschedule-modal.tsx.
   function closeConfirm() {
     setConfirmTarget(null);
+    book.reset();
+    bookCorporate.reset();
   }
 
   function handleConfirm() {
@@ -220,6 +228,7 @@ export default function SchedulePage() {
         source={confirmTarget?.source ?? "personal"}
         companyName={myCompany?.name}
         isPending={isBooking}
+        errorMessage={bookingError?.message}
         onConfirm={handleConfirm}
         onClose={closeConfirm}
       />

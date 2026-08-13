@@ -1818,6 +1818,72 @@ mechanism described above.
 
 ---
 
+### SCHED-001 — Booking confirm popup swallowed mutation errors (already-booked, insufficient credits, etc.)
+
+**Severity:** Medium (no data-safety issue — the backend still correctly
+rejected the booking either way — but a member hitting a failed booking
+saw the popup just sit there with no visible reason, since the page's
+own error banner rendered *behind* the still-open modal's overlay)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Schedule / Booking
+**File:** `src/app/schedule/page.tsx`, `src/components/booking-confirm-modal.tsx`
+
+**Original behavior:** the confirm popup (added same session, see
+`EDIT_LOG.md`'s "confirm popup before booking a class" entry) only
+closes via its own `onSuccess` callback. When `bookings.book`/
+`corporateBookings.book` failed instead (e.g. `CONFLICT` — "You are
+already on the list for this class."), the popup correctly stayed open,
+but the error text was only ever rendered on the page itself, which the
+modal's full-screen overlay sits on top of — so the failure was
+invisible. Confirmed live: attempted to re-book a class the test
+account already had a confirmed booking for; the popup remained open
+with no error shown, `console` logged the 409, and only closing the
+popup (Cancel) revealed the real error message that had been sitting
+behind it the whole time.
+
+A related, smaller gap found during the same check: react-query only
+clears a mutation's own `error` on its *next* `.mutate()` call, not on
+unmount/close — so `bookingError` could theoretically still be set (and,
+after this fix, rendered inside the popup) when reopening the popup for
+a *different* class after a prior failed attempt, without ever retrying.
+Same shape as `RESCH-007` above, in `reschedule-modal.tsx`.
+
+**Fix:** `BookingConfirmModal` gained an `errorMessage` prop, rendered
+inside the popup (same red-text styling `reschedule-modal.tsx` already
+uses) whenever set. `schedule/page.tsx` passes `bookingError?.message`
+through. `closeConfirm` (already the single exit path for Cancel,
+overlay-click, and success, mirroring `RESCH-007`'s "route every exit
+through one resetter" pattern) now also calls `book.reset()` and
+`bookCorporate.reset()`, so a stale error can't leak into a differently-
+targeted reopen. No tRPC procedure, error code, or error message string
+changed — only where the existing message becomes visible.
+
+**Verification:** found and confirmed via a real, driven browser session
+(Playwright, headless Chromium against the running dev server) rather
+than by inspection — logged in as a seeded, company-linked member
+(`rahul.k@example.com`), and for a specific class instance confirmed
+via direct DB query to have no prior booking (so the happy path is
+guaranteed clean, not assumed):
+1. Opened the popup, clicked **Cancel** — spots-left count unchanged,
+   confirmed no booking occurred.
+2. Opened the popup again, clicked **OK** — popup closed, spots-left
+   dropped by exactly one, and the booking appeared on `/dashboard`.
+3. Attempted to book the *same* class a second time — popup opened,
+   `OK` clicked, mutation failed with `CONFLICT` as expected, and (after
+   the fix) **the error message now renders inside the still-open
+   popup**, not just on the hidden page behind it.
+4. Repeated the personal-credit flow's steps 1-2 for the corporate-
+   credit path (`Company credits` button) — popup showed "credits will
+   be deducted from your TechCorp Inc's pool," booking succeeded, popup
+   closed, booking appeared in `/dashboard`'s "Corporate bookings"
+   section. The public schedule's spots-left count did **not** decrease
+   for the corporate booking — this is CORP-002's already-documented,
+   deliberately out-of-scope behavior (`spotsLeft` only ever reflects
+   personal bookings), not a new defect.
+5. `tsc --noEmit` clean throughout.
+
+---
+
 ### AUTH-001 through NOTIF-001 note
 
 Both entries above were found while writing characterization tests, not
