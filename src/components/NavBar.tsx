@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useRouter, usePathname } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 
 /**
@@ -31,11 +30,6 @@ export function NavBar() {
     enabled: !!user,
     refetchInterval: 30000,
   });
-
-  const navLinkClass = (path: string) => {
-    const isActive = pathname === path || (path !== "/" && pathname.startsWith(path + "/"));
-    return `text-sm ${isActive ? "text-white font-medium" : "muted hover:text-white"}`;
-  };
 
   const logout = trpc.auth.logout.useMutation({
     onSuccess: async () => {
@@ -78,21 +72,6 @@ export function NavBar() {
         </Link>
 
         {/*
-        {/* Home link visible for everyone except admin */}
-        {user?.role !== "admin" && (
-          <Link href="/" className="font-semibold tracking-tight">
-            FlexFit<span style={{ color: "var(--accent)" }}>.</span>
-          </Link>
-        )}
-
-        {/* Schedule link only visible for members and trainers */}
-        {(user?.role === "member" || user?.role === "trainer") && (
-          <Link href="/schedule" className={navLinkClass("/schedule")}>
-            Schedule
-          </Link>
-        )}
-
-        {/* 
           WHY IT'S IMPLEMENTED: NavBar Cleanup.
           Trainers/admins shouldn't see member-specific links.
         */}
@@ -102,10 +81,6 @@ export function NavBar() {
               My bookings
             </Link>
             <Link href="/waitlist" className={linkClass}>
-            <Link href="/dashboard" className={navLinkClass("/dashboard")}>
-              My bookings
-            </Link>
-            <Link href="/waitlist" className={navLinkClass("/waitlist")}>
               Waitlist
             </Link>
           </>
@@ -113,7 +88,6 @@ export function NavBar() {
 
         {user?.role === "trainer" && (
           <Link href="/trainer/schedule" className={linkClass}>
-          <Link href="/trainer/schedule" className={navLinkClass("/trainer/schedule")}>
             My schedule
           </Link>
         )}
@@ -124,10 +98,6 @@ export function NavBar() {
               Admin
             </Link>
             <Link href="/admin/attendance" className={linkClass}>
-            <Link href="/admin" className={navLinkClass("/admin")}>
-              Admin
-            </Link>
-            <Link href="/admin/attendance" className={navLinkClass("/admin/attendance")}>
               Attendance
             </Link>
           </>
@@ -135,7 +105,6 @@ export function NavBar() {
 
         {(user?.role === "admin" || user?.role === "trainer") && (
           <Link href="/kiosk" className={linkClass}>
-          <Link href="/kiosk" className={navLinkClass("/kiosk")}>
             Kiosk
           </Link>
         )}

@@ -95,7 +95,8 @@ export default function PlansPage() {
               {user ? "Subscribe" : "Sign in to subscribe"}
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
