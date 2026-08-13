@@ -62,7 +62,7 @@ export function NavBar() {
     ? `text-sm transition-colors ${
         scrolled ? "text-neutral-600 hover:text-black" : "text-white/80 hover:text-white"
       }`
-    : "text-sm muted hover:text-white";
+    : "text-sm muted hover:text-green-400";
 
   return (
     <header className={headerClass} style={headerStyle}>
