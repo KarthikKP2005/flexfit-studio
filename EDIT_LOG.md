@@ -10,6 +10,37 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — CHORE(schedule): confirm popup before booking a class
+
+**Type:** CHORE
+**Defect:** n/a — UX change requested directly by the user, not tied to
+a known defect
+**Behavior change:** yes, client-side only — clicking Book/Personal
+credits/Company credits on `/schedule` now opens a confirmation popup
+(class name, date/time, room, and how many credits will be deducted —
+or the waitlist wording when the class is full, since waitlisted
+bookings are always created with 0 credits used) instead of booking
+immediately. `bookings.book`/`corporateBookings.book` are called with
+identical inputs as before, just after Confirm is clicked instead of on
+the button's own click — no tRPC procedure, schema, or error
+handling changed.
+**Files touched:**
+- `src/components/booking-confirm-modal.tsx` (new) — reuses the same
+  overlay/panel styling as `reschedule-modal.tsx` for visual
+  consistency; works identically for both personal and corporate credit
+  sources via a `source` prop.
+- `src/app/schedule/page.tsx` — `BookButton`'s callbacks now open the
+  popup (storing which class + credit source) instead of calling
+  `book.mutate`/`bookCorporate.mutate` directly; the popup's own Confirm
+  button is what actually fires the mutation. Everything else on the
+  page (day filter, class list, spots-left/credit-cost display,
+  sign-in redirect for logged-out visitors) is untouched.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually: `tsc --noEmit`
+clean; `git status --short` confirms only these 2 files touched.
+
+---
+
 ## 2026-08-13 — FIX(auth): consistent client-side role gating across staff pages
 
 **Type:** FIX

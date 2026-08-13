@@ -4,12 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
+import { BookingConfirmModal } from "@/components/booking-confirm-modal";
 
 /**
  * Public class browser and booking entry point. Books against the
  * caller's personal membership credits via `bookings.book` by default;
  * for a member linked to an active company (CORP-005), the book button
  * also offers a company-credits option via `corporateBookings.book`.
+ * Clicking Book/Personal credits/Company credits opens a confirmation
+ * popup (class details + credits to be deducted) before either mutation
+ * actually fires — previously it booked immediately on click.
  * Not responsible for: reconciling personal and corporate capacity —
  * `spotsLeft`/`full` below reflect personal bookings only, same as
  * before (see CORP-002 in known-issues.md, not changed here).
@@ -51,6 +55,38 @@ export default function SchedulePage() {
 
   const bookingError = book.error ?? bookCorporate.error;
   const isBooking = book.isPending || bookCorporate.isPending;
+
+  // Which class + credit source the confirm popup is currently showing,
+  // or null when it's closed. Set by BookButton's callbacks below;
+  // cleared on Cancel, overlay click, or a successful booking.
+  const [confirmTarget, setConfirmTarget] = useState<{
+    classId: number;
+    className: string;
+    startsAt: string;
+    room: string;
+    creditCost: number;
+    full: boolean;
+    source: "personal" | "corporate";
+  } | null>(null);
+
+  function closeConfirm() {
+    setConfirmTarget(null);
+  }
+
+  function handleConfirm() {
+    if (!confirmTarget) return;
+    if (confirmTarget.source === "corporate") {
+      bookCorporate.mutate(
+        { classId: confirmTarget.classId },
+        { onSuccess: closeConfirm },
+      );
+    } else {
+      book.mutate(
+        { classId: confirmTarget.classId },
+        { onSuccess: closeConfirm },
+      );
+    }
+  }
 
   if (isLoading) return <p className="muted">Loading schedule...</p>;
 
@@ -140,10 +176,30 @@ export default function SchedulePage() {
               disabled={isBooking}
               company={myCompany ?? null}
               onBookPersonal={() =>
-                user ? book.mutate({ classId: c.id }) : router.push("/login")
+                user
+                  ? setConfirmTarget({
+                      classId: c.id,
+                      className: c.name,
+                      startsAt: c.startsAt,
+                      room: c.room,
+                      creditCost: c.creditCost,
+                      full: c.full,
+                      source: "personal",
+                    })
+                  : router.push("/login")
               }
               onBookCompany={() =>
-                user ? bookCorporate.mutate({ classId: c.id }) : router.push("/login")
+                user
+                  ? setConfirmTarget({
+                      classId: c.id,
+                      className: c.name,
+                      startsAt: c.startsAt,
+                      room: c.room,
+                      creditCost: c.creditCost,
+                      full: c.full,
+                      source: "corporate",
+                    })
+                  : router.push("/login")
               }
             />
           </div>
@@ -153,6 +209,20 @@ export default function SchedulePage() {
       {!user && (
         <p className="muted text-sm">Sign in to book a class.</p>
       )}
+
+      <BookingConfirmModal
+        isOpen={confirmTarget !== null}
+        className={confirmTarget?.className ?? ""}
+        classTime={confirmTarget?.startsAt ?? ""}
+        room={confirmTarget?.room ?? ""}
+        creditCost={confirmTarget?.creditCost ?? 0}
+        full={confirmTarget?.full ?? false}
+        source={confirmTarget?.source ?? "personal"}
+        companyName={myCompany?.name}
+        isPending={isBooking}
+        onConfirm={handleConfirm}
+        onClose={closeConfirm}
+      />
     </div>
   );
 }
