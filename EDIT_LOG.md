@@ -10,6 +10,69 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — FIX(auth): consistent client-side role gating across staff pages
+
+**Type:** FIX
+**Defect:** AUTH-004
+**Behavior change:** yes, client-side presentation only — every one of
+the 7 role-restricted pages listed below now shows one consistent
+"Access denied"/"Please sign in" message, computed only after
+`trpc.auth.me` actually settles. No tRPC procedure's input schema,
+output shape, error code, or error message changed; the backend
+(`adminProcedure`/`staffProcedure`, `src/server/trpc.ts`) was already the
+real authorization boundary and remains completely unchanged — verified
+by reading it directly before starting this fix.
+**Files touched:**
+- `src/components/require-role.tsx` (new) — `RequireRole`, the shared
+  gate used by every page below instead of 4 different copy-pasted
+  patterns.
+- `src/app/admin/page.tsx` — previously had no client-side check at all
+  (denied visitors saw `admin.stats`'s raw FORBIDDEN text).
+- `src/app/admin/attendance/page.tsx`, `src/app/trainer/schedule/page.tsx`,
+  `src/app/kiosk/page.tsx` — previously had a role check, but it ran
+  before `auth.me` itself settled, so *legitimate* admins/trainers/staff
+  also saw a false "Access denied" flash on every page load. Also fixes
+  attendance's 3 data queries firing unconditionally for any visitor
+  (plan.md #41's "unnecessary requests" complaint) — they're inside the
+  now-gated child component, so they never mount for a denied visitor.
+- `src/app/admin/reports/page.tsx`, `src/app/admin/companies/page.tsx`,
+  `src/app/admin/companies/[id]/page.tsx` — previously had **no**
+  client-side gating at all; a denied visitor saw a fully normal,
+  interactive admin screen (companies list + create form, or the
+  actively misleading "Company not found" on the detail page).
+- `src/app/admin/announcements/page.tsx` — previously had no gating; the
+  complete broadcast form (title, message, submit) rendered and was
+  clickable for any visitor, only failing after submit.
+- `documents/known-issues.md` — added AUTH-004 with the full per-page
+  breakdown and the Rule 8 decision below.
+**Rule 8 decision:** plan.md item #41 (and its system-wide duplicate,
+item #11) only specifies the architecture direction (route groups, keep
+tRPC as the real boundary) — it doesn't say whether a denied visitor
+should see an inline message or be redirected. Chose inline message,
+reusing the exact wording pattern `profile`/`dashboard` already used
+correctly, as the smaller behavior change — no new client-side
+navigation introduced anywhere. Full reasoning in known-issues.md's
+AUTH-004 entry.
+**Explicitly out of scope:** the fuller route-group restructuring
+(`app/(member)/`, `app/(staff)/`, `app/(admin)/`) plan.md #41 also
+suggests is a real file-move REFACTOR — Rule 3 forbids blending that
+with this behavior FIX in one commit; left as a separate future
+REFACTOR candidate. A stale comment in `trainers.ts` (claims a
+trainer-only check where `staffProcedure` is actually used) was noticed
+during this pass but is unrelated and untouched. The pre-existing `any`
+types in `kiosk/page.tsx`/`companies/[id]/page.tsx` (plan.md #42) were
+not introduced or expanded by this change and were left alone, same
+precedent as KIOSK-001's fix.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually: `tsc --noEmit`
+clean across all 9 touched/new files; traced each page's render path by
+hand against `RequireRole`'s implementation to confirm the denied state
+now only renders after `auth.me` settles (no premature flash) and that
+the wrapped content — including its data queries — never mounts for a
+denied visitor, not merely stays visually hidden.
+
+---
+
 ## 2026-08-13 — CHORE(dashboard): add a border around the membership cards
 
 **Type:** CHORE

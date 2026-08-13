@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { RequireRole } from "@/components/require-role";
 
 /**
  * Admin broadcast form — sends an announcement notification to every
@@ -9,8 +10,21 @@ import { trpc } from "@/lib/trpc";
  * but that's client-side only; the server accepts empty or arbitrarily
  * long strings (see notifications.ts's `broadcast`), and also currently
  * reaches deactivated members (NOTIF-001 in known-issues.md).
+ *
+ * Wrapped in `RequireRole` (see AUTH-004 in known-issues.md) — this page
+ * previously had no client-side gating at all, so the full broadcast
+ * form (title, message, submit) rendered and was clickable for any
+ * visitor; only submitting it surfaced a raw backend error.
  */
 export default function AnnouncementsPage() {
+  return (
+    <RequireRole role="admin">
+      <AnnouncementsForm />
+    </RequireRole>
+  );
+}
+
+function AnnouncementsForm() {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);

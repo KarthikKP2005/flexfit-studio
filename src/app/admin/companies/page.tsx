@@ -4,9 +4,26 @@ import Link from "next/link";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatMoney } from "@/lib/format";
+import { RequireRole } from "@/components/require-role";
 
-/** Corporate account list + create-company form. Links out to each company's detail page. */
+/**
+ * Corporate account list + create-company form. Links out to each
+ * company's detail page.
+ *
+ * Wrapped in `RequireRole` (see AUTH-004 in known-issues.md) — this page
+ * previously had no client-side gating at all, so a denied visitor saw
+ * a fully normal, interactive admin screen ("New Company" button, create
+ * form) with no indication access was denied.
+ */
 export default function CompaniesPage() {
+  return (
+    <RequireRole role="admin">
+      <CompaniesList />
+    </RequireRole>
+  );
+}
+
+function CompaniesList() {
   const { data: companies, isLoading, refetch } = trpc.adminCompanies.list.useQuery();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");

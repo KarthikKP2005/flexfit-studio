@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
+import { RequireRole } from "@/components/require-role";
 
 /**
  * Single company's detail: credit pool + top-up, linked members +
@@ -19,8 +20,22 @@ import { formatDateTime } from "@/lib/format";
  *   `linkMember` rejects them server-side with BAD_REQUEST.
  * - Nothing here warns if the member being added is already linked to a
  *   different company — see COMPANY-001 in known-issues.md.
+ *
+ * Wrapped in `RequireRole` (see AUTH-004 in known-issues.md) — this page
+ * previously had no client-side gating at all, so a denied visitor
+ * permanently saw the actively misleading "Company not found" (the
+ * `getById` query failing for auth reasons, not because the company
+ * doesn't exist).
  */
 export default function CompanyDetailsPage() {
+  return (
+    <RequireRole role="admin">
+      <CompanyDetails />
+    </RequireRole>
+  );
+}
+
+function CompanyDetails() {
   const params = useParams();
   const id = parseInt(params.id as string);
   const { data: company, isLoading, refetch } = trpc.adminCompanies.getById.useQuery({ id });

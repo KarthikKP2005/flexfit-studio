@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
+import { RequireRole } from "@/components/require-role";
 
 /**
  * Front-desk check-in flow: look up a member, pick from their classes
@@ -30,9 +31,21 @@ import { formatDateTime } from "@/lib/format";
  *   scope for KIOSK-001, a separate question about whether an expired
  *   membership should also be allowed to check into a booking made while
  *   it was still active.
+ *
+ * Wrapped in `RequireRole` (see AUTH-004 in known-issues.md), which
+ * replaces this page's own previous inline role check — that check ran
+ * before `auth.me` itself settled, so real staff also saw a false
+ * "Access denied" flash on every load.
  */
 export default function KioskPage() {
-  const { data: user } = trpc.auth.me.useQuery();
+  return (
+    <RequireRole role={["admin", "trainer"]}>
+      <KioskContent />
+    </RequireRole>
+  );
+}
+
+function KioskContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMember, setSelectedMember] = useState<any>(null);
   const [checkinSuccess, setCheckinSuccess] = useState<{ memberName: string; className: string } | null>(null);
@@ -69,10 +82,6 @@ export default function KioskPage() {
       }
     },
   });
-
-  if (user?.role !== "admin" && user?.role !== "trainer") {
-    return <p className="muted">Access denied. Staff only.</p>;
-  }
 
   const isMembershipExpired = memberDetails.data && memberDetails.data.memberships && memberDetails.data.memberships.length > 0
     ? new Date(memberDetails.data.memberships[0].endDate) < new Date()

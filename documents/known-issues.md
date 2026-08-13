@@ -119,6 +119,99 @@ errors attributable to this file.
 
 ---
 
+### AUTH-004 — Client-side role gating is inconsistent and partially broken across staff pages
+
+**Severity:** Medium (UX/trust issue, not a live data leak — confirmed:
+every corresponding tRPC procedure is already `adminProcedure`/
+`staffProcedure`/`protectedProcedure`, so no real data is reachable
+regardless of what the client renders. But several admin pages currently
+present a fully-functional-looking screen to any visitor, which is bad
+for both trust and code quality — see plan.md item #41 / system-wide
+item #11.)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Frontend / Access control (client-side only — backend
+untouched)
+**Files:** `src/app/admin/page.tsx`, `src/app/admin/attendance/page.tsx`,
+`src/app/admin/reports/page.tsx`, `src/app/admin/announcements/page.tsx`,
+`src/app/admin/companies/page.tsx`,
+`src/app/admin/companies/[id]/page.tsx`,
+`src/app/trainer/schedule/page.tsx`, `src/app/kiosk/page.tsx`
+
+**Original behavior — four different, uncoordinated patterns, all
+confirmed by reading the actual files:**
+1. **Racy** (`admin/attendance`, `trainer/schedule`, `kiosk`): a role
+   check exists, but runs before `trpc.auth.me` itself settles — so
+   *legitimate* admins/trainers/staff also see "Access denied" flash on
+   every page load, before flipping to real content once `auth.me`
+   resolves.
+2. **Raw passthrough** (`admin`, the main dashboard): no client-side
+   check at all; a denied visitor sees the raw backend error string
+   ("Admins only." / "Sign in required.") from whichever of the page's 5
+   queries happens to settle into error first.
+3. **Silent, misleading** (`admin/reports`, `admin/companies` list +
+   detail): no gating at all — the full page shell renders normally
+   ("No revenue data available.", "No companies yet", or, on the
+   companies detail page, the actively misleading "Company not found")
+   with no indication anything was denied.
+4. **Fully functional, no gate** (`admin/announcements`): the complete
+   broadcast form renders and is clickable for any visitor; only fails
+   after submit, with a raw error string.
+
+`profile` and `dashboard` (member pages) already do this correctly —
+they branch on their own data query's settled state (`!profile`), so
+there's no premature check and no flash bug. That pattern is the model
+for the fix below.
+
+**Rule 8 decision (denial UX, not specified by plan.md):** plan.md #41
+only prescribes the architecture direction (route groups, keep the tRPC
+layer as the real boundary) — it does not say whether a denied visitor
+should see an inline message or be redirected. Chose **inline message**,
+reusing the exact wording pattern `profile`/`dashboard` already use
+("Please sign in to..."), because it is the smaller behavior change: no
+new client-side navigation is introduced anywhere in the app by this
+fix. Redirecting was considered and rejected for this pass — it's a
+larger, separately-decidable UX change or a candidate to bundle *with*
+the fuller route-group refactor plan.md actually asks for.
+
+**Fix:** a new shared component, `src/components/require-role.tsx`
+(`RequireRole`), used by all 7 pages above instead of each page's own
+copy-pasted check:
+- Waits for `trpc.auth.me` to actually settle before judging anything
+  (fixes the flash-of-denial-for-legitimate-staff bug in pattern 1).
+- Renders one consistent message when the resolved role doesn't match
+  (or the visitor isn't signed in at all), instead of the 3+ different
+  copy-pasted wordings previously scattered across pages 1–2, or no
+  message at all (patterns 3–4).
+- Wraps each page's real content, so pages that previously rendered a
+  fully functional UI to any visitor (patterns 3 and 4) now render
+  nothing but the denial message until the role is confirmed — their
+  data queries never fire for a denied visitor either.
+- Changes **no** tRPC procedure, error code, error message, schema, or
+  any other route — Prime Directive intact. Only what an unauthorized
+  visitor visually sees on these 7 pages changes; what data they can
+  actually reach was already safe and is unchanged.
+
+**Explicitly out of scope for this fix (documented, not silently
+folded in):**
+- The fuller route-group restructuring plan.md #41 also suggests
+  (`app/(member)/`, `app/(staff)/`, `app/(admin)/`) is a real file-move
+  REFACTOR, which Rule 3 says can't be blended with this behavior FIX in
+  one commit. Left for a separate future REFACTOR entry.
+- A stale comment found in `src/server/routers/trainers.ts` (claims a
+  trainer-only check where `staffProcedure`, admin-or-trainer, is
+  actually used — harmless in practice) is unrelated to this defect and
+  untouched here.
+
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually: `tsc --noEmit`
+clean; traced each of the 7 pages' render logic by hand against
+`RequireRole`'s implementation to confirm the role check now waits for
+`auth.me` to settle before branching (no premature-denial flash), and
+that the wrapped content is unreachable — not merely visually hidden —
+before that resolves.
+
+---
+
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
 
 **Severity:** Low (a deactivated user can't sign in to read it, so the

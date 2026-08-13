@@ -2,6 +2,7 @@
 
 import { trpc } from "@/lib/trpc";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { RequireRole } from "@/components/require-role";
 
 /**
  * 14-day attendance dashboard: check-ins by day, top trainers, no-shows.
@@ -9,9 +10,21 @@ import { formatDate, formatDateTime } from "@/lib/format";
  * Behavior note: the no-shows section will stay empty in a real (non-
  * seeded) deployment — nothing in the app ever transitions a booking to
  * `no_show` (see admin.ts's `noShowList` comment).
+ *
+ * Wrapped in `RequireRole` (see AUTH-004 in known-issues.md), which
+ * replaces this page's own previous inline role check — that check ran
+ * before `auth.me` itself settled, so real admins also saw a false
+ * "Access denied" flash on every load.
  */
 export default function AdminAttendancePage() {
-  const { data: user } = trpc.auth.me.useQuery();
+  return (
+    <RequireRole role="admin">
+      <AttendanceDashboard />
+    </RequireRole>
+  );
+}
+
+function AttendanceDashboard() {
   const { data: checkinsPerDay, isLoading: checkinsLoading } =
     trpc.admin.checkinsPerDay.useQuery();
   const { data: topTrainers, isLoading: trainersLoading } =
@@ -20,10 +33,6 @@ export default function AdminAttendancePage() {
     trpc.admin.noShowList.useQuery();
 
   const isLoading = checkinsLoading || trainersLoading || noShowLoading;
-
-  if (user?.role !== "admin") {
-    return <p className="muted">Access denied. Admins only.</p>;
-  }
 
   if (isLoading) return <p className="muted">Loading attendance data...</p>;
 
