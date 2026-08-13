@@ -15,6 +15,13 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Full-bleed sections (home hero/white band) use `w-screen`, which is
+     100vw and ignores the vertical scrollbar's own width — that pushes
+     the page a few px past the viewport and forces a stray horizontal
+     scrollbar. Clipping horizontal overflow here fixes it site-wide
+     without touching vertical scrolling (still needed to reach content
+     below the hero). */
+  overflow-x: hidden;
 }
 
 .panel {

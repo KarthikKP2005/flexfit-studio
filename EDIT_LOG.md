@@ -10,6 +10,120 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-11 — CHORE(frontend): redesign landing page hero + navbar (branch `landing-page-one`)
+
+**Type:** CHORE
+**Defect:** n/a — visual redesign requested directly by the user, frontend-only
+**Behavior change:** yes, but UI-only — no tRPC procedure, schema, or
+server route was touched. All existing links/routes (`/schedule`,
+`/plans`, `/signup`, `/login`) still exist and work; only the navbar's
+*visible entry points* to them changed.
+- `NavBar.tsx`: removed the "Schedule" link and the "Sign up" link
+  (sign-up is still reachable from `/login`, unlinked from the bar only).
+  On `/` only, the bar is now `fixed`/transparent over the hero image and
+  flips to a solid white bar with black text past `scrollY > 40`
+  (`usePathname`-gated so every other route's bar is byte-identical to
+  before — still static, in-flow, dark, with "Schedule"/"Sign up" removed
+  since those are shared across all routes).
+- `src/app/page.tsx`: rebuilt as a full-bleed hero (100vw/100vh image
+  background via a new original SVG asset, dark overlay for text
+  contrast, existing headline/subtext/CTA buttons unchanged in content)
+  followed by a full-bleed pure-white section reusing the exact same
+  three studio cards (Studio A/B/Spin Room), restyled black-on-white with
+  a small green accent dot. No content was added or removed, only
+  re-laid-out, per the user's explicit "just rearrange" instruction. Uses
+  the `left-1/2 w-screen -translate-x-1/2` full-bleed technique so
+  `layout.tsx`'s shared `max-w-5xl`/`py-8` shell (used by every other
+  route) did not need to change.
+- `public/hero-bg.svg` (new): an original, code-generated dark/neon-green
+  abstract background (gradient + ring/spotlight motif), used in place of
+  a real gym photo — no photo asset was available in the repo and one
+  wasn't fetched from the internet. Flagged to the user as swappable for
+  a real photo later.
+- Color theme: reused the existing `--accent: #4ade80` (already
+  Tailwind's `green-400`, matching the requested neon-green-on-dark
+  palette) — no `globals.css` changes were needed.
+**Files touched:** `src/components/NavBar.tsx`, `src/app/page.tsx`,
+`public/hero-bg.svg` (new)
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope (pure frontend/marketing page). Verified
+manually: `tsc --noEmit` shows only the same pre-existing, unrelated
+`auth.ts`/`corporate-bookings.ts` errors present before this change —
+nothing new. Started the dev server on a spare port and confirmed via
+curl that `/` renders 200 with the new hero/white-section content and
+`hero-bg.svg` serves 200, and that "Schedule"/"Sign up" no longer appear
+in the rendered navbar markup.
+
+Scope: frontend-only per explicit user instruction; no backend, schema,
+or other page was touched.
+
+**Follow-up (same session):** the `w-screen` full-bleed technique used
+above is `100vw`, which ignores the vertical scrollbar's own width and
+pushed the page a few px past the viewport — Chrome on Windows then
+showed a stray horizontal scrollbar (and, since that widened the
+document, an extra sliver of vertical scroll). Fixed with one line,
+`overflow-x: hidden` on `body` in `globals.css` — site-wide, but purely
+clips horizontal overflow; vertical scrolling (needed to reach the white
+section below the hero) is untouched. Verified: dev server on a spare
+port, `curl localhost:3001/` → 200 after the change.
+
+**Follow-up 2 (same session):** two more `src/app/page.tsx` tweaks, both
+requested directly:
+- Studio cards in the white section switched from a white/bordered card
+  to a neon-green fill (`var(--accent)` background + a soft green glow
+  shadow, brightening on hover) with black text; the small indicator dot
+  changed from green to white so it still reads against the now-green
+  card instead of disappearing into it.
+- The section's heading/subtext (previously the hero's paragraph reused
+  verbatim, per the prior follow-up) rewritten as its own short, distinct
+  copy — same facts (three rooms, one class for every kind of day), new
+  wording, so the white section doesn't just repeat the hero.
+No tRPC/backend touched.
+
+**Follow-up 3 (same session):** `src/app/schedule/page.tsx` — a signed-
+out visitor's "Book"/"Join waitlist" button now redirects to `/login`
+(`router.push`) on click, instead of just being disabled with a small
+"Sign in to book a class" line as the only hint. Scoped entirely to this
+one file: `BookButton` is a local, unexported function defined in
+`schedule/page.tsx` only (confirmed via grep — no other file imports or
+duplicates it), so this can't affect any other page. Signed-in behavior
+(personal vs. company credits, full-class waitlisting, `bookings.book`/
+`corporateBookings.book` themselves) is completely unchanged — only the
+disabled-vs-clickable branching for `!user` changed. No tRPC procedure
+touched. Verified: `tsc --noEmit` shows only the same pre-existing,
+unrelated `auth.ts`/`corporate-bookings.ts` errors as every prior entry
+in this log — nothing new.
+
+**Follow-up 4 (same session):** `src/app/plans/page.tsx` — same fix as
+Follow-up 3, applied to the "Sign in to subscribe" button: a signed-out
+visitor clicking it now redirects to `/login` instead of doing nothing
+(button was `disabled`). Scoped entirely to this one file — only the
+button's `disabled`/`onClick` logic changed; `plans.subscribe` and the
+signed-in Subscribe flow are untouched. No tRPC procedure touched.
+Verified: `tsc --noEmit` shows only the same pre-existing, unrelated
+errors as every prior entry in this log — nothing new.
+
+**Follow-up 5 (same session):** `src/components/NavBar.tsx` — bumped the
+"FlexFit." logo from the default (unset, ~1rem) size to `text-lg`, one
+class added to the existing `logoClass` string. Purely cosmetic, no
+other class/behavior touched.
+
+**Incident (same session, self-inflicted, not a code defect):** while
+verifying the scrollbar fix, a second `pnpm dev` was started in the
+background (on a spare port) while the user's own `pnpm dev` was already
+running on port 3000 — both processes wrote to the same `.next` build
+cache concurrently, corrupting it (`route.js` manifest error, then
+cascading 404s on `/login` in the user's live session). Fixed by deleting
+the `.next` directory (safe, regenerated on next build — not source, not
+touched otherwise) once confirmed no extra dev-server processes were
+still running (`Get-NetTCPConnection` on ports 3000–3010 showed only the
+user's original process). User needs to restart their own `pnpm dev` for
+a clean rebuild. Lesson: never start a second `next dev` against a
+directory that already has one running — reuse/observe the existing
+server instead of spawning a parallel instance.
+
+---
+
 ## 2026-08-09 — CHORE(docs): backfill AUTH-003 for the login role-redirect fix
 
 **Type:** CHORE

@@ -79,26 +79,23 @@ export default function PlansPage() {
                 {isUnlimited ? "Unlimited classes" : `${p.classCredits} class credits`}
               </div>
 
-              <button
-                className={`btn mt-auto py-2.5 ${isUnlimited ? 'btn-primary' : ''}`}
-                disabled={!!user && subscribe.isPending}
-                onClick={() => {
-                  if (!user) {
-                    router.push("/login?redirect=/plans");
-                  } else {
-                    subscribe.mutate({ planId: p.id, method: "card" });
-                  }
-                }}
-              >
-                {!user 
-                  ? "Sign in to subscribe" 
-                  : subscribe.isPending 
-                    ? "Subscribing..." 
-                    : "Subscribe Now"}
-              </button>
-            </div>
-          );
-        })}
+            {/* Signed-out visitor: clickable button that sends them to
+                sign in, same pattern as schedule/page.tsx's Book button,
+                instead of a disabled button. Signed-in Subscribe flow is
+                unchanged. */}
+            <button
+              className="btn btn-primary mt-auto"
+              disabled={!!user && subscribe.isPending}
+              onClick={() =>
+                user
+                  ? subscribe.mutate({ planId: p.id, method: "card" })
+                  : router.push("/login")
+              }
+            >
+              {user ? "Subscribe" : "Sign in to subscribe"}
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
