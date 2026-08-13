@@ -267,7 +267,7 @@ function BookButton({
     >
       <div
         className="flex gap-1.5 overflow-hidden transition-all duration-200"
-        style={{ maxWidth: expanded ? 260 : 96 }}
+        style={{ maxWidth: expanded ? 420 : 96 }}
       >
         {!expanded ? (
           <button

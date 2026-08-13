@@ -10,6 +10,22 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — CHORE(schedule): widen the expanded book-button row so longer company names don't clip
+
+**Type:** CHORE
+**Defect:** n/a — cosmetic, requested directly by the user
+**Behavior change:** yes, visual only — the expanded Personal/Company
+credits button row's `maxWidth` (a CSS transition target) went from
+`260px` to `420px`, since `260px` was too narrow to fit "Personal
+credits" + a longer company name like "TechCorp Inc credits" side by
+side, clipping the second button's text. No logic, click handler, or
+mutation touched.
+**Files touched:** `src/app/schedule/page.tsx` (1 line)
+**Tests:** no tRPC procedure touched, nothing to characterize. `tsc
+--noEmit` clean; `git diff --stat` confirms only this 1-line change.
+
+---
+
 ## 2026-08-13 — CHORE(schedule): confirm popup before booking a class
 
 **Type:** CHORE
