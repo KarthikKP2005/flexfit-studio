@@ -119,6 +119,99 @@ errors attributable to this file.
 
 ---
 
+### AUTH-004 — Client-side role gating is inconsistent and partially broken across staff pages
+
+**Severity:** Medium (UX/trust issue, not a live data leak — confirmed:
+every corresponding tRPC procedure is already `adminProcedure`/
+`staffProcedure`/`protectedProcedure`, so no real data is reachable
+regardless of what the client renders. But several admin pages currently
+present a fully-functional-looking screen to any visitor, which is bad
+for both trust and code quality — see plan.md item #41 / system-wide
+item #11.)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Frontend / Access control (client-side only — backend
+untouched)
+**Files:** `src/app/admin/page.tsx`, `src/app/admin/attendance/page.tsx`,
+`src/app/admin/reports/page.tsx`, `src/app/admin/announcements/page.tsx`,
+`src/app/admin/companies/page.tsx`,
+`src/app/admin/companies/[id]/page.tsx`,
+`src/app/trainer/schedule/page.tsx`, `src/app/kiosk/page.tsx`
+
+**Original behavior — four different, uncoordinated patterns, all
+confirmed by reading the actual files:**
+1. **Racy** (`admin/attendance`, `trainer/schedule`, `kiosk`): a role
+   check exists, but runs before `trpc.auth.me` itself settles — so
+   *legitimate* admins/trainers/staff also see "Access denied" flash on
+   every page load, before flipping to real content once `auth.me`
+   resolves.
+2. **Raw passthrough** (`admin`, the main dashboard): no client-side
+   check at all; a denied visitor sees the raw backend error string
+   ("Admins only." / "Sign in required.") from whichever of the page's 5
+   queries happens to settle into error first.
+3. **Silent, misleading** (`admin/reports`, `admin/companies` list +
+   detail): no gating at all — the full page shell renders normally
+   ("No revenue data available.", "No companies yet", or, on the
+   companies detail page, the actively misleading "Company not found")
+   with no indication anything was denied.
+4. **Fully functional, no gate** (`admin/announcements`): the complete
+   broadcast form renders and is clickable for any visitor; only fails
+   after submit, with a raw error string.
+
+`profile` and `dashboard` (member pages) already do this correctly —
+they branch on their own data query's settled state (`!profile`), so
+there's no premature check and no flash bug. That pattern is the model
+for the fix below.
+
+**Rule 8 decision (denial UX, not specified by plan.md):** plan.md #41
+only prescribes the architecture direction (route groups, keep the tRPC
+layer as the real boundary) — it does not say whether a denied visitor
+should see an inline message or be redirected. Chose **inline message**,
+reusing the exact wording pattern `profile`/`dashboard` already use
+("Please sign in to..."), because it is the smaller behavior change: no
+new client-side navigation is introduced anywhere in the app by this
+fix. Redirecting was considered and rejected for this pass — it's a
+larger, separately-decidable UX change or a candidate to bundle *with*
+the fuller route-group refactor plan.md actually asks for.
+
+**Fix:** a new shared component, `src/components/require-role.tsx`
+(`RequireRole`), used by all 7 pages above instead of each page's own
+copy-pasted check:
+- Waits for `trpc.auth.me` to actually settle before judging anything
+  (fixes the flash-of-denial-for-legitimate-staff bug in pattern 1).
+- Renders one consistent message when the resolved role doesn't match
+  (or the visitor isn't signed in at all), instead of the 3+ different
+  copy-pasted wordings previously scattered across pages 1–2, or no
+  message at all (patterns 3–4).
+- Wraps each page's real content, so pages that previously rendered a
+  fully functional UI to any visitor (patterns 3 and 4) now render
+  nothing but the denial message until the role is confirmed — their
+  data queries never fire for a denied visitor either.
+- Changes **no** tRPC procedure, error code, error message, schema, or
+  any other route — Prime Directive intact. Only what an unauthorized
+  visitor visually sees on these 7 pages changes; what data they can
+  actually reach was already safe and is unchanged.
+
+**Explicitly out of scope for this fix (documented, not silently
+folded in):**
+- The fuller route-group restructuring plan.md #41 also suggests
+  (`app/(member)/`, `app/(staff)/`, `app/(admin)/`) is a real file-move
+  REFACTOR, which Rule 3 says can't be blended with this behavior FIX in
+  one commit. Left for a separate future REFACTOR entry.
+- A stale comment found in `src/server/routers/trainers.ts` (claims a
+  trainer-only check where `staffProcedure`, admin-or-trainer, is
+  actually used — harmless in practice) is unrelated to this defect and
+  untouched here.
+
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually: `tsc --noEmit`
+clean; traced each of the 7 pages' render logic by hand against
+`RequireRole`'s implementation to confirm the role check now waits for
+`auth.me` to settle before branching (no premature-denial flash), and
+that the wrapped content is unreachable — not merely visually hidden —
+before that resolves.
+
+---
+
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
 
 **Severity:** Low (a deactivated user can't sign in to read it, so the
@@ -1002,6 +1095,64 @@ constraint is enforced.
 
 ---
 
+### COMPANY-002 — Dashboard shows no visibility into a member's corporate credit pool
+
+**Severity:** Low (cosmetic/UX gap — no incorrect data, no security issue;
+a company-linked member simply has no way to see their employer's credit
+pool status without asking staff)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Corporate accounts / Dashboard
+**File:** `src/app/dashboard/page.tsx`
+
+**Original behavior:** `/dashboard` ("My bookings") only ever called
+`trpc.members.profile` for personal membership data and rendered a
+"Your Membership" card from it. It never called
+`corporateBookings.myCompany` (an existing, unmodified query — already
+used by `/schedule`'s book-button credit-source selector, see CORP-005),
+so a member linked to a company had zero on-dashboard indication of
+their company name, pool balance, or link status. They could still book
+against the pool from `/schedule` and see corporate bookings in the
+"Corporate bookings" section below — only the *membership-style summary
+card* was missing.
+
+**Data model note (checked before fixing, not guessed):** `companies`
+(`src/db/schema.ts`) has `name`, `contactEmail`, `creditPoolBalance`,
+`active`, `createdAt` — no renewal/expiry date field exists for a
+corporate credit pool, unlike a personal membership's `endDate`. The fix
+below does not display a "renews on" row for the corporate card, since
+there is no real date to show — confirmed with the user rather than
+fabricating one.
+
+**Existing behavior reused, not changed:** `corporateBookings.myCompany`
+returns `null` both when a member was never linked to a company *and*
+when they're linked to a company an admin has since deactivated (it
+filters on `companies.active`, see COMPANY-001's `getCompanyForMember`
+note above) — these two cases are indistinguishable from this query.
+The new card shows the same "not linked" message for both, matching the
+query's existing, documented behavior exactly; this fix does not query
+around it or otherwise change what `myCompany` resolves.
+
+**Fix:** Added a `trpc.corporateBookings.myCompany.useQuery()` call to
+`/dashboard` and a new card, placed directly below the personal "Your
+Membership" section and above "Upcoming bookings": when linked, shows
+company name, credit pool balance, and a static "Active" status pill
+(safe as static since `myCompany` only ever returns companies where
+`active = true` — no separate status field needed). When not linked
+(`null`), shows "Not part of any corporate account." No tRPC procedure,
+schema, or other route was touched — purely additive, read-only UI
+reusing an existing query.
+
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually against the dev
+server: a company-linked seeded member (`rahul.k@example.com`, TechCorp
+Inc) shows the new card with the correct company name and pool balance;
+an unlinked seeded member (`karthik.p@example.com` — confirmed via
+`seed.ts`'s `companyMemberLinks`, which only links the first 5 of 12
+seeded members) shows "Not part of any corporate account" instead.
+`tsc --noEmit` clean.
+
+---
+
 ### BOOK-004 — Waitlist promotion on cancel does not re-check the promoted member's credit balance
 
 **Severity:** High (a member could be promoted into a paid class while
@@ -1664,6 +1815,147 @@ tool (Playwright) was available in this session to reproduce the fix
 live the way RESCH-005/006 were — verified instead by tracing every
 `onClose`/`onClick` path in the diff by hand against the state-leak
 mechanism described above.
+
+---
+
+### SCHED-001 — Booking confirm popup swallowed mutation errors (already-booked, insufficient credits, etc.)
+
+**Severity:** Medium (no data-safety issue — the backend still correctly
+rejected the booking either way — but a member hitting a failed booking
+saw the popup just sit there with no visible reason, since the page's
+own error banner rendered *behind* the still-open modal's overlay)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Schedule / Booking
+**File:** `src/app/schedule/page.tsx`, `src/components/booking-confirm-modal.tsx`
+
+**Original behavior:** the confirm popup (added same session, see
+`EDIT_LOG.md`'s "confirm popup before booking a class" entry) only
+closes via its own `onSuccess` callback. When `bookings.book`/
+`corporateBookings.book` failed instead (e.g. `CONFLICT` — "You are
+already on the list for this class."), the popup correctly stayed open,
+but the error text was only ever rendered on the page itself, which the
+modal's full-screen overlay sits on top of — so the failure was
+invisible. Confirmed live: attempted to re-book a class the test
+account already had a confirmed booking for; the popup remained open
+with no error shown, `console` logged the 409, and only closing the
+popup (Cancel) revealed the real error message that had been sitting
+behind it the whole time.
+
+A related, smaller gap found during the same check: react-query only
+clears a mutation's own `error` on its *next* `.mutate()` call, not on
+unmount/close — so `bookingError` could theoretically still be set (and,
+after this fix, rendered inside the popup) when reopening the popup for
+a *different* class after a prior failed attempt, without ever retrying.
+Same shape as `RESCH-007` above, in `reschedule-modal.tsx`.
+
+**Fix:** `BookingConfirmModal` gained an `errorMessage` prop, rendered
+inside the popup (same red-text styling `reschedule-modal.tsx` already
+uses) whenever set. `schedule/page.tsx` passes `bookingError?.message`
+through. `closeConfirm` (already the single exit path for Cancel,
+overlay-click, and success, mirroring `RESCH-007`'s "route every exit
+through one resetter" pattern) now also calls `book.reset()` and
+`bookCorporate.reset()`, so a stale error can't leak into a differently-
+targeted reopen. No tRPC procedure, error code, or error message string
+changed — only where the existing message becomes visible.
+
+**Verification:** found and confirmed via a real, driven browser session
+(Playwright, headless Chromium against the running dev server) rather
+than by inspection — logged in as a seeded, company-linked member
+(`rahul.k@example.com`), and for a specific class instance confirmed
+via direct DB query to have no prior booking (so the happy path is
+guaranteed clean, not assumed):
+1. Opened the popup, clicked **Cancel** — spots-left count unchanged,
+   confirmed no booking occurred.
+2. Opened the popup again, clicked **OK** — popup closed, spots-left
+   dropped by exactly one, and the booking appeared on `/dashboard`.
+3. Attempted to book the *same* class a second time — popup opened,
+   `OK` clicked, mutation failed with `CONFLICT` as expected, and (after
+   the fix) **the error message now renders inside the still-open
+   popup**, not just on the hidden page behind it.
+4. Repeated the personal-credit flow's steps 1-2 for the corporate-
+   credit path (`Company credits` button) — popup showed "credits will
+   be deducted from your TechCorp Inc's pool," booking succeeded, popup
+   closed, booking appeared in `/dashboard`'s "Corporate bookings"
+   section. The public schedule's spots-left count did **not** decrease
+   for the corporate booking — this is CORP-002's already-documented,
+   deliberately out-of-scope behavior (`spotsLeft` only ever reflects
+   personal bookings), not a new defect.
+5. `tsc --noEmit` clean throughout.
+
+---
+
+### SCHED-002 — Expanded personal/company book buttons never said "waitlist" for a full class
+
+**Severity:** Medium (no data-safety issue — clicking either button still
+correctly waitlists, not books, a full class server-side — but a
+company-linked member had zero indication that's what was about to
+happen, since the button text was identical to a normal, confirmed
+booking)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Schedule / Booking
+**File:** `src/app/schedule/page.tsx` (`BookButton`)
+
+**Original behavior:** the collapsed single button correctly read "Join
+waitlist" vs "Book" based on the class's `full` state. But for a
+company-linked member, clicking it doesn't book — it *expands* into two
+separate buttons, "Personal credits" and "{company name} credits", and
+those two labels never referenced `full` at all. So once expanded, all
+waitlist-vs-book context disappeared: a full class's expanded buttons
+looked identical to a normal, available class's.
+
+**Reproduction:** found live (not by inspection) — filled a real class
+to capacity via direct DB inserts (`Strength Basics`, 10/10 booked, 0
+left), logged in as a company-linked seeded member
+(`rahul.k@example.com`, linked to TechCorp Inc), navigated to
+`/schedule`, and expanded that row's button. Screenshot confirmed:
+"Personal credits" / "TechCorp Inc credits" — same wording a member
+would see on a completely empty class.
+
+**Fix:** both expanded labels now check `full`: `"Join waitlist
+(personal)"` / `"Join waitlist ({company.name})"` when full, unchanged
+`"Personal credits"` / `"{company.name} credits"` otherwise. No click
+handler, mutation, or non-company (single-button) path touched.
+
+**Verification:** re-ran the same live repro after the fix — the
+expanded buttons now read "Join waitlist (personal)" / "Join waitlist
+(TechCorp Inc)" for the same full class. `tsc --noEmit` clean;
+`git diff --stat` confirms only this one file changed.
+
+---
+
+### SCHED-003 — Book/Join-waitlist button could get clipped on a narrower window
+
+**Severity:** Low (cosmetic — the button is still clickable if you
+happen to hit the visible sliver, but part of its label was invisible)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Schedule
+**File:** `src/app/schedule/page.tsx` (each class row)
+
+**Original behavior:** each class row is one `flex` container with
+three children — the name/time column (`min-w-0 flex-1`, correctly
+allowed to shrink), the spots-left/credit-cost column, and the Book/
+Join-waitlist button. Only the first child had shrink protection; the
+other two had no `flex-shrink: 0`, so on a narrower window the button
+(and the spots/credit text) could get compressed below their natural
+content width instead of the flexible name/time column absorbing the
+squeeze first. Combined with `overflow-x: hidden` on `body` (added
+earlier this session for an unrelated full-bleed-hero fix), the
+compressed/overflowing part of the button was silently clipped rather
+than triggering a scrollbar. Reported live with a screenshot showing
+roughly the last quarter of the "Join waitlist" button cut off.
+
+**Fix:** added `shrink-0` to the spots-left/credit-cost column and to
+both of `BookButton`'s render paths (the plain single button, and the
+expanded-state wrapper div) — the name/time column is now the only
+part of the row that shrinks. No click handler, mutation, or label text
+touched (separate from `SCHED-002` right above, which only changed the
+label wording).
+
+**Verification:** reproduced and confirmed fixed live — screenshotted
+the row at a 900px viewport (narrower than the row's natural content
+width) before and after; the button rendered fully after the fix, no
+clipping. `tsc --noEmit` clean; `git diff --stat` confirms only this
+one file changed.
 
 ---
 

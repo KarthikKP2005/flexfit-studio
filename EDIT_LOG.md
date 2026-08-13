@@ -10,6 +10,340 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — FIX(schedule): stop the Book/Join-waitlist button from getting clipped on a narrower window
+
+**Type:** FIX
+**Defect:** SCHED-003
+**Behavior change:** yes, visual only — the spots-left/credit-cost
+column and the Book/Join-waitlist button now have `shrink-0`, so only
+the name/time column absorbs a narrower viewport by shrinking; the
+button previously had no shrink protection and could get compressed
+(and, combined with `body`'s `overflow-x: hidden`, silently clipped)
+below its natural width. No click handler, mutation, or label text
+touched.
+**Files touched:** `src/app/schedule/page.tsx` (3 `shrink-0` additions:
+the spots/credit column, the single-button path, the expanded-wrapper
+path), `documents/known-issues.md` (added SCHED-003).
+**Tests:** no tRPC procedure changed, nothing to characterize. Verified
+live: screenshotted a class row at a 900px viewport before and after —
+button visibly clipped before, renders fully after. `tsc --noEmit`
+clean.
+
+---
+
+## 2026-08-13 — FIX(schedule): label the expanded book buttons "Join waitlist" for a full class
+
+**Type:** FIX
+**Defect:** SCHED-002
+**Behavior change:** yes — for a company-linked member viewing a full
+class, the expanded "Personal credits"/"{company} credits" buttons now
+read "Join waitlist (personal)"/"Join waitlist ({company})" instead of
+identical-to-normal wording. The collapsed single button (non-company
+members) already said "Join waitlist" correctly and is unchanged; no
+click handler or mutation touched — same `onBookPersonal`/`onBookCompany`
+calls as before.
+**Files touched:** `src/app/schedule/page.tsx` (`BookButton`'s two
+expanded-state labels + its header comment), `documents/known-issues.md`
+(added SCHED-002).
+**Tests:** no tRPC procedure changed, nothing to characterize at the
+caller level. Found and verified live: filled "Strength Basics" to
+capacity via direct DB inserts, logged in as a company-linked seeded
+member (Playwright against the running dev server), screenshotted the
+expanded button before the fix ("Personal credits" / "TechCorp Inc
+credits" — no waitlist indication) and after ("Join waitlist (personal)"
+/ "Join waitlist (TechCorp Inc)"). `tsc --noEmit` clean.
+
+---
+
+## 2026-08-13 — FIX(schedule): surface booking-confirm errors inside the popup instead of hiding them behind it
+
+**Type:** FIX
+**Defect:** SCHED-001
+**Behavior change:** yes — when a booking fails after clicking OK in the
+confirm popup (e.g. `CONFLICT` for an already-booked class), the error
+message now renders inside the still-open popup. Previously it only
+rendered on the page behind the modal's overlay, invisible until the
+popup was closed. Also resets the mutation's error state whenever the
+popup opens/closes (`closeConfirm` now calls `book.reset()`/
+`bookCorporate.reset()`), so a stale error can't leak into a differently
+-targeted reopen — same shape as `RESCH-007`'s fix in
+`reschedule-modal.tsx`. No tRPC procedure, error code, or error message
+string changed.
+**Files touched:**
+- `src/components/booking-confirm-modal.tsx` — new `errorMessage` prop,
+  rendered in the same red-text style `reschedule-modal.tsx` uses.
+- `src/app/schedule/page.tsx` — passes `bookingError?.message` through;
+  `closeConfirm` resets both mutations' error state.
+- `documents/known-issues.md` — added SCHED-001.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Found and verified by actually driving
+the app — launched headless Chromium (Playwright) against the running
+dev server, logged in as a real seeded member, and exercised the full
+flow live rather than assuming it worked from reading the diff:
+1. Picked a specific class instance confirmed via direct DB query to
+   have zero prior bookings for the test account, so the happy path is
+   provably clean.
+2. Cancel → no booking, spots-left unchanged.
+3. OK → booking succeeds, spots-left drops by exactly one, popup closes,
+   booking appears on `/dashboard`.
+4. Re-attempted booking the same class → `CONFLICT` as expected, and
+   (this fix) the error is now visible inside the popup.
+5. Repeated 2-3 for the corporate-credit path (a company-linked test
+   account) — same result, correct "TechCorp Inc's pool" wording.
+6. `tsc --noEmit` clean.
+
+This is a genuine bug I introduced in the same session's earlier
+"confirm popup before booking a class" CHORE — found by actually testing
+the feature end-to-end rather than assuming it worked from the diff, per
+the user's direct request to verify the pipeline.
+
+---
+
+## 2026-08-13 — CHORE(schedule): widen the expanded book-button row so longer company names don't clip
+
+**Type:** CHORE
+**Defect:** n/a — cosmetic, requested directly by the user
+**Behavior change:** yes, visual only — the expanded Personal/Company
+credits button row's `maxWidth` (a CSS transition target) went from
+`260px` to `420px`, since `260px` was too narrow to fit "Personal
+credits" + a longer company name like "TechCorp Inc credits" side by
+side, clipping the second button's text. No logic, click handler, or
+mutation touched.
+**Files touched:** `src/app/schedule/page.tsx` (1 line)
+**Tests:** no tRPC procedure touched, nothing to characterize. `tsc
+--noEmit` clean; `git diff --stat` confirms only this 1-line change.
+
+---
+
+## 2026-08-13 — CHORE(schedule): confirm popup before booking a class
+
+**Type:** CHORE
+**Defect:** n/a — UX change requested directly by the user, not tied to
+a known defect
+**Behavior change:** yes, client-side only — clicking Book/Personal
+credits/Company credits on `/schedule` now opens a confirmation popup
+(class name, date/time, room, and how many credits will be deducted —
+or the waitlist wording when the class is full, since waitlisted
+bookings are always created with 0 credits used) instead of booking
+immediately. `bookings.book`/`corporateBookings.book` are called with
+identical inputs as before, just after Confirm is clicked instead of on
+the button's own click — no tRPC procedure, schema, or error
+handling changed.
+**Files touched:**
+- `src/components/booking-confirm-modal.tsx` (new) — reuses the same
+  overlay/panel styling as `reschedule-modal.tsx` for visual
+  consistency; works identically for both personal and corporate credit
+  sources via a `source` prop.
+- `src/app/schedule/page.tsx` — `BookButton`'s callbacks now open the
+  popup (storing which class + credit source) instead of calling
+  `book.mutate`/`bookCorporate.mutate` directly; the popup's own Confirm
+  button is what actually fires the mutation. Everything else on the
+  page (day filter, class list, spots-left/credit-cost display,
+  sign-in redirect for logged-out visitors) is untouched.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually: `tsc --noEmit`
+clean; `git status --short` confirms only these 2 files touched.
+
+---
+
+## 2026-08-13 — FIX(auth): consistent client-side role gating across staff pages
+
+**Type:** FIX
+**Defect:** AUTH-004
+**Behavior change:** yes, client-side presentation only — every one of
+the 7 role-restricted pages listed below now shows one consistent
+"Access denied"/"Please sign in" message, computed only after
+`trpc.auth.me` actually settles. No tRPC procedure's input schema,
+output shape, error code, or error message changed; the backend
+(`adminProcedure`/`staffProcedure`, `src/server/trpc.ts`) was already the
+real authorization boundary and remains completely unchanged — verified
+by reading it directly before starting this fix.
+**Files touched:**
+- `src/components/require-role.tsx` (new) — `RequireRole`, the shared
+  gate used by every page below instead of 4 different copy-pasted
+  patterns.
+- `src/app/admin/page.tsx` — previously had no client-side check at all
+  (denied visitors saw `admin.stats`'s raw FORBIDDEN text).
+- `src/app/admin/attendance/page.tsx`, `src/app/trainer/schedule/page.tsx`,
+  `src/app/kiosk/page.tsx` — previously had a role check, but it ran
+  before `auth.me` itself settled, so *legitimate* admins/trainers/staff
+  also saw a false "Access denied" flash on every page load. Also fixes
+  attendance's 3 data queries firing unconditionally for any visitor
+  (plan.md #41's "unnecessary requests" complaint) — they're inside the
+  now-gated child component, so they never mount for a denied visitor.
+- `src/app/admin/reports/page.tsx`, `src/app/admin/companies/page.tsx`,
+  `src/app/admin/companies/[id]/page.tsx` — previously had **no**
+  client-side gating at all; a denied visitor saw a fully normal,
+  interactive admin screen (companies list + create form, or the
+  actively misleading "Company not found" on the detail page).
+- `src/app/admin/announcements/page.tsx` — previously had no gating; the
+  complete broadcast form (title, message, submit) rendered and was
+  clickable for any visitor, only failing after submit.
+- `documents/known-issues.md` — added AUTH-004 with the full per-page
+  breakdown and the Rule 8 decision below.
+**Rule 8 decision:** plan.md item #41 (and its system-wide duplicate,
+item #11) only specifies the architecture direction (route groups, keep
+tRPC as the real boundary) — it doesn't say whether a denied visitor
+should see an inline message or be redirected. Chose inline message,
+reusing the exact wording pattern `profile`/`dashboard` already used
+correctly, as the smaller behavior change — no new client-side
+navigation introduced anywhere. Full reasoning in known-issues.md's
+AUTH-004 entry.
+**Explicitly out of scope:** the fuller route-group restructuring
+(`app/(member)/`, `app/(staff)/`, `app/(admin)/`) plan.md #41 also
+suggests is a real file-move REFACTOR — Rule 3 forbids blending that
+with this behavior FIX in one commit; left as a separate future
+REFACTOR candidate. A stale comment in `trainers.ts` (claims a
+trainer-only check where `staffProcedure` is actually used) was noticed
+during this pass but is unrelated and untouched. The pre-existing `any`
+types in `kiosk/page.tsx`/`companies/[id]/page.tsx` (plan.md #42) were
+not introduced or expanded by this change and were left alone, same
+precedent as KIOSK-001's fix.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified manually: `tsc --noEmit`
+clean across all 9 touched/new files; traced each page's render path by
+hand against `RequireRole`'s implementation to confirm the denied state
+now only renders after `auth.me` settles (no premature flash) and that
+the wrapped content — including its data queries — never mounts for a
+denied visitor, not merely stays visually hidden.
+
+---
+
+## 2026-08-13 — CHORE(dashboard): add a border around the membership cards
+
+**Type:** CHORE
+**Defect:** n/a — cosmetic, requested directly by the user
+**Behavior change:** yes, visual only — wrapped the existing "Your
+Membership" and "Corporate Membership" sections in one container `<div>`
+with a border (`var(--border)`, matching the color already used
+elsewhere for borders) and rounded corners. No content, spacing inside
+each section, query, or logic touched — purely an outer wrapper.
+**Files touched:** `src/app/dashboard/page.tsx` (2 lines: one opening
+`<div>`, one closing `</div>`)
+**Tests:** no tRPC procedure touched, nothing to characterize. `tsc
+--noEmit` clean; confirmed via `git diff --stat` that only these 2 lines
+changed.
+
+---
+
+## 2026-08-13 — FIX(dashboard): show corporate credit pool on the member dashboard
+
+**Type:** FIX
+**Defect:** COMPANY-002
+**Behavior change:** yes — `/dashboard` now shows a "Corporate
+Membership" card (company name, credit pool balance, Active status) for
+a company-linked member, or "Not part of any corporate account" if not.
+No tRPC procedure was touched — `corporateBookings.myCompany` is called
+exactly as `/schedule` already calls it; only a new read and new JSX
+were added.
+**Files touched:**
+- `src/app/dashboard/page.tsx` — added
+  `trpc.corporateBookings.myCompany.useQuery()`; new section placed
+  directly below "Your Membership", above "Upcoming bookings", styled to
+  match the existing personal-membership card grid. Deliberately no
+  "Renews on" row — `companies` has no renewal/expiry date field (see
+  known-issues.md's data-model note); confirmed with the user rather
+  than fabricating one.
+- `documents/known-issues.md` — added COMPANY-002.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope. Verified against the real dev database
+directly (not just `seed.ts`'s intent) with a one-off script querying
+`companyMembers`/`companies`: `rahul.k@example.com` → linked to
+TechCorp Inc, balance 95 — matches what the new card renders.
+`karthik.p@example.com` → not linked (seed only links the first 5 of 12
+members) — matches the "Not part of any corporate account" empty state.
+Script deleted after use, no DB rows modified. `tsc --noEmit` clean.
+
+Closes known-issues.md's COMPANY-002. `corporateBookings.myCompany`,
+`members.profile`, and every other query/mutation this page calls are
+unchanged.
+
+---
+
+## 2026-08-13 — CHORE(docs): backfill 6 undocumented NavBar/plans commits (branch `member-page-updates` + `feature/password-visibility-toggle`)
+
+**Type:** CHORE
+**Defect:** n/a — these were all direct user-requested UI tweaks; no
+`known-issues.md` defect ID applies to any of them
+**Behavior change:** no — this entry only adds the log record Rule 7
+required at commit time but didn't get. No code changes here.
+
+The following 6 commits landed this session without an `EDIT_LOG.md`
+entry and without the `<TYPE>(<area>): <summary>` message format Rule 8
+requires. Backfilled here, same precedent as the 2026-08-09 AUTH-003
+backfill entry above.
+
+1. **`54c672e` — "feat: add show/hide toggle for password fields on
+   login and signup"** (branch `feature/password-visibility-toggle`,
+   merged via PR #30/`bbc843a`). Added a click-to-toggle eye icon on the
+   password `<input>` in `src/app/login/page.tsx` and
+   `src/app/signup/page.tsx` (local `showPassword` state, toggles
+   `type="password"`/`type="text"`). No tRPC procedure touched — pure
+   client state. **Files:** both password-field pages.
+
+2. **`c50385a` — "fix: resolve leftover merge-conflict remnants in
+   NavBar and plans page"**. A merge of `main` into `landing-page-one`
+   (`e51f101`) had been resolved badly upstream, leaving duplicate JSX
+   blocks, a duplicate `import`, and a mismatched closing brace committed
+   directly to `main`. `src/components/NavBar.tsx`: removed the
+   duplicated `navLinkClass`/Schedule-link/admin-hide-Home fragment
+   stacked on top of the working `isHome`/`scrolled`/`logoClass` hero-nav
+   code (this later turned out to have deleted a real feature — see
+   entry 5 below, which restored it correctly). `src/app/plans/page.tsx`:
+   fixed a missing `}` that broke the `.map((p) => { ... })` callback's
+   closing (`))}`→ `);\n})}`), a straight syntax fix, no JSX content
+   changed. **Behavior change:** unintentional regression (Schedule link
+   lost), corrected in entry 5. **Files:** `NavBar.tsx`, `plans/page.tsx`.
+
+3. **`9ee7a56` — "style: hover navbar links to neon green on non-home
+   pages"**. One line: non-home nav links (`linkClass`) now
+   `hover:text-green-400` instead of `hover:text-white`, matching the
+   `--accent` neon-green already used elsewhere. **Files:** `NavBar.tsx`.
+
+4. **`878b1dc` — "style: place notification badge inline next to bell
+   icon"**. Replaced the 🔔 emoji with an outline SVG bell icon
+   (`currentColor`), and changed the unread-count badge from an
+   `absolute -right-2 -top-2` corner overlay (rendering incorrectly,
+   wrapping to its own line) to a normal inline badge beside the icon
+   (`inline-flex items-center gap-1.5`). **Files:** `NavBar.tsx`.
+
+5. **`6fe17d2` — "style: reorder member nav links to My bookings,
+   Schedule, Waitlist"** + the Schedule-link restoration that preceded
+   it in the same conversation turn. Restored the member-only "Schedule"
+   nav link (`/schedule`) that commit 2 above had accidentally deleted —
+   confirmed via `git log -S` that it originated from a real, deliberate
+   commit (`d5791a2` on `feature/ui-ux-polishes`, with its own
+   logged-out/admin edge-case fixes) on a third branch that got tangled
+   into the bad merge, not leftover noise. Scoped to **members only**
+   (not trainers, who already have their own "My schedule" link) per
+   explicit instruction, then reordered to My bookings → Schedule →
+   Waitlist. Login's post-auth redirect to `/dashboard` for members was
+   already correct (no change needed there). **Files:** `NavBar.tsx`.
+
+6. **`4ec18ad` — "feat: highlight active navbar link in green"**.
+   `linkClass` changed from a static string to a function taking a
+   `path`, comparing it against `usePathname()` (exact match, or a
+   `startsWith(path + "/")` prefix match for nested routes — same
+   formula `d5791a2`'s original `navLinkClass` used) and returning
+   `text-green-400 font-medium` when active, else falling back to the
+   existing hero-aware styling. Applied to every nav link including the
+   profile-name link. **Files:** `NavBar.tsx`.
+
+**Tests:** none of the 6 touch a tRPC procedure, schema, or server route
+— all client-side JSX/styling/state in `NavBar.tsx`, `login/page.tsx`,
+`signup/page.tsx`, `plans/page.tsx`. Each was verified with `tsc --noEmit`
+(clean) at the time and confirmed scoped via `git diff --stat` (each
+commit touched only the file(s) listed above) before being committed.
+No automated test harness exists in this branch for frontend-only
+changes, consistent with every other frontend-only entry in this log.
+
+**Process note going forward:** every commit from this point on will be
+classified (REFACTOR/FIX/DOCUMENT/CHORE/TEST) and get its `EDIT_LOG.md`
+entry in the same commit, per Rule 7 — this backfill should not need to
+happen again.
+
+---
+
 ## 2026-08-11 — CHORE(frontend): redesign landing page hero + navbar (branch `landing-page-one`)
 
 **Type:** CHORE

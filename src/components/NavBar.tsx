@@ -58,11 +58,15 @@ export function NavBar() {
   const logoClass = `text-lg font-semibold tracking-tight ${
     isHome ? (scrolled ? "text-black" : "text-white") : ""
   }`;
-  const linkClass = isHome
-    ? `text-sm transition-colors ${
-        scrolled ? "text-neutral-600 hover:text-black" : "text-white/80 hover:text-white"
-      }`
-    : "text-sm muted hover:text-white";
+  const linkClass = (path: string) => {
+    const isActive = pathname === path || (path !== "/" && pathname.startsWith(path + "/"));
+    if (isActive) return "text-sm font-medium text-green-400";
+    return isHome
+      ? `text-sm transition-colors ${
+          scrolled ? "text-neutral-600 hover:text-black" : "text-white/80 hover:text-white"
+        }`
+      : "text-sm muted hover:text-green-400";
+  };
 
   return (
     <header className={headerClass} style={headerStyle}>
@@ -77,45 +81,50 @@ export function NavBar() {
         */}
         {user?.role === "member" && (
           <>
-            <Link href="/dashboard" className={linkClass}>
+            <Link href="/dashboard" className={linkClass("/dashboard")}>
               My bookings
             </Link>
-            <Link href="/waitlist" className={linkClass}>
+            <Link href="/schedule" className={linkClass("/schedule")}>
+              Schedule
+            </Link>
+            <Link href="/waitlist" className={linkClass("/waitlist")}>
               Waitlist
             </Link>
           </>
         )}
 
         {user?.role === "trainer" && (
-          <Link href="/trainer/schedule" className={linkClass}>
+          <Link href="/trainer/schedule" className={linkClass("/trainer/schedule")}>
             My schedule
           </Link>
         )}
 
         {user?.role === "admin" && (
           <>
-            <Link href="/admin" className={linkClass}>
+            <Link href="/admin" className={linkClass("/admin")}>
               Admin
             </Link>
-            <Link href="/admin/attendance" className={linkClass}>
+            <Link href="/admin/attendance" className={linkClass("/admin/attendance")}>
               Attendance
             </Link>
           </>
         )}
 
         {(user?.role === "admin" || user?.role === "trainer") && (
-          <Link href="/kiosk" className={linkClass}>
+          <Link href="/kiosk" className={linkClass("/kiosk")}>
             Kiosk
           </Link>
         )}
 
         <div className="ml-auto flex items-center gap-3">
           {user && (
-            <Link href="/notifications" className="relative">
-              <span className="text-sm">🔔</span>
+            <Link href="/notifications" className="inline-flex items-center gap-1.5">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+              </svg>
               {unreadCount && unreadCount > 0 && (
                 <span
-                  className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold"
+                  className="flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-semibold"
                   style={{ backgroundColor: "var(--accent)" }}
                 >
                   {unreadCount > 9 ? "9+" : unreadCount}
@@ -125,7 +134,7 @@ export function NavBar() {
           )}
           {user ? (
             <>
-              <Link href="/profile" className={linkClass}>
+              <Link href="/profile" className={linkClass("/profile")}>
                 {user.name}
               </Link>
               <button

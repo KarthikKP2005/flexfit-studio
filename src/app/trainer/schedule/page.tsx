@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
+import { RequireRole } from "@/components/require-role";
 
 /** 
  * Booked/checked-in counts for one class card, with a toggleable roster view to mark attendance. 
@@ -220,21 +221,26 @@ const DAYS = [
  * setAvailability has no format/range validation either — see
  * TRAINER-001 in known-issues.md).
  *
- * Behavior note: role gating here is client-side only ("Access denied"
- * after the page has already loaded) — trpc's staff-only procedures are
- * the real security boundary underneath, this check is just UX.
+ * Wrapped in `RequireRole` (see AUTH-004 in known-issues.md), which
+ * replaces this page's own previous inline role check — that check ran
+ * before `auth.me` itself settled, so a real trainer also saw a false
+ * "Access denied" flash on every load. trpc's staff-only procedures
+ * remain the real security boundary underneath either way.
  */
 export default function TrainerSchedulePage() {
+  return (
+    <RequireRole role="trainer">
+      <TrainerScheduleContent />
+    </RequireRole>
+  );
+}
+
+function TrainerScheduleContent() {
   const utils = trpc.useUtils();
-  const { data: user } = trpc.auth.me.useQuery();
   const { data: classes, isLoading: classesLoading } =
-    trpc.trainers.upcomingClasses.useQuery(undefined, {
-      enabled: user?.role === "trainer",
-    });
+    trpc.trainers.upcomingClasses.useQuery();
   const { data: availability, isLoading: availLoading } =
-    trpc.trainers.availability.useQuery(undefined, {
-      enabled: user?.role === "trainer",
-    });
+    trpc.trainers.availability.useQuery();
 
   const [editingDay, setEditingDay] = useState<number | null>(null);
   const [startTime, setStartTime] = useState("");
@@ -258,10 +264,6 @@ export default function TrainerSchedulePage() {
       await utils.trainers.availability.invalidate();
     },
   });
-
-  if (user?.role !== "trainer") {
-    return <p className="muted">Access denied. Trainers only.</p>;
-  }
 
   const isLoading = classesLoading || availLoading;
 

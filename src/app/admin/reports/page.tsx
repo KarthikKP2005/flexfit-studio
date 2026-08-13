@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatMoney, formatDate } from "@/lib/format";
+import { RequireRole } from "@/components/require-role";
 
 /**
  * Revenue and membership-expiry reports, plus a manual trigger for the
@@ -12,8 +13,21 @@ import { formatMoney, formatDate } from "@/lib/format";
  * only ever reflect `payments` rows — corporate credit pool top-ups
  * never appear here (see ADMIN-002 in known-issues.md), so this
  * understates real money movement for gyms using corporate accounts.
+ *
+ * Wrapped in `RequireRole` (see AUTH-004 in known-issues.md) — this
+ * page previously had no client-side gating at all, so a denied visitor
+ * saw the full, normal-looking report shell with empty-state copy
+ * instead of any indication access was denied.
  */
 export default function AdminReportsPage() {
+  return (
+    <RequireRole role="admin">
+      <ReportsDashboard />
+    </RequireRole>
+  );
+}
+
+function ReportsDashboard() {
   const utils = trpc.useUtils();
   const { data: revenueByMonth, isLoading: monthLoading } =
     trpc.admin.revenueByMonth.useQuery();

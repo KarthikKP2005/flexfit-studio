@@ -38,6 +38,12 @@ export default function DashboardPage() {
   });
   const { data: bookings } = trpc.bookings.mine.useQuery({ includePast: false });
   const { data: corporateBookings } = trpc.corporateBookings.mine.useQuery({ includePast: false });
+  // COMPANY-002: existing, unmodified query — `/schedule` already uses it
+  // for the personal/company credit-source picker. `null` covers both
+  // "never linked" and "linked but the company was since deactivated"
+  // (see getCompanyForMember's own comment) — not distinguished here,
+  // same as everywhere else this query is already used.
+  const { data: company } = trpc.corporateBookings.myCompany.useQuery();
   const { data: rescheduleHistory } = trpc.reschedules.history.useQuery();
 
   const cancel = trpc.bookings.cancel.useMutation({
@@ -71,6 +77,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      <div className="rounded-xl border p-6 space-y-10" style={{ borderColor: "var(--border)" }}>
       <section className="space-y-4">
         <h2 className="text-xl font-semibold tracking-tight">Your Membership</h2>
         {ms ? (
@@ -111,6 +118,40 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      {/* COMPANY-002: corporate credit pool visibility, mirrors the
+          personal membership card above. No "renews on" row — the
+          companies table has no renewal/expiry date field, unlike a
+          personal membership's endDate (see known-issues.md). */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold tracking-tight">Corporate Membership</h2>
+        {company ? (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="panel p-5 border-t-2 border-t-green-500/50 flex flex-col justify-center">
+              <span className="muted text-xs font-semibold uppercase tracking-wider mb-1">Company</span>
+              <span className="text-lg font-medium">{company.name}</span>
+            </div>
+
+            <div className="panel p-5 flex flex-col justify-center relative overflow-hidden">
+              <span className="muted text-xs font-semibold uppercase tracking-wider mb-1">Status</span>
+              <span className="text-lg font-medium text-green-400 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]"></span>
+                Active
+              </span>
+            </div>
+
+            <div className="panel p-5 flex flex-col justify-center">
+              <span className="muted text-xs font-semibold uppercase tracking-wider mb-1">Credit Pool Balance</span>
+              <span className="text-2xl font-bold">{company.creditPoolBalance}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="panel p-6 text-center space-y-1 bg-gradient-to-br from-[#171a21] to-[#12141a]">
+            <p className="muted">Not part of any corporate account.</p>
+          </div>
+        )}
+      </section>
+      </div>
 
       <section className="space-y-3">
         <h2 className="font-medium">Upcoming bookings</h2>

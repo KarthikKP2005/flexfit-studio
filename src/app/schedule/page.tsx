@@ -4,12 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/format";
+import { BookingConfirmModal } from "@/components/booking-confirm-modal";
 
 /**
  * Public class browser and booking entry point. Books against the
  * caller's personal membership credits via `bookings.book` by default;
  * for a member linked to an active company (CORP-005), the book button
  * also offers a company-credits option via `corporateBookings.book`.
+ * Clicking Book/Personal credits/Company credits opens a confirmation
+ * popup (class details + credits to be deducted) before either mutation
+ * actually fires — previously it booked immediately on click.
  * Not responsible for: reconciling personal and corporate capacity —
  * `spotsLeft`/`full` below reflect personal bookings only, same as
  * before (see CORP-002 in known-issues.md, not changed here).
@@ -51,6 +55,46 @@ export default function SchedulePage() {
 
   const bookingError = book.error ?? bookCorporate.error;
   const isBooking = book.isPending || bookCorporate.isPending;
+
+  // Which class + credit source the confirm popup is currently showing,
+  // or null when it's closed. Set by BookButton's callbacks below;
+  // cleared on Cancel, overlay click, or a successful booking.
+  const [confirmTarget, setConfirmTarget] = useState<{
+    classId: number;
+    className: string;
+    startsAt: string;
+    room: string;
+    creditCost: number;
+    full: boolean;
+    source: "personal" | "corporate";
+  } | null>(null);
+
+  // SCHED-001: clears any leftover error from a previous failed attempt
+  // (react-query only resets a mutation's own error on its *next*
+  // .mutate() call) — without this, closing the popup after a failure
+  // and reopening it for a different class could still show the old
+  // error message. Same reset-on-every-exit-path shape as RESCH-007's
+  // fix in reschedule-modal.tsx.
+  function closeConfirm() {
+    setConfirmTarget(null);
+    book.reset();
+    bookCorporate.reset();
+  }
+
+  function handleConfirm() {
+    if (!confirmTarget) return;
+    if (confirmTarget.source === "corporate") {
+      bookCorporate.mutate(
+        { classId: confirmTarget.classId },
+        { onSuccess: closeConfirm },
+      );
+    } else {
+      book.mutate(
+        { classId: confirmTarget.classId },
+        { onSuccess: closeConfirm },
+      );
+    }
+  }
 
   if (isLoading) return <p className="muted">Loading schedule...</p>;
 
@@ -120,7 +164,7 @@ export default function SchedulePage() {
               </p>
             </div>
 
-            <div className="text-right text-sm muted">
+            <div className="text-right text-sm muted shrink-0">
               <div>
                 {c.spotsLeft} / {c.capacity} left
               </div>
@@ -140,10 +184,30 @@ export default function SchedulePage() {
               disabled={isBooking}
               company={myCompany ?? null}
               onBookPersonal={() =>
-                user ? book.mutate({ classId: c.id }) : router.push("/login")
+                user
+                  ? setConfirmTarget({
+                      classId: c.id,
+                      className: c.name,
+                      startsAt: c.startsAt,
+                      room: c.room,
+                      creditCost: c.creditCost,
+                      full: c.full,
+                      source: "personal",
+                    })
+                  : router.push("/login")
               }
               onBookCompany={() =>
-                user ? bookCorporate.mutate({ classId: c.id }) : router.push("/login")
+                user
+                  ? setConfirmTarget({
+                      classId: c.id,
+                      className: c.name,
+                      startsAt: c.startsAt,
+                      room: c.room,
+                      creditCost: c.creditCost,
+                      full: c.full,
+                      source: "corporate",
+                    })
+                  : router.push("/login")
               }
             />
           </div>
@@ -153,6 +217,21 @@ export default function SchedulePage() {
       {!user && (
         <p className="muted text-sm">Sign in to book a class.</p>
       )}
+
+      <BookingConfirmModal
+        isOpen={confirmTarget !== null}
+        className={confirmTarget?.className ?? ""}
+        classTime={confirmTarget?.startsAt ?? ""}
+        room={confirmTarget?.room ?? ""}
+        creditCost={confirmTarget?.creditCost ?? 0}
+        full={confirmTarget?.full ?? false}
+        source={confirmTarget?.source ?? "personal"}
+        companyName={myCompany?.name}
+        isPending={isBooking}
+        errorMessage={bookingError?.message}
+        onConfirm={handleConfirm}
+        onClose={closeConfirm}
+      />
     </div>
   );
 }
@@ -165,6 +244,14 @@ export default function SchedulePage() {
  * choice is explicit rather than silently picked (see CORP-005).
  * Expanding on click too (not just hover) so it also works on touch
  * devices, which don't fire hover events.
+ *
+ * SCHED-002: when `full`, the expanded personal/company buttons are
+ * labeled "Join waitlist (…)" instead of "… credits" — previously they
+ * always said "Personal credits"/"{company} credits" regardless of
+ * `full`, so a company-linked member had no indication a full class's
+ * expanded buttons would join a waitlist rather than book a confirmed
+ * spot (the collapsed single button already said "Join waitlist"
+ * correctly; only the expanded state lost that wording).
  */
 function BookButton({
   full,
@@ -183,7 +270,7 @@ function BookButton({
 
   if (!company) {
     return (
-      <button className="btn btn-primary" disabled={disabled} onClick={onBookPersonal}>
+      <button className="btn btn-primary shrink-0 mr-1" disabled={disabled} onClick={onBookPersonal}>
         {full ? "Join waitlist" : "Book"}
       </button>
     );
@@ -191,13 +278,13 @@ function BookButton({
 
   return (
     <div
-      className="relative flex justify-end"
+      className="relative flex justify-end shrink-0 mr-1"
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
     >
       <div
         className="flex gap-1.5 overflow-hidden transition-all duration-200"
-        style={{ maxWidth: expanded ? 260 : 96 }}
+        style={{ maxWidth: expanded ? 420 : 96 }}
       >
         {!expanded ? (
           <button
@@ -214,14 +301,14 @@ function BookButton({
               disabled={disabled}
               onClick={onBookPersonal}
             >
-              Personal credits
+              {full ? "Join waitlist (personal)" : "Personal credits"}
             </button>
             <button
               className="btn whitespace-nowrap text-sm"
               disabled={disabled}
               onClick={onBookCompany}
             >
-              {company.name} credits
+              {full ? `Join waitlist (${company.name})` : `${company.name} credits`}
             </button>
           </>
         )}
