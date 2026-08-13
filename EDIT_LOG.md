@@ -10,6 +10,30 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — FIX(schedule): label the expanded book buttons "Join waitlist" for a full class
+
+**Type:** FIX
+**Defect:** SCHED-002
+**Behavior change:** yes — for a company-linked member viewing a full
+class, the expanded "Personal credits"/"{company} credits" buttons now
+read "Join waitlist (personal)"/"Join waitlist ({company})" instead of
+identical-to-normal wording. The collapsed single button (non-company
+members) already said "Join waitlist" correctly and is unchanged; no
+click handler or mutation touched — same `onBookPersonal`/`onBookCompany`
+calls as before.
+**Files touched:** `src/app/schedule/page.tsx` (`BookButton`'s two
+expanded-state labels + its header comment), `documents/known-issues.md`
+(added SCHED-002).
+**Tests:** no tRPC procedure changed, nothing to characterize at the
+caller level. Found and verified live: filled "Strength Basics" to
+capacity via direct DB inserts, logged in as a company-linked seeded
+member (Playwright against the running dev server), screenshotted the
+expanded button before the fix ("Personal credits" / "TechCorp Inc
+credits" — no waitlist indication) and after ("Join waitlist (personal)"
+/ "Join waitlist (TechCorp Inc)"). `tsc --noEmit` clean.
+
+---
+
 ## 2026-08-13 — FIX(schedule): surface booking-confirm errors inside the popup instead of hiding them behind it
 
 **Type:** FIX

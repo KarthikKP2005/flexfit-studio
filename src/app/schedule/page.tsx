@@ -244,6 +244,14 @@ export default function SchedulePage() {
  * choice is explicit rather than silently picked (see CORP-005).
  * Expanding on click too (not just hover) so it also works on touch
  * devices, which don't fire hover events.
+ *
+ * SCHED-002: when `full`, the expanded personal/company buttons are
+ * labeled "Join waitlist (…)" instead of "… credits" — previously they
+ * always said "Personal credits"/"{company} credits" regardless of
+ * `full`, so a company-linked member had no indication a full class's
+ * expanded buttons would join a waitlist rather than book a confirmed
+ * spot (the collapsed single button already said "Join waitlist"
+ * correctly; only the expanded state lost that wording).
  */
 function BookButton({
   full,
@@ -293,14 +301,14 @@ function BookButton({
               disabled={disabled}
               onClick={onBookPersonal}
             >
-              Personal credits
+              {full ? "Join waitlist (personal)" : "Personal credits"}
             </button>
             <button
               className="btn whitespace-nowrap text-sm"
               disabled={disabled}
               onClick={onBookCompany}
             >
-              {company.name} credits
+              {full ? `Join waitlist (${company.name})` : `${company.name} credits`}
             </button>
           </>
         )}

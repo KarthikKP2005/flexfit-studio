@@ -1884,6 +1884,45 @@ guaranteed clean, not assumed):
 
 ---
 
+### SCHED-002 — Expanded personal/company book buttons never said "waitlist" for a full class
+
+**Severity:** Medium (no data-safety issue — clicking either button still
+correctly waitlists, not books, a full class server-side — but a
+company-linked member had zero indication that's what was about to
+happen, since the button text was identical to a normal, confirmed
+booking)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Schedule / Booking
+**File:** `src/app/schedule/page.tsx` (`BookButton`)
+
+**Original behavior:** the collapsed single button correctly read "Join
+waitlist" vs "Book" based on the class's `full` state. But for a
+company-linked member, clicking it doesn't book — it *expands* into two
+separate buttons, "Personal credits" and "{company name} credits", and
+those two labels never referenced `full` at all. So once expanded, all
+waitlist-vs-book context disappeared: a full class's expanded buttons
+looked identical to a normal, available class's.
+
+**Reproduction:** found live (not by inspection) — filled a real class
+to capacity via direct DB inserts (`Strength Basics`, 10/10 booked, 0
+left), logged in as a company-linked seeded member
+(`rahul.k@example.com`, linked to TechCorp Inc), navigated to
+`/schedule`, and expanded that row's button. Screenshot confirmed:
+"Personal credits" / "TechCorp Inc credits" — same wording a member
+would see on a completely empty class.
+
+**Fix:** both expanded labels now check `full`: `"Join waitlist
+(personal)"` / `"Join waitlist ({company.name})"` when full, unchanged
+`"Personal credits"` / `"{company.name} credits"` otherwise. No click
+handler, mutation, or non-company (single-button) path touched.
+
+**Verification:** re-ran the same live repro after the fix — the
+expanded buttons now read "Join waitlist (personal)" / "Join waitlist
+(TechCorp Inc)" for the same full class. `tsc --noEmit` clean;
+`git diff --stat` confirms only this one file changed.
+
+---
+
 ### AUTH-001 through NOTIF-001 note
 
 Both entries above were found while writing characterization tests, not
