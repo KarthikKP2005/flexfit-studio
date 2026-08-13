@@ -80,6 +80,9 @@ export function NavBar() {
             <Link href="/dashboard" className={linkClass}>
               My bookings
             </Link>
+            <Link href="/schedule" className={linkClass}>
+              Schedule
+            </Link>
             <Link href="/waitlist" className={linkClass}>
               Waitlist
             </Link>
