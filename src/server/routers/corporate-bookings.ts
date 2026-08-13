@@ -8,6 +8,7 @@ import {
   companyMembers,
   checkins,
   users,
+  studioSettings,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
@@ -166,28 +167,32 @@ export const corporateBookingsRouter = router({
         });
       }
 
-      const isFull = await isClassFull(ctx.db, cls.id, cls.capacity);
+      const created = await ctx.db.transaction(async (tx) => {
+        const isFull = await isClassFull(tx, cls.id, cls.capacity);
 
-      const created = await ctx.db
-        .insert(corporateBookings)
-        .values({
-          classId: cls.id,
-          userId: ctx.user.id,
-          companyId: company.id,
-          status: isFull ? "waitlisted" : "booked",
-          creditsUsed: isFull ? 0 : cls.creditCost,
-        })
-        .returning()
-        .get();
-
-      if (!isFull) {
-        await ctx.db
-          .update(companies)
-          .set({
-            creditPoolBalance: company.creditPoolBalance - cls.creditCost,
+        const newBooking = await tx
+          .insert(corporateBookings)
+          .values({
+            classId: cls.id,
+            userId: ctx.user.id,
+            companyId: company.id,
+            status: isFull ? "waitlisted" : "booked",
+            creditsUsed: isFull ? 0 : cls.creditCost,
           })
-          .where(eq(companies.id, company.id));
-      }
+          .returning()
+          .get();
+
+        if (!isFull) {
+          await tx
+            .update(companies)
+            .set({
+              creditPoolBalance: company.creditPoolBalance - cls.creditCost,
+            })
+            .where(eq(companies.id, company.id));
+        }
+
+        return newBooking;
+      });
 
       return created;
     }),
@@ -239,35 +244,37 @@ export const corporateBookingsRouter = router({
         hoursUntil(row.cls.startsAt) >= CORPORATE_FREE_CANCELLATION_HOURS &&
         row.booking.creditsUsed > 0;
 
-      await ctx.db
-        .update(corporateBookings)
-        .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
-        .where(eq(corporateBookings.id, row.booking.id));
+      await ctx.db.transaction(async (tx) => {
+        await tx
+          .update(corporateBookings)
+          .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+          .where(eq(corporateBookings.id, row.booking.id));
 
-      if (refundable) {
-        const company = await ctx.db
-          .select()
-          .from(companies)
-          .where(eq(companies.id, row.booking.companyId))
-          .get();
+        if (refundable) {
+          const company = await tx
+            .select()
+            .from(companies)
+            .where(eq(companies.id, row.booking.companyId))
+            .get();
 
-        if (company) {
-          await ctx.db
-            .update(companies)
-            .set({
-              creditPoolBalance:
-                company.creditPoolBalance + row.booking.creditsUsed,
-            })
-            .where(eq(companies.id, company.id));
+          if (company) {
+            await tx
+              .update(companies)
+              .set({
+                creditPoolBalance:
+                  company.creditPoolBalance + row.booking.creditsUsed,
+              })
+              .where(eq(companies.id, company.id));
+          }
         }
-      }
 
-      // Freeing a confirmed spot promotes whoever has waited longest and
-      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
-      // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
-      if (row.booking.status === "booked") {
-        await promoteNextWaitlisted(ctx.db, row.cls);
-      }
+        // Freeing a confirmed spot promotes whoever has waited longest and
+        // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
+        // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
+        if (row.booking.status === "booked") {
+          await promoteNextWaitlisted(tx, row.cls);
+        }
+      });
 
       return { ok: true, refunded: refundable };
     }),
@@ -303,7 +310,7 @@ export const corporateBookingsRouter = router({
         .where(eq(companies.id, booking.companyId))
         .get();
 
-      if (!company || company.creditsRemaining < cls.creditCost) {
+      if (!company || company.creditPoolBalance < cls.creditCost) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Company has insufficient credits to be admitted.",
@@ -317,7 +324,7 @@ export const corporateBookingsRouter = router({
 
       await ctx.db
         .update(companies)
-        .set({ creditsRemaining: company.creditsRemaining - cls.creditCost })
+        .set({ creditPoolBalance: company.creditPoolBalance - cls.creditCost })
         .where(eq(companies.id, company.id));
 
       return { ok: true };
@@ -369,13 +376,16 @@ export const corporateBookingsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
+      let settingsRow = await ctx.db.select().from(studioSettings).limit(1).get();
+      const windowMinutes = settingsRow?.checkinWindowMinutes ?? 30;
+
       const now = Date.now();
       const startMs = new Date(cls.startsAt).getTime();
       const endMs = startMs + cls.durationMin * 60000;
-      if (now < startMs - 30 * 60000 || now > endMs) {
+      if (now < startMs - windowMinutes * 60000 || now > endMs) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Check-in is only allowed from 30 minutes before class starts until it ends.",
+          message: `Check-in is only allowed from ${windowMinutes} minutes before class starts until it ends.`,
         });
       }
 

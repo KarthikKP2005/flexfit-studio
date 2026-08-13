@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { bookings, classes, memberships, checkins, users } from "@/db/schema";
+import { bookings, classes, memberships, checkins, users, studioSettings } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
 import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
@@ -138,26 +138,30 @@ export const bookingsRouter = router({
         });
       }
 
-      const isFull = await isClassFull(ctx.db, cls.id, cls.capacity);
+      const created = await ctx.db.transaction(async (tx) => {
+        const isFull = await isClassFull(tx, cls.id, cls.capacity);
 
-      const created = await ctx.db
-        .insert(bookings)
-        .values({
-          classId: cls.id,
-          userId: ctx.user.id,
-          membershipId: membership.id,
-          status: isFull ? "waitlisted" : "booked",
-          creditsUsed: isFull ? 0 : cls.creditCost,
-        })
-        .returning()
-        .get();
+        const newBooking = await tx
+          .insert(bookings)
+          .values({
+            classId: cls.id,
+            userId: ctx.user.id,
+            membershipId: membership.id,
+            status: isFull ? "waitlisted" : "booked",
+            creditsUsed: isFull ? 0 : cls.creditCost,
+          })
+          .returning()
+          .get();
 
-      if (!isFull && !unlimited) {
-        await ctx.db
-          .update(memberships)
-          .set({ creditsRemaining: membership.creditsRemaining - cls.creditCost })
-          .where(eq(memberships.id, membership.id));
-      }
+        if (!isFull && !unlimited) {
+          await tx
+            .update(memberships)
+            .set({ creditsRemaining: membership.creditsRemaining - cls.creditCost })
+            .where(eq(memberships.id, membership.id));
+        }
+
+        return newBooking;
+      });
 
       return created;
     }),
@@ -213,32 +217,34 @@ export const bookingsRouter = router({
         hoursUntil(row.cls.startsAt) >= FREE_CANCELLATION_HOURS &&
         row.booking.creditsUsed > 0;
 
-      await ctx.db
-        .update(bookings)
-        .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
-        .where(eq(bookings.id, row.booking.id));
+      await ctx.db.transaction(async (tx) => {
+        await tx
+          .update(bookings)
+          .set({ status: "cancelled", cancelledAt: new Date().toISOString() })
+          .where(eq(bookings.id, row.booking.id));
 
-      if (refundable && row.booking.membershipId) {
-        const ms = await ctx.db
-          .select()
-          .from(memberships)
-          .where(eq(memberships.id, row.booking.membershipId))
-          .get();
+        if (refundable && row.booking.membershipId) {
+          const ms = await tx
+            .select()
+            .from(memberships)
+            .where(eq(memberships.id, row.booking.membershipId))
+            .get();
 
-        if (ms && ms.creditsRemaining < UNLIMITED_CREDITS) {
-          await ctx.db
-            .update(memberships)
-            .set({ creditsRemaining: ms.creditsRemaining + row.booking.creditsUsed })
-            .where(eq(memberships.id, ms.id));
+          if (ms && ms.creditsRemaining < UNLIMITED_CREDITS) {
+            await tx
+              .update(memberships)
+              .set({ creditsRemaining: ms.creditsRemaining + row.booking.creditsUsed })
+              .where(eq(memberships.id, ms.id));
+          }
         }
-      }
 
-      // Freeing a confirmed spot promotes whoever has waited longest and
-      // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
-      // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
-      if (row.booking.status === "booked") {
-        await promoteNextWaitlisted(ctx.db, row.cls);
-      }
+        // Freeing a confirmed spot promotes whoever has waited longest and
+        // is actually eligible, across BOTH waitlists (CORP-003/CORP-001/
+        // BOOK-004, all fixed) — see features/bookings/waitlist-service.ts.
+        if (row.booking.status === "booked") {
+          await promoteNextWaitlisted(tx, row.cls);
+        }
+      });
 
       return { ok: true, refunded: refundable };
     }),
@@ -346,14 +352,17 @@ export const bookingsRouter = router({
       }
 
       // WHY IT'S IMPLEMENTED: Infinite Check-in Window boundary. Check-ins are only allowed 
-      // from 30 mins before the class starts until the class ends.
+      // from dynamic studio-configured mins before the class starts until the class ends.
+      let settingsRow = await ctx.db.select().from(studioSettings).limit(1).get();
+      const windowMinutes = settingsRow?.checkinWindowMinutes ?? 30;
+
       const now = Date.now();
       const startMs = new Date(cls.startsAt).getTime();
       const endMs = startMs + cls.durationMin * 60000;
-      if (now < startMs - 30 * 60000 || now > endMs) {
+      if (now < startMs - windowMinutes * 60000 || now > endMs) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Check-in is only allowed from 30 minutes before class starts until it ends.",
+          message: `Check-in is only allowed from ${windowMinutes} minutes before class starts until it ends.`,
         });
       }
 

@@ -48,9 +48,7 @@ export const authRouter = router({
   login: publicProcedure
     .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      // Very basic IP grab for rate-limiting, falls back to "unknown"
-      const ip = (ctx.req?.headers?.["x-forwarded-for"] as string)?.split(",")[0] || "unknown";
-      const ratelimit = await checkRateLimit(ip);
+      const ratelimit = await checkRateLimit(ctx.ip);
       if (!ratelimit.allowed) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
@@ -116,8 +114,7 @@ export const authRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const ip = (ctx.req?.headers?.["x-forwarded-for"] as string)?.split(",")[0] || "unknown";
-      const ratelimit = await checkRateLimit(ip);
+      const ratelimit = await checkRateLimit(ctx.ip);
       if (!ratelimit.allowed) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",

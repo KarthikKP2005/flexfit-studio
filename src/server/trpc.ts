@@ -24,9 +24,12 @@ export const SESSION_COOKIE = "flexfit_session";
  * itself does reject inactive users; only this existing-session path
  * doesn't re-check.
  */
-export async function createContext() {
+export async function createContext(opts?: { req: Request }) {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
+
+  // Extract client IP address for rate-limiting
+  const ip = opts?.req?.headers.get("x-forwarded-for")?.split(",")[0] || "unknown";
 
   let user: User | null = null;
 
@@ -43,7 +46,7 @@ export async function createContext() {
     }
   }
 
-  return { db, user, token };
+  return { db, user, token, ip };
 }
 
 export type Context = Awaited<ReturnType<typeof createContext>>;

@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { trpc } from "@/lib/trpc";
 
 /**
  * Public marketing/landing page — static content, no data fetching.
@@ -12,6 +15,8 @@ import Link from "next/link";
  * directly behind the transparent/fixed NavBar (see NavBar.tsx).
  */
 export default function HomePage() {
+  const { data: user } = trpc.auth.me.useQuery();
+  const isMemberOrTrainer = user?.role === "member" || user?.role === "trainer";
   return (
     <>
       <section

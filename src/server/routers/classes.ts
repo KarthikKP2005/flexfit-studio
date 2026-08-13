@@ -4,6 +4,7 @@ import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
 import { classes, bookings, users } from "@/db/schema";
 import { router, publicProcedure, staffProcedure, adminProcedure } from "../trpc";
 import { cancelClass } from "@/features/bookings/class-cancellation-service";
+import { isTrainerAvailable } from "@/features/trainers/availability-service";
 
 /**
  * Class scheduling: public browse/detail, staff create/update, admin
@@ -132,6 +133,13 @@ export const classesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.trainerId) {
+        const check = await isTrainerAvailable(ctx.db, input.trainerId, input.startsAt, input.durationMin);
+        if (!check.available) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: check.reason });
+        }
+      }
+
       return ctx.db
         .insert(classes)
         .values({
@@ -165,6 +173,22 @@ export const classesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...patch } = input;
+      
+      const current = await ctx.db.select().from(classes).where(eq(classes.id, id)).get();
+      if (!current) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+      }
+
+      const newTrainerId = patch.trainerId !== undefined ? patch.trainerId : current.trainerId;
+      const newStartsAt = patch.startsAt !== undefined ? patch.startsAt : current.startsAt;
+      
+      if (newTrainerId) {
+        const check = await isTrainerAvailable(ctx.db, newTrainerId, newStartsAt, current.durationMin, id);
+        if (!check.available) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: check.reason });
+        }
+      }
+
       const updated = await ctx.db
         .update(classes)
         .set(patch)
@@ -172,9 +196,6 @@ export const classesRouter = router({
         .returning()
         .get();
 
-      if (!updated) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
-      }
       return updated;
     }),
 

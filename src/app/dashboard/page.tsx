@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { RescheduleModal } from "@/components/reschedule-modal";
+import { motion, AnimatePresence } from "framer-motion";
 
 /**
  * Member-facing home: membership summary, upcoming personal and
@@ -60,7 +61,7 @@ export default function DashboardPage() {
   const ms = profile.membership;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10 py-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           Hello, {profile.name.split(" ")[0]}
@@ -70,31 +71,44 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <section className="panel p-5">
-        <h2 className="font-medium">Membership</h2>
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold tracking-tight">Your Membership</h2>
         {ms ? (
-          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-4">
-            <div>
-              <dt className="muted">Plan</dt>
-              <dd>{ms.planName}</dd>
+          <div className="grid gap-4 sm:grid-cols-4">
+            <div className="panel p-5 border-t-2 border-t-green-500/50 flex flex-col justify-center">
+              <span className="muted text-xs font-semibold uppercase tracking-wider mb-1">Active Plan</span>
+              <span className="text-lg font-medium">{ms.planName}</span>
             </div>
-            <div>
-              <dt className="muted">Status</dt>
-              <dd>{ms.status}</dd>
+            
+            <div className="panel p-5 flex flex-col justify-center relative overflow-hidden">
+              <span className="muted text-xs font-semibold uppercase tracking-wider mb-1">Status</span>
+              <span className="text-lg font-medium text-green-400 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]"></span>
+                {ms.status.charAt(0).toUpperCase() + ms.status.slice(1)}
+              </span>
             </div>
-            <div>
-              <dt className="muted">Valid until</dt>
-              <dd>{formatDate(ms.endDate)}</dd>
+            
+            <div className="panel p-5 flex flex-col justify-center">
+              <span className="muted text-xs font-semibold uppercase tracking-wider mb-1">Credits Remaining</span>
+              {ms.creditsRemaining >= 999 ? (
+                <span className="inline-flex w-max items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
+                  Unlimited
+                </span>
+              ) : (
+                <span className="text-2xl font-bold">{ms.creditsRemaining}</span>
+              )}
             </div>
-            <div>
-              <dt className="muted">Credits</dt>
-              <dd>{ms.creditsRemaining >= 999 ? "Unlimited" : ms.creditsRemaining}</dd>
+            
+            <div className="panel p-5 flex flex-col justify-center">
+              <span className="muted text-xs font-semibold uppercase tracking-wider mb-1">Renews On</span>
+              <span className="text-lg font-medium">{formatDate(ms.endDate)}</span>
             </div>
-          </dl>
+          </div>
         ) : (
-          <p className="muted mt-2 text-sm">
-            No active membership. Pick a plan to start booking classes.
-          </p>
+          <div className="panel p-6 text-center space-y-3 bg-gradient-to-br from-[#171a21] to-[#12141a]">
+            <p className="muted">No active membership found.</p>
+            <a href="/plans" className="btn btn-primary inline-block">Explore Plans</a>
+          </div>
         )}
       </section>
 
@@ -113,24 +127,36 @@ export default function DashboardPage() {
           </p>
         )}
 
-        {bookings?.length ? (
-          <div className="space-y-2">
-            {bookings.map((b) => (
-              <div key={b.id} className="panel flex items-center gap-2 p-4 flex-wrap sm:flex-nowrap">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-medium">{b.className}</h3>
-                    <span className="muted text-xs uppercase tracking-wide">
+        {bookings && bookings.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <AnimatePresence>
+              {bookings.filter(b => b.status !== "cancelled").map((b) => (
+                <motion.div 
+                  key={b.id} 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.3 }}
+                  className="panel p-5 flex flex-col gap-4"
+                >
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <h3 className="font-semibold text-lg">{b.className}</h3>
+                      <p className="muted text-sm mt-1">
+                        {formatDateTime(b.startsAt)} &middot; {b.room}
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded ${
+                      b.status === "booked" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
+                      b.status === "waitlisted" ? "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20" :
+                      "bg-gray-500/10 text-gray-400"
+                    }`}>
                       {b.status}
                     </span>
                   </div>
-                  <p className="muted mt-0.5 text-sm">
-                    {formatDateTime(b.startsAt)} &middot; {b.room}
-                  </p>
-                </div>
 
-                {(b.status === "booked" || b.status === "waitlisted") && (
-                  <div className="flex gap-2 w-full sm:w-auto">
+                  {(b.status === "booked" || b.status === "waitlisted") && (
+                    <div className="flex gap-2 w-full sm:w-auto">
                     {b.status === "booked" && (
                       <button
                         className="btn text-sm flex-1 sm:flex-none"
@@ -157,8 +183,9 @@ export default function DashboardPage() {
                     </button>
                   </div>
                 )}
-              </div>
-            ))}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         ) : (
           <p className="muted text-sm">No upcoming bookings.</p>
@@ -176,31 +203,40 @@ export default function DashboardPage() {
           )}
 
           <div className="space-y-2">
-            {corporateBookings.map((b) => (
-              <div key={b.id} className="panel flex items-center gap-2 p-4 flex-wrap sm:flex-nowrap">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-medium">{b.className}</h3>
-                    <span className="muted text-xs uppercase tracking-wide">
-                      {b.status}
-                    </span>
+            <AnimatePresence>
+              {corporateBookings.filter(b => b.status !== "cancelled").map((b) => (
+                <motion.div 
+                  key={b.id} 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.3 }}
+                  className="panel flex items-center gap-2 p-4 flex-wrap sm:flex-nowrap"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium">{b.className}</h3>
+                      <span className="muted text-xs uppercase tracking-wide">
+                        {b.status}
+                      </span>
+                    </div>
+                    <p className="muted mt-0.5 text-sm">
+                      {formatDateTime(b.startsAt)} &middot; {b.room} &middot; {b.companyName}
+                    </p>
                   </div>
-                  <p className="muted mt-0.5 text-sm">
-                    {formatDateTime(b.startsAt)} &middot; {b.room} &middot; {b.companyName}
-                  </p>
-                </div>
 
-                {(b.status === "booked" || b.status === "waitlisted") && (
-                  <button
-                    className="btn text-sm flex-1 sm:flex-none"
-                    disabled={cancelCorporate.isPending}
-                    onClick={() => cancelCorporate.mutate({ bookingId: b.id })}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            ))}
+                  {(b.status === "booked" || b.status === "waitlisted") && (
+                    <button
+                      className="btn text-sm flex-1 sm:flex-none"
+                      disabled={cancelCorporate.isPending}
+                      onClick={() => cancelCorporate.mutate({ bookingId: b.id })}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         </section>
       )}

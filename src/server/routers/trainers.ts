@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq, and, gte } from "drizzle-orm";
-import { classes, users, trainerAvailability } from "@/db/schema";
-import { router, protectedProcedure } from "../trpc";
+import { eq, and, gte, sql } from "drizzle-orm";
+import { classes, users, trainerAvailability, bookings } from "@/db/schema";
+import { router, staffProcedure } from "../trpc";
+import { isTrainerAvailable } from "@/features/trainers/availability-service";
 
 /**
  * Trainer self-service: own upcoming classes, weekly availability CRUD,
@@ -14,17 +15,10 @@ import { router, protectedProcedure } from "../trpc";
 
 export const trainersRouter = router({
   /** This trainer's own future, non-cancelled classes. @throws FORBIDDEN if the caller isn't a trainer */
-  upcomingClasses: protectedProcedure.query(async ({ ctx }) => {
-    if (ctx.user.role !== "trainer") {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Only trainers can access this.",
-      });
-    }
-
+  upcomingClasses: staffProcedure.query(async ({ ctx }) => {
     const now = new Date().toISOString();
 
-    return ctx.db
+    const rows = await ctx.db
       .select({
         id: classes.id,
         name: classes.name,
@@ -32,6 +26,12 @@ export const trainersRouter = router({
         startsAt: classes.startsAt,
         durationMin: classes.durationMin,
         cancelled: classes.cancelled,
+        capacity: classes.capacity,
+        booked: sql<number>`(
+          select count(*) from ${bookings}
+          where ${bookings.classId} = ${classes.id}
+            and ${bookings.status} = 'booked'
+        )`.as("booked"),
       })
       .from(classes)
       .where(
@@ -42,17 +42,15 @@ export const trainersRouter = router({
         ),
       )
       .orderBy(classes.startsAt);
+
+    return rows.map((r) => ({
+      ...r,
+      spotsLeft: Math.max(0, r.capacity - Number(r.booked)),
+    }));
   }),
 
   /** This trainer's own weekly availability rows. @throws FORBIDDEN if the caller isn't a trainer */
-  availability: protectedProcedure.query(async ({ ctx }) => {
-    if (ctx.user.role !== "trainer") {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Only trainers can access this.",
-      });
-    }
-
+  availability: staffProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
       .select()
       .from(trainerAvailability)
@@ -72,7 +70,7 @@ export const trainersRouter = router({
    *
    * @throws FORBIDDEN if the caller isn't a trainer
    */
-  setAvailability: protectedProcedure
+  setAvailability: staffProcedure
     .input(
       z.object({
         dayOfWeek: z.number().int().min(0).max(6),
@@ -81,13 +79,6 @@ export const trainersRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "trainer") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only trainers can access this.",
-        });
-      }
-
       // WHY IT'S IMPLEMENTED: Validation ensuring trainers cannot set an invalid time block.
       if (input.startTime >= input.endTime) {
         throw new TRPCError({
@@ -138,16 +129,9 @@ export const trainersRouter = router({
    *
    * @throws FORBIDDEN if the caller isn't a trainer
    */
-  removeAvailability: protectedProcedure
+  removeAvailability: staffProcedure
     .input(z.object({ dayOfWeek: z.number().int().min(0).max(6) }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "trainer") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only trainers can access this.",
-        });
-      }
-
       const existing = await ctx.db
         .select()
         .from(trainerAvailability)
@@ -183,7 +167,7 @@ export const trainersRouter = router({
    *
    * @throws FORBIDDEN if the caller is neither a trainer nor an admin
    */
-  checkAvailability: protectedProcedure
+  checkAvailability: staffProcedure
     .input(
       z.object({
         trainerId: z.number(),
@@ -192,72 +176,6 @@ export const trainersRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // This can be called by staff or trainers
-      if (ctx.user.role !== "trainer" && ctx.user.role !== "admin") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Staff only.",
-        });
-      }
-      const classStart = new Date(input.startsAt);
-      const classEnd = new Date(classStart.getTime() + input.durationMin * 60000);
-
-      const dayOfWeek = classStart.getUTCDay();
-      const startTimeStr = String(classStart.getUTCHours()).padStart(2, "0") +
-        ":" +
-        String(classStart.getUTCMinutes()).padStart(2, "0");
-      const endTimeStr = String(classEnd.getUTCHours()).padStart(2, "0") +
-        ":" +
-        String(classEnd.getUTCMinutes()).padStart(2, "0");
-
-      const availability = await ctx.db
-        .select()
-        .from(trainerAvailability)
-        .where(
-          and(
-            eq(trainerAvailability.trainerId, input.trainerId),
-            eq(trainerAvailability.dayOfWeek, dayOfWeek),
-          ),
-        )
-        .get();
-
-      if (!availability) {
-        return { available: false, reason: "No availability set for this day" };
-      }
-
-      const availStart = availability.startTime;
-      const availEnd = availability.endTime;
-
-      const isWithinAvailability =
-        startTimeStr >= availStart && endTimeStr <= availEnd;
-
-      if (!isWithinAvailability) {
-        return { available: false, reason: "Outside availability hours" };
-      }
-
-      const conflictingClasses = await ctx.db
-        .select()
-        .from(classes)
-        .where(
-          and(
-            eq(classes.trainerId, input.trainerId),
-            eq(classes.cancelled, false),
-          ),
-        );
-
-      // Check every one of this trainer's non-cancelled classes for a
-      // time overlap with the requested window; stop at the first hit.
-      for (const cls of conflictingClasses) {
-        const existStart = new Date(cls.startsAt);
-        const existEnd = new Date(
-          existStart.getTime() + cls.durationMin * 60000,
-        );
-
-        if (classStart < existEnd && classEnd > existStart) {
-          return { available: false, reason: "Trainer already has a class at this time" };
-        }
-      }
-
-      return { available: true };
+      return isTrainerAvailable(ctx.db, input.trainerId, input.startsAt, input.durationMin);
     }),
 });
