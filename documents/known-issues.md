@@ -1923,6 +1923,42 @@ expanded buttons now read "Join waitlist (personal)" / "Join waitlist
 
 ---
 
+### SCHED-003 — Book/Join-waitlist button could get clipped on a narrower window
+
+**Severity:** Low (cosmetic — the button is still clickable if you
+happen to hit the visible sliver, but part of its label was invisible)
+**Status:** Fixed on branch `member-page-updates`
+**Area:** Schedule
+**File:** `src/app/schedule/page.tsx` (each class row)
+
+**Original behavior:** each class row is one `flex` container with
+three children — the name/time column (`min-w-0 flex-1`, correctly
+allowed to shrink), the spots-left/credit-cost column, and the Book/
+Join-waitlist button. Only the first child had shrink protection; the
+other two had no `flex-shrink: 0`, so on a narrower window the button
+(and the spots/credit text) could get compressed below their natural
+content width instead of the flexible name/time column absorbing the
+squeeze first. Combined with `overflow-x: hidden` on `body` (added
+earlier this session for an unrelated full-bleed-hero fix), the
+compressed/overflowing part of the button was silently clipped rather
+than triggering a scrollbar. Reported live with a screenshot showing
+roughly the last quarter of the "Join waitlist" button cut off.
+
+**Fix:** added `shrink-0` to the spots-left/credit-cost column and to
+both of `BookButton`'s render paths (the plain single button, and the
+expanded-state wrapper div) — the name/time column is now the only
+part of the row that shrinks. No click handler, mutation, or label text
+touched (separate from `SCHED-002` right above, which only changed the
+label wording).
+
+**Verification:** reproduced and confirmed fixed live — screenshotted
+the row at a 900px viewport (narrower than the row's natural content
+width) before and after; the button rendered fully after the fix, no
+clipping. `tsc --noEmit` clean; `git diff --stat` confirms only this
+one file changed.
+
+---
+
 ### AUTH-001 through NOTIF-001 note
 
 Both entries above were found while writing characterization tests, not

@@ -164,7 +164,7 @@ export default function SchedulePage() {
               </p>
             </div>
 
-            <div className="text-right text-sm muted">
+            <div className="text-right text-sm muted shrink-0">
               <div>
                 {c.spotsLeft} / {c.capacity} left
               </div>
@@ -270,7 +270,7 @@ function BookButton({
 
   if (!company) {
     return (
-      <button className="btn btn-primary" disabled={disabled} onClick={onBookPersonal}>
+      <button className="btn btn-primary shrink-0 mr-1" disabled={disabled} onClick={onBookPersonal}>
         {full ? "Join waitlist" : "Book"}
       </button>
     );
@@ -278,7 +278,7 @@ function BookButton({
 
   return (
     <div
-      className="relative flex justify-end"
+      className="relative flex justify-end shrink-0 mr-1"
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
     >

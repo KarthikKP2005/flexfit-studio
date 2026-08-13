@@ -10,6 +10,27 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-13 — FIX(schedule): stop the Book/Join-waitlist button from getting clipped on a narrower window
+
+**Type:** FIX
+**Defect:** SCHED-003
+**Behavior change:** yes, visual only — the spots-left/credit-cost
+column and the Book/Join-waitlist button now have `shrink-0`, so only
+the name/time column absorbs a narrower viewport by shrinking; the
+button previously had no shrink protection and could get compressed
+(and, combined with `body`'s `overflow-x: hidden`, silently clipped)
+below its natural width. No click handler, mutation, or label text
+touched.
+**Files touched:** `src/app/schedule/page.tsx` (3 `shrink-0` additions:
+the spots/credit column, the single-button path, the expanded-wrapper
+path), `documents/known-issues.md` (added SCHED-003).
+**Tests:** no tRPC procedure changed, nothing to characterize. Verified
+live: screenshotted a class row at a 900px viewport before and after —
+button visibly clipped before, renders fully after. `tsc --noEmit`
+clean.
+
+---
+
 ## 2026-08-13 — FIX(schedule): label the expanded book buttons "Join waitlist" for a full class
 
 **Type:** FIX
