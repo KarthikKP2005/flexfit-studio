@@ -10,6 +10,30 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-14 — CHORE(navbar): hide role-based links, bell, and profile name on the home page
+
+**Type:** CHORE
+**Defect:** n/a — UI request made directly by the user, not tied to a
+known defect
+**Behavior change:** yes, client-side only — on `/` (home) the navbar
+now shows only the FlexFit logo and Sign in/Sign out, regardless of
+role or login state. Every other route is byte-for-byte unchanged
+(same role-based links, notification bell, profile-name link as
+before). No tRPC procedure, query, or mutation touched — purely which
+existing JSX blocks render, gated by the `isHome` flag `NavBar.tsx`
+already computed for its transparent-over-hero styling.
+**Files touched:** `src/components/NavBar.tsx` (wrapped the member/
+trainer/admin link blocks, the notifications bell, and the profile-name
+link in `!isHome &&`; header comment updated)
+**Tests:** no tRPC procedure changed, nothing to characterize. Verified
+live (Playwright, headless Chromium against the running dev server):
+logged in as a seeded member, screenshotted the navbar on `/dashboard`
+(unchanged — logo, My bookings/Schedule/Waitlist, bell, name, Sign out
+all present) and on `/` (only logo + Sign out, everything else
+correctly hidden). `tsc --noEmit` clean.
+
+---
+
 ## 2026-08-13 — FIX(schedule): stop the Book/Join-waitlist button from getting clipped on a narrower window
 
 **Type:** FIX
