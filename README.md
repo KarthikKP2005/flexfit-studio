@@ -1,6 +1,6 @@
 # FlexFit Studio
 
-Class booking and membership management for a single gym site. Members book classes, buy memberships and spend class credits. Staff run the front desk, manage trainers and pull reports. Companies buy credit pools their employees book against.
+A full-stack gym management platform that streamlines membership management, class booking, credit-based payments, trainer scheduling, front-desk operations, attendance tracking, reporting, and corporate fitness programs with shared employee credit pools.
 
 ## Requirements
 
