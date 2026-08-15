@@ -267,6 +267,13 @@ function TrainerScheduleContent() {
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 20;
 
+  // Upcoming Classes filter state (client-side only — same name/date/time
+  // filter pattern used on admin/classes/page.tsx, applied here to the
+  // trainer's own upcoming-classes list instead of the admin class list).
+  const [filterName, setFilterName] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+  const [filterTime, setFilterTime] = useState("");
+
   const setAvailability = trpc.trainers.setAvailability.useMutation({
     onSuccess: async () => {
       await utils.trainers.availability.invalidate();
@@ -313,6 +320,26 @@ function TrainerScheduleContent() {
   const todayClasses = classes?.filter(c => new Date(c.startsAt).toDateString() === new Date().toDateString()) || [];
   const expectedAttendees = todayClasses.reduce((acc, c) => acc + (c.capacity - c.spotsLeft), 0);
   const remainingCapacity = todayClasses.reduce((acc, c) => acc + c.spotsLeft, 0);
+
+  // Narrow the trainer's upcoming classes down to whatever the name/date/time
+  // filters currently specify. Only affects what's displayed/paginated in the
+  // "Upcoming Classes" tab below — does not touch the top metrics bar (those
+  // stay based on the full, unfiltered `classes` list).
+  const filteredClasses = classes?.filter((c) => {
+    if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+    if (filterDate || filterTime) {
+      const d = new Date(c.startsAt);
+      if (filterDate) {
+        const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        if (localDate !== filterDate) return false;
+      }
+      if (filterTime) {
+        const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        if (localTime !== filterTime) return false;
+      }
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-8 py-6">
@@ -366,30 +393,64 @@ function TrainerScheduleContent() {
 
       {activeSection === "upcoming" && (
         <section className="space-y-4">
-          {classes && classes.length > 0 ? (
+          {/* Upcoming Classes filter bar: name/date/time, same client-side
+              filtering pattern as admin/classes/page.tsx. Filtering the
+              already-fetched `classes` list, not a new query. */}
+          <div className="panel p-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className="block text-sm muted mb-1">Filter by Name</label>
+              <input
+                className="input w-full"
+                type="text"
+                value={filterName}
+                onChange={(e) => { setFilterName(e.target.value); setPage(1); }}
+                placeholder="e.g. Yoga"
+              />
+            </div>
+            <div>
+              <label className="block text-sm muted mb-1">Filter by Date</label>
+              <input
+                className="input w-full"
+                type="date"
+                value={filterDate}
+                onChange={(e) => { setFilterDate(e.target.value); setPage(1); }}
+              />
+            </div>
+            <div>
+              <label className="block text-sm muted mb-1">Filter by Time</label>
+              <input
+                className="input w-full"
+                type="time"
+                value={filterTime}
+                onChange={(e) => { setFilterTime(e.target.value); setPage(1); }}
+              />
+            </div>
+          </div>
+
+          {filteredClasses && filteredClasses.length > 0 ? (
             <>
               <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
-                {classes.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE).map((cls) => (
+                {filteredClasses.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE).map((cls) => (
                   <ClassCard key={cls.id} classId={cls.id} className={cls.name} startsAt={cls.startsAt} room={cls.room} durationMin={cls.durationMin} cancelled={cls.cancelled} />
                 ))}
               </div>
-              
-              {classes.length > ITEMS_PER_PAGE && (
+
+              {filteredClasses.length > ITEMS_PER_PAGE && (
                 <div className="flex items-center justify-between panel p-4">
                   <p className="text-sm muted">
-                    Showing {((page - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(page * ITEMS_PER_PAGE, classes.length)} of {classes.length}
+                    Showing {((page - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(page * ITEMS_PER_PAGE, filteredClasses.length)} of {filteredClasses.length}
                   </p>
                   <div className="flex gap-2">
-                    <button 
+                    <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       disabled={page === 1}
                       className="btn btn-sm"
                     >
                       Previous
                     </button>
-                    <button 
+                    <button
                       onClick={() => setPage(p => p + 1)}
-                      disabled={page * ITEMS_PER_PAGE >= classes.length}
+                      disabled={page * ITEMS_PER_PAGE >= filteredClasses.length}
                       className="btn btn-sm"
                     >
                       Next
