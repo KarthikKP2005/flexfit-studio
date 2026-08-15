@@ -237,10 +237,25 @@ visibly break the app right before submission.
 
 ## Phase 5 — Close remaining `known-issues.md` gaps where it's now worth it
 
-Re-triage the 14 "documented, not fixed" items once Phases 0–2 land —
-some (e.g. `AUTH-001` passwordHash leak, `CLASS-002` capacity-below-occupancy)
-become worth actually fixing now that there's time, rather than staying
-logged-and-left.
+**Triage done (2026-08-15).** All 18 open items (grew from 14 as Phase
+2/3 surfaced `AUTH-006`, `ADMIN-003`, `ADMIN-004`, `CORP-006`) re-triaged
+in `known-issues.md` — see its "Phase 5 triage" section at the top for
+the full table, and a `Phase 5 triage:` line on each item's own entry.
+No code changed in this pass, per the user's explicit choice to
+triage-only first.
+
+**Verdict: 12 worth fixing, 6 staying documented.**
+- Worth fixing (roughly cheapest/highest-value first): `ADMIN-003`,
+  `AUTH-005`, `CORP-006`, `AUTH-006`, `AUTH-001`, `ADMIN-004`,
+  `PLAN-004`, `MEMBER-003`, `CLASS-003`, `TRAINER-001`, `NOTIF-001`,
+  `CLASS-002`.
+- Staying documented (schema migration, cross-cutting, or explicitly
+  flagged by plan.md as needing strong tests first): `MEMBER-001`,
+  `TRAINER-002`, `ADMIN-001`, `ADMIN-002`, `KIOSK-002`, `CORP-004`.
+
+Actually implementing the "worth fixing" list (each its own FIX commit,
+characterization test first, per Rule 1.1) is not yet started —
+next step if picked back up.
 
 ---
 

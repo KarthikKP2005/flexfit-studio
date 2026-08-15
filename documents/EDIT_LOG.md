@@ -10,6 +10,34 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — DOCUMENT(known-issues): Phase 5 triage of all 18 open defects, no code changed
+
+**Type:** DOCUMENT
+**Defect:** n/a — a triage pass across all 18 currently
+`Confirmed`/`Documented, not fixed` items in `known-issues.md`
+(`AUTH-001`, `AUTH-005`, `AUTH-006`, `NOTIF-001`, `PLAN-004`,
+`MEMBER-001`, `MEMBER-003`, `TRAINER-001`, `TRAINER-002`, `CLASS-002`,
+`CLASS-003`, `ADMIN-001`, `ADMIN-002`, `ADMIN-003`, `ADMIN-004`,
+`KIOSK-002`, `CORP-004`, `CORP-006`).
+**Behavior change:** no — this is a documentation-only pass. Per the
+user's explicit choice, no fixes were implemented this round.
+**Files:**
+- `documents/known-issues.md` — added a "Phase 5 triage" summary
+  section up top (two tables: worth-fixing vs. staying-documented, with
+  reasoning), plus a `Phase 5 triage:` line on each of the 18 items'
+  own entries carrying the same verdict.
+- `documents/restructure-plan.md` — Phase 5 section updated with the
+  triage verdict and pointer to `known-issues.md`.
+**Verdict:** 12 items judged worth fixing (severity × fix cost — several
+Low-severity items are cheap one-liners with an exact template already
+proven elsewhere in the codebase; `ADMIN-003` and `AUTH-005` are High
+severity and contained). 6 items staying documented because a safe fix
+needs a schema migration, is cross-cutting across 3+ files, or plan.md
+itself flags them as needing strong tests before touching.
+**Tests:** n/a — no code touched.
+
+---
+
 ## 2026-08-15 — REFACTOR(admin, admin-reports): extract AdminDashboard and ReportsDashboard, verified live in a browser
 
 **Type:** REFACTOR
