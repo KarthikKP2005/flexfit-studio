@@ -131,10 +131,13 @@ Current sizes (real, checked — not from memory):
 
 Ordered by value/risk:
 
-1. **`attendance-service.ts`** (`src/features/bookings/`) — dedupe
-   `markAttended` between `bookings.ts` and `corporate-bookings.ts`.
-   Smallest, matches Rule 7's own named example, first proof the harness
-   works end to end.
+1. ✅ **`attendance-service.ts`** (`src/features/bookings/`) — done
+   (2026-08-15). Dedupes `markAttended` between `bookings.ts` and
+   `corporate-bookings.ts`. Found and documented a real, previously-
+   unknown quirk while extracting (`CORP-006`: corporate check-ins
+   always record `source: "front_desk"` regardless of the real source) —
+   preserved exactly, not silently fixed, per Rule 3. 8/8 characterization
+   tests pass before and after. `tsc --noEmit`/`pnpm build` clean.
 2. **`booking-policy.ts`** (pure functions, no DB) — shared eligibility
    checks (membership active, class not cancelled/started, duplicate
    booking) duplicated across `bookings.book` and `corporateBookings.book`.

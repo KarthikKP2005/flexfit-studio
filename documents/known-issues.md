@@ -1681,6 +1681,53 @@ booking is not supported (`reschedules.ts` only operates on the personal
 
 ---
 
+### CORP-006 — Corporate check-ins always record `checkins.source` as `"front_desk"`, ignoring the real source
+
+**Severity:** Low (reporting/audit-trail inaccuracy, not a functional
+break — attendance still gets recorded, just with a wrong source label)
+**Status:** Documented, not fixed (new — found during the Phase 2.1
+`attendance-service.ts` extraction on branch `restructure-project1`;
+related to, but distinct from, `CORP-004`)
+**Area:** Corporate bookings / Attendance
+**File:** `src/server/routers/corporate-bookings.ts` — `markAttended`
+
+**Current behavior:** the mutation accepts
+`source: "front_desk" | "kiosk" | "app" | "trainer"` as input, but its
+`checkins` insert never passes `source` at all:
+```ts
+await ctx.db.insert(checkins).values({
+  userId: booking.userId,
+  bookingId: null,
+});
+```
+`checkins.source` is `NOT NULL DEFAULT "front_desk"` (`schema.ts`), so
+every corporate check-in's recorded source is silently `"front_desk"`
+regardless of what was actually passed — a check-in made from the
+trainer roster (`source: "trainer"`) or kiosk (`source: "kiosk"`) is
+indistinguishable from a front-desk one in the `checkins` table. The
+sibling personal path, `bookings.ts`'s `markAttended`, does pass
+`source: input.source` correctly — this is a one-sided inconsistency
+between the two otherwise-parallel mutations, not a shared bug.
+
+**Reproduction:** `attendance.test.ts`'s *"corporate: marks attended,
+checkins.bookingId is null, source is ALWAYS front_desk regardless of
+input"* — passes `source: "trainer"` and asserts the stored row is
+`"front_desk"`.
+
+**Why not fixed here:** found and locked in as a characterization test
+while extracting shared check-in logic into `attendance-service.ts`
+(Phase 2.1, a REFACTOR) — per Rule 3, a REFACTOR must be behavior-
+identical, so this was preserved exactly rather than silently corrected
+inside that commit. Fixing it is a one-line change
+(`source: input.source` added to the insert) but is a real behavior
+change and belongs in its own FIX commit, not bundled here.
+
+**What "fixed" would look like:** add `source: input.source` to the
+insert, matching the personal path exactly. Low risk, small blast
+radius — a reasonable Phase 5 candidate.
+
+---
+
 ### RESCH-001 — Rescheduling a waitlisted booking to an available class produces an unpaid confirmed booking
 
 **Severity:** High

@@ -10,6 +10,44 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(bookings): extract attendance-service.ts, dedupe markAttended
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction, no defect fixed (see CORP-006 below
+for a real bug *found* while doing this, deliberately not fixed here)
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first (Rule 5), then re-run unchanged
+against the extraction; all 8 pass identically before and after.
+**Files:**
+- `src/features/bookings/attendance-service.ts` (new) —
+  `assertBookingCheckable`, `assertCheckInWindow`,
+  `getCheckinWindowMinutes`. The shared check-in policy both
+  `bookings.markAttended` and `corporateBookings.markAttended` had
+  independently, byte-for-byte.
+- `src/server/routers/bookings.ts` — `markAttended` now calls the shared
+  functions; removed unused `studioSettings` import; corrected a stale
+  comment that incorrectly claimed no server-side check-in window
+  existed (it always has).
+- `src/server/routers/corporate-bookings.ts` — same extraction; removed
+  unused `studioSettings` import; comment documents the `source`-field
+  quirk found during this work (see `CORP-006`).
+- `vitest.config.ts` — added `fileParallelism: false`. Reproduced
+  `SQLITE_BUSY` directly once a second test file existed (two files
+  opening concurrent connections to the same `flexfit.test.db`) —
+  necessary infrastructure fix, not scope creep.
+**Tests:** `src/server/routers/attendance.test.ts` (new, 5 tests) —
+written first, against unmodified code, before any extraction; all
+still pass after.
+
+**Found, not fixed, while doing this:** `CORP-006` — corporate
+check-ins never pass `source` to the `checkins` insert, so they always
+record `"front_desk"` regardless of the real source. New
+`known-issues.md` entry; separate FIX candidate for Phase 5.
+
+Phase 2 item 1 of `documents/restructure-plan.md`.
+
+---
+
 ## 2026-08-15 — DOCUMENT(restructure): Phase 1 docs — system map, behavior inventory, refactor map, schema-stance decision
 
 **Type:** DOCUMENT
