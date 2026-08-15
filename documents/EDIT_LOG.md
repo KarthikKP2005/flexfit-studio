@@ -10,6 +10,40 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — DOCUMENT(restructure): Phase 1 docs — system map, behavior inventory, refactor map, schema-stance decision
+
+**Type:** DOCUMENT
+**Defect:** n/a — planning documentation, per `restructure-plan.md` Phase 1
+**Behavior change:** no — documentation only, no application code touched.
+**Files:**
+- `documents/system-map.md` (new) — Page → tRPC procedure → validation →
+  business rules → DB → side-effects for all 75+ procedures across 16
+  routers, built from a fresh grep of every router's procedure list
+  cross-referenced against every `trpc.*.useQuery/useMutation` call
+  actually found under `src/app/**`/`src/components/**`, so the
+  backend-only-procedure list (`plans.setActive`, `classes.create`/
+  `update`/`cancel`, `members.setActive`/`setRole`, `payments.mine`/
+  `markPaid`/`refund`) is verified, not remembered.
+- `documents/behavior-inventory.md` (new) — plan.md's own requested
+  table format (role/input/output/error/DB/UI/edge-cases), scoped to
+  exactly the features Phase 2 will touch (attendance, booking,
+  waitlist promotion, reschedule, class scheduling, admin reports) —
+  the concrete "must not change" reference each extraction gets
+  verified against.
+- `documents/refactor-map.md` (new) — the target `src/features/` and
+  `src/features/*/components/` trees, one line of *why* per module,
+  written before any Phase 2/3 file move.
+- `documents/architecture-decisions.md` — added the schema-stance
+  decision (core schema left as-is; the `bookings`/`corporateBookings`
+  two-table split was considered for consolidation and explicitly kept,
+  reasoning recorded).
+- `documents/restructure-plan.md` — Phase 0 and Phase 1 both marked done
+  with what actually landed.
+**Tests:** n/a — documentation only. `tsc --noEmit` and `pnpm test`
+re-run to confirm no application code was touched; both clean.
+
+---
+
 ## 2026-08-15 — CHORE: consolidate root-level docs into documents/
 
 **Type:** CHORE

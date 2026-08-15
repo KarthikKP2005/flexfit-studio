@@ -80,21 +80,25 @@ to those files elsewhere in this plan should now be read as
 
 ---
 
-## Phase 1 — Make the restructuring defensible (docs before code)
+## Phase 1 — Make the restructuring defensible (docs before code) — ✅ done (2026-08-15)
 
 Written *before* moving code, so the plan is reviewable, not
 reverse-engineered after the fact:
 
-- **`documents/system-map.md`** — Page → tRPC procedure → validation →
-  business rules → DB → side-effects, for every router.
-- **`documents/behavior-inventory.md`** — the same ground `known-issues.md`'s
-  50 entries already cover, reorganized by feature instead of by defect,
-  so a reader can see "what does booking do" without cross-referencing
-  defect IDs.
-- **`documents/refactor-map.md`** — the actual target layout from Phase 2
-  below, one line of *why* per new module.
-- **Schema-stance paragraph** in `architecture-decisions.md` (Decision #2
-  above).
+- ✅ **`documents/system-map.md`** — Page → tRPC procedure → validation →
+  business rules → DB → side-effects, for every router (75+ procedures
+  across 16 routers), plus the backend-only-procedure list.
+- ✅ **`documents/behavior-inventory.md`** — focused specifically on the
+  features Phase 2 will touch (attendance, booking, waitlist, reschedule,
+  class scheduling, admin reports), in plan.md's own requested table
+  format, so each extraction has a concrete "must not change" reference.
+- ✅ **`documents/refactor-map.md`** — the actual target layout (backend
+  `src/features/` tree + frontend `src/features/*/components/` tree),
+  one line of *why* per new module, written before any Phase 2/3 move.
+- ✅ **Schema-stance paragraph** in `architecture-decisions.md` — core
+  schema left as-is, reasoning recorded (the two-table
+  `bookings`/`corporateBookings` split was considered for consolidation
+  and explicitly kept).
 
 ---
 

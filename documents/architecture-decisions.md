@@ -7,6 +7,26 @@ picked, so it can be defended.
 
 ---
 
+
+----------------------------
+
+
+# Architecture Decisions
+
+This file tracks major structural changes to the codebase, as required by `AGENT_RULES.md` Rule 1.2.
+
+## 2026-08-09: `studio_settings` Table
+**Context:** The application previously had a hardcoded 30-minute check-in window. To support enterprise/professional administration, the studio needs to configure rules dynamically without redeploying code.
+**Decision:** Added a `studioSettings` table to `src/db/schema.ts` to hold global configuration values, starting with `checkinWindowMinutes`.
+**Consequences:** 
+- A migration (`db:push`) is required.
+- Routers that depend on time boundaries (e.g., `bookings.ts` and `corporate-bookings.ts` `markAttended`) must now execute a read query against this table before validating.
+- The Admin dashboard requires a new UI panel to manage these settings.
+
+
+
+-------------------------------------
+
 ## 2026-08-07 — Database Indexing for Schedule Load Performance
 
 **Decision:** Added `classes_starts_at_idx` and `bookings_class_id_idx` indexes via Drizzle schema to `flexfit.db`.
@@ -400,3 +420,45 @@ is accidental duplication, not an intentional split.
 **Status:** open — tracked as a Phase 2 target in
 `documents/restructure-plan.md`. Not resolved in this entry; this entry
 exists to make the open question real instead of a broken promise.
+
+---
+
+## 2026-08-15 — Data model: left as-is, not restructured
+
+**Decision:** the core schema (`src/db/schema.ts`) is being left in its
+current shape for this restructuring pass — no table merges, no new
+normal forms, no consolidating `bookings`/`corporateBookings` into one
+table with a credit-source column (plan.md's own suggested alternative
+for `CORP-003`, considered and explicitly not taken).
+
+**Why:** Item B states either choice is fine — *"staying in the
+TypeScript and leaving the database alone is fine... going further and
+changing the data model is also fine if you think the design needs
+it... we're not after a particular depth, we're after a decision you can
+defend."* The two-table `bookings`/`corporateBookings` split was
+evaluated (`CORP-002`/`CORP-003`'s fixes both had to reason about it
+directly) and kept because: consolidating them into one table with a
+`creditSource` column would touch every query, every insert, and every
+foreign key across `bookings.ts`, `corporate-bookings.ts`,
+`reschedules.ts`, `admin.ts`, and `checkins` — a genuinely large,
+high-risk migration for a benefit (avoiding duplicated *table*
+structure) that's smaller than the risk of getting it wrong this close
+to a deadline. The actual duplicated *logic* problem the two tables
+create (capacity counting, waitlist ordering, credit checks, attendance)
+is already solved without touching the schema — `capacity-service.ts` and
+`waitlist-service.ts` read from both tables and present one unified
+view, which is the cheaper fix for the same symptom.
+
+**What did change incidentally, not as part of a broader redesign:**
+- `companyMembers.userId` made unique (`COMPANY-001`, fixed) — a real
+  constraint the business rule needed, not a structural rewrite.
+- Indexes added (`classes.startsAt`, `bookings.classId`) for query
+  performance — additive, no shape change.
+
+**What a future pass could do differently, if this constraint didn't
+exist:** the `checkins.bookingId`-only-references-personal-bookings
+issue (`CORP-004`) and the missing corporate revenue ledger (`ADMIN-002`)
+both have schema-level fixes plan.md itself sketches (a
+`bookingSource` + two nullable FK columns on `checkins`; a
+`company_credit_transactions` table) — deliberately not attempted here,
+consistent with this decision.
