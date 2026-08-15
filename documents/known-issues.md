@@ -1190,6 +1190,84 @@ recommendation given the time available.
 
 ---
 
+### ADMIN-003 — Correlated-subquery-as-column pattern always returns 0, affecting `admin.classUtilisation` and `classes.list`'s `spotsLeft`
+
+**Severity:** High (both a member-facing and admin-facing display bug —
+confirmed to make the public `/schedule` page's "spots left" and the
+admin dashboard's "booked" numbers wrong for every class, always. Not a
+data-integrity or overbooking risk — see below.)
+**Status:** Confirmed from source, root cause isolated (new — found
+while writing characterization tests for the Phase 2.4
+`admin.ts` split on branch `restructure-project1`; not previously
+documented anywhere, including plan.md's original 56-item audit)
+**Area:** Reporting / Schedule display
+**Files:** `src/server/routers/admin.ts` — `classUtilisation`;
+`src/server/routers/classes.ts` — `list`
+
+**Current behavior:** both procedures select a `booked` column computed
+as a correlated subquery referencing the outer row:
+```ts
+booked: sql<number>`(
+  select count(*) from ${bookings}
+  where ${bookings.classId} = ${classes.id}
+    and ${bookings.status} in ('booked','attended')
+)`.as("booked"),
+```
+This always evaluates to `0`, regardless of how many real `booked`/
+`attended` rows exist for that class.
+
+**Verified real, not a test artifact:** reproduced directly against the
+live `flexfit.db` (not just the disposable test database) — classes with
+4, 8, and 17 real confirmed bookings (verified via a separate, direct
+`count(*)` query) all report `booked: 0` through this query shape.
+Removing `.limit()` didn't change it. The exact same subquery run as raw
+SQL via `db.all(sql\`...\`)` — no drizzle query-builder involved — returns
+the correct counts (4, 8, 17). The bug is isolated specifically to how
+drizzle-orm's query builder compiles a `sql<T>` tagged-template
+correlated subquery when used as a selected column and referencing an
+outer-query column (`${classes.id}`) from inside it; not present when
+the same subquery is issued as raw SQL, and not present in
+`capacity-service.ts`'s `getConfirmedOccupancy`, which uses a plain
+`.select({count: sql<number>\`count(*)\`}).from(bookings).where(...)` —
+no correlation, no column-embedded subquery — and returns correct counts.
+
+**Not a security/overbooking issue:** actual capacity enforcement
+(`bookings.book`, `corporateBookings.book`) goes through
+`capacity-service.ts`'s safe, separate query shape — confirmed
+unaffected. This bug is display-only: `/schedule` always shows every
+class as if `0` people had booked (so `spotsLeft` always equals full
+`capacity`, and a class is never shown as visually "full" even when it
+is), and the admin dashboard's utilisation report always shows `0%`
+for every class. A member could still be correctly waitlisted by `book`
+even though the page told them there was room.
+
+**Not yet confirmed:** whether this reproduces against a real Turso
+cloud database (`dialect: "turso"` in `drizzle.config.ts`) as opposed to
+the local file-based `@libsql/client` driver both the dev database and
+this test harness use — no way to test that from this environment. If
+it's driver-specific, production behavior on real Turso could differ
+from what's reproduced here; flagged as an open question, not assumed
+either way.
+
+**Why not fixed here:** found while writing a *characterization* test
+for a REFACTOR (Phase 2.4, extracting `classUtilisation` into
+`src/features/reports/`) — Rule 3 requires that extraction be
+byte-for-byte behavior-identical, so the bug is preserved exactly in the
+move, not silently fixed. `classes.list` is untouched entirely by that
+extraction (out of its scope) and is documented here as a second,
+separate call site sharing the same root cause, not touched either.
+
+**What "fixed" would look like:** replace the correlated-subquery-column
+pattern with the same safe pattern `capacity-service.ts` already proves
+works — either two separate queries (one for classes, one aggregated
+`count(*)...group by classId` joined/merged in application code), or a
+`LEFT JOIN` + `GROUP BY` instead of a scalar subquery in the select
+list. Real fix candidate for Phase 5, and arguably higher priority than
+several already-`Fixed` items given it affects the primary public
+schedule page.
+
+---
+
 ### COMPANY-001 — A member can be linked to more than one company at once
 
 **Severity:** Medium (which company pays for a corporate booking becomes

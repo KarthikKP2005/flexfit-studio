@@ -153,10 +153,16 @@ Ordered by value/risk:
    four credit-transition outcomes (RESCH-001/002), RESCH-004's
    equal-cost check, and RESCH-003's waitlist promotion. `tsc --noEmit`/
    `pnpm build` clean. Biggest, highest-risk item in the plan — done.
-4. **Split `admin.ts`** (384 lines, several unrelated concerns) —
-   utilisation reporting, revenue reporting, attendance/no-show, into
-   `src/features/reports/` and `src/features/attendance/`; router stays
-   thin.
+4. ✅ **Split `admin.ts`** — done (2026-08-15). Utilisation, revenue, and
+   attendance/no-show queries moved into `src/features/reports/` and
+   `src/features/attendance/`; router calls are now one-liners. Found
+   and documented a real, previously-unknown bug along the way
+   (`ADMIN-003` — `classUtilisation`'s booked count always 0, same root
+   cause also affects `classes.list`'s `spotsLeft`), preserved exactly
+   per Rule 3. 6/6 new tests (32 total) pass before and after. `tsc
+   --noEmit`/`pnpm build` clean. `stats`/`trainerPayroll`/settings/
+   `expiringMemberships`/`refundCount` intentionally left inline —
+   outside this item's stated scope.
 5. **Resolve the `classes.ts` / `adminClasses.ts` duplication** (Phase 0
    item #2) — consolidate the duplicate `create` logic, or explicitly
    document why the two routers stay separate (staff-facing vs.

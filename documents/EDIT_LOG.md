@@ -10,6 +10,48 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(admin): split classUtilisation/revenue/attendance queries out of admin.ts
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first; all 6 new tests (32 total) pass
+identically before and after, including the `ADMIN-003` bug (see below),
+preserved exactly.
+**Files:**
+- `src/features/reports/utilisation-service.ts` (new) —
+  `getClassUtilisation`.
+- `src/features/reports/revenue-service.ts` (new) — `getRevenueByMonth`,
+  `getRevenueByMethod`.
+- `src/features/attendance/no-show-service.ts` (new) —
+  `getCheckinsPerDay`, `getTopTrainers`, `getNoShowList`.
+- `src/server/routers/admin.ts` — those six procedures are now one-line
+  calls into the services above; removed now-unused `desc`/`inArray`
+  imports. `stats`, `trainerPayroll`, `settings`/`updateSettings`,
+  `runMembershipExpiryCheck`, `expiringMemberships`, `refundCount` stay
+  inline — outside this extraction's stated scope (see
+  `restructure-plan.md` Phase 2 item 4).
+**Tests:** `src/server/routers/admin-reports.test.ts` (new, 6 tests).
+`tsc --noEmit` and `pnpm build` both clean.
+
+**Found, not fixed, while writing the characterization test:** `ADMIN-003`
+— `classUtilisation`'s `booked` count always evaluates to `0`, confirmed
+against the real `flexfit.db` (not just the test DB) for classes with
+real double-digit booking counts. Root cause isolated to how drizzle-orm
+compiles a correlated subquery used as a selected column — raw SQL with
+the identical shape returns correct counts. `classes.list`'s `spotsLeft`
+uses the exact same buggy pattern (a second call site, not touched by
+this extraction, documented as the same defect). Not an overbooking
+risk — `capacity-service.ts`'s actual capacity enforcement uses a
+different, unaffected query shape — but it is a real, previously-
+undiscovered display bug on both the admin dashboard and the public
+`/schedule` page. Preserved exactly per Rule 3, new `known-issues.md`
+entry written, left as a Phase 5 FIX candidate.
+
+Phase 2 item 4 of `documents/restructure-plan.md`.
+
+---
+
 ## 2026-08-15 — REFACTOR(reschedules): extract evaluateReschedule, close the reschedule/validateReschedule duplication
 
 **Type:** REFACTOR
