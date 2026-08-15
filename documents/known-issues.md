@@ -1268,6 +1268,43 @@ schedule page.
 
 ---
 
+### ADMIN-004 — Admin class scheduler never surfaces cancel/swap-trainer mutation errors
+
+**Severity:** Medium (admin-facing — "Cancel Class" and "Confirm Swap"
+appear to silently do nothing on failure; the admin has no way to know
+why, or that anything went wrong at all)
+**Status:** Documented, not fixed (new — found during the Phase 3
+`ClassScheduler` extraction on branch `restructure-project1`)
+**Area:** Admin / Classes / Frontend
+**File:** `src/features/admin-classes/components/ClassScheduler.tsx`
+(formerly `src/app/admin/classes/page.tsx`)
+
+**Current behavior:** `cancelMutation` and `swapMutation` are both
+defined with `onSuccess` handlers but no error handling anywhere in the
+component — `cancelMutation.error`/`swapMutation.error` are never read,
+and no error `<p>` element exists in the JSX (unlike, for example,
+`schedule/page.tsx`'s `bookingError` panel, or `trainer/schedule`'s
+`actionError` panel). If either mutation rejects — most concretely,
+`swapTrainer` throwing `BAD_REQUEST` when the new trainer isn't
+available (`TRAINER-003`, fixed on the backend this session) — the
+button click simply does nothing visible: no toast, no inline message,
+no state change. The admin has to infer failure from the UI *not*
+changing.
+
+**Why not fixed here:** found while doing a pure Phase 3 REFACTOR (JSX
+moved verbatim, no logic changes per Rule 3) — surfacing the error would
+be a real UI behavior change, not a move, so it's logged instead of
+folded into that commit.
+
+**What "fixed" would look like:** the same pattern already used
+elsewhere in this codebase — render `cancelMutation.error?.message` /
+`swapMutation.error?.message` in a `panel` element near the button, same
+shape as `schedule/page.tsx`'s `bookingError` or
+`trainer/schedule`'s `actionError`. Small, low-risk, good Phase 5
+candidate.
+
+---
+
 ### COMPANY-001 — A member can be linked to more than one company at once
 
 **Severity:** Medium (which company pays for a corporate booking becomes

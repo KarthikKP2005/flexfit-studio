@@ -10,6 +10,36 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(admin-classes): extract ClassScheduler, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction (found `ADMIN-004` along the way, not
+fixed here)
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/admin-classes/components/ClassScheduler.tsx` (new) —
+  the entire previous contents of `admin/classes/page.tsx`, moved
+  character-for-character except the component's own name.
+- `src/app/admin/classes/page.tsx` — now route-level composition only.
+  Was 296 lines, now 11.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed the create-class form (all fields, trainer
+select), the swap-trainer inline form, the cancel-class button, and the
+name filter all render and are wired correctly. Zero console errors.
+`tsc --noEmit` and `pnpm build` both clean, bundle size unchanged.
+
+**Found, not fixed, while doing this:** `ADMIN-004` — neither
+`cancelMutation.error` nor `swapMutation.error` is read or rendered
+anywhere in this component. A rejected cancel or trainer-swap (e.g.
+`TRAINER-003`'s `BAD_REQUEST` for an unavailable trainer) currently
+looks like the button did nothing. New `known-issues.md` entry,
+preserved exactly per Rule 3, left as a Phase 5 FIX candidate.
+
+Phase 3 of `documents/restructure-plan.md`, fourth item.
+
+---
+
 ## 2026-08-15 — REFACTOR(dashboard): extract MemberDashboard, verified live in a browser
 
 **Type:** REFACTOR
