@@ -10,6 +10,43 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(schedule): extract ScheduleBrowser, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/schedule/components/ScheduleBrowser.tsx` (new) — the
+  entire previous contents of `schedule/page.tsx` (`ScheduleBrowser` +
+  `BookButton`), moved character-for-character except the main
+  component's own name.
+- `src/app/schedule/page.tsx` — now route-level composition only. Was
+  369 lines, now 9.
+**Tests:** verified live — dev server + headless Chromium (Playwright).
+Checked signed-out view (day filter, name/date filters, "Sign in to
+book a class"), the name filter actually narrowing results ("Yoga" →
+only Sunrise Yoga rows), and signed-in as a company-linked member:
+confirmed the `BookButton`'s click-to-expand behavior still works
+exactly as coded — a company-linked member's first click expands to
+"Personal credits"/"TechCorp Inc credits" rather than booking
+immediately, matching `CORP-005`'s documented behavior precisely,
+nothing guessed. Zero console errors. `tsc --noEmit` and `pnpm build`
+both clean; `/schedule`'s bundle size unchanged (2.9kB → 2.92kB, noise).
+
+**Environment note:** two dev-server instances from earlier sessions
+were still listening on ports 3000-3003 (`lsof`-based kills weren't
+reaching them on this Windows/git-bash setup), causing the Playwright
+driver script to hit whichever stale instance answered first on
+whatever port it happened to occupy. Fixed with a `netstat`-based PID
+lookup + `taskkill //F`,
+confirming exactly one server on exactly one port before driving it —
+worth doing this way going forward for any further Phase 3 items.
+
+Phase 3 of `documents/restructure-plan.md`, second item.
+
+---
+
 ## 2026-08-15 — REFACTOR(trainer-schedule): extract TrainerScheduleView, verified live in a browser
 
 **Type:** REFACTOR
