@@ -10,6 +10,34 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(admin-companies): extract CompanyDetail, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, including the `useParams()` call
+(still resolves correctly from any client component under the
+`/admin/companies/[id]` dynamic segment, regardless of which file
+defines the component).
+**Files:**
+- `src/features/admin-companies/components/CompanyDetail.tsx` (new) —
+  the entire previous contents of `admin/companies/[id]/page.tsx`
+  (formerly named `CompanyDetails`, now exported as `CompanyDetail`),
+  moved character-for-character.
+- `src/app/admin/companies/[id]/page.tsx` — now route-level composition
+  only: `RequireRole` wrapping `CompanyDetail`. Was 285 lines, now 20.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin, navigated via the real companies list to a real
+company detail page. Confirmed the Deactivate/Activate button, credit
+pool balance + Top Up form, linked-members list with Remove buttons,
+Add Member search form, and Recent Corporate Bookings list all render
+and are wired correctly. Zero console errors. `tsc --noEmit` and
+`pnpm build` both clean, bundle size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, fifth item.
+
+---
+
 ## 2026-08-15 — REFACTOR(admin-classes): extract ClassScheduler, verified live in a browser
 
 **Type:** REFACTOR
