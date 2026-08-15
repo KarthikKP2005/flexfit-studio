@@ -10,6 +10,21 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — CHORE: consolidate root-level docs into documents/
+
+**Type:** CHORE
+**Defect:** n/a
+**Behavior change:** no — file moves only, no application code touched.
+**Files:** `AGENT_RULES.md`, `EDIT_LOG.md`, `plan.md`,
+`finallist_phase1.docx` moved from repo root into `documents/`; a stray
+duplicate `architecture-decisions.md` that existed at root (separate
+from the canonical `documents/architecture-decisions.md`) removed.
+Content verified line-for-line identical after the move (2585/264/1698
+lines respectively, matching the pre-move originals).
+**Tests:** n/a — no code affected.
+
+---
+
 ## 2026-08-15 — DOCUMENT(auth): log AUTH-005 (deactivating a user doesn't invalidate existing sessions)
 
 **Type:** DOCUMENT
