@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
 /**
- * Member self-service profile (MEMBER-004): view read-only account info
- * and edit name/phone via the existing, unmodified
- * `members.updateProfile` mutation. Not responsible for: password or
- * email changes — `updateProfile`'s input only accepts name/phone, so
- * neither is offered here; email and role are shown read-only.
+ * Allows members to view their account information and update
+ * their name and phone number using the existing `members.updateProfile`
+ * mutation.
+ *
+ * Email and role are displayed as read-only.
+ * Password and email changes are not supported by this profile feature.
  */
 export default function ProfilePage() {
   const utils = trpc.useUtils();
