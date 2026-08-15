@@ -261,14 +261,43 @@ next step if picked back up.
 
 ## Phase 6 — Final pass
 
-1. Update `architecture-decisions.md` with the real, final structure and
-   reasoning (supersedes Phase 1's draft where they diverge).
-2. Confirm every touched file meets Rule 10's Definition of Done checklist.
-3. Final `EDIT_LOG.md` review — every entry has type, defect ID or n/a,
-   behavior-change Y/N, files, tests.
-4. **Full end-to-end smoke test** — not per-phase spot checks, one final
-   pass walking all three golden paths in the running dev server: member
-   books/waitlists/cancels/reschedules a class; trainer checks someone
-   in; admin cancels a class, swaps a trainer, refunds a payment. This is
-   the step that catches anything the phase-by-phase verification missed.
-5. Final `pnpm build` + `tsc --noEmit` + `next lint`, clean.
+**Done (2026-08-15).**
+
+1. ✅ `architecture-decisions.md` updated with a new "Final structure, as
+   actually built" entry — reconciles `refactor-map.md`'s pre-Phase-2/3
+   plan against what actually landed. Two naming differences
+   (`AdminOverview`→`AdminDashboard`, `ReportsView`→`ReportsDashboard`)
+   and two planned-but-unneeded items (`business-time.ts`, the
+   `classes/` consolidation) called out explicitly, plus the four
+   defects found mid-refactor (`ADMIN-003`, `ADMIN-004`, `CORP-006`,
+   `AUTH-006`).
+2. ✅ Rule 10 Definition-of-Done audit across every file touched in
+   Phase 2/3: all backend service exports and all router procedures
+   already had header comments; one real gap found and fixed
+   (comment-only) — `TrainerScheduleView`'s exported component had no
+   header comment of its own (the file-top comment only described the
+   move, separated from the export by the `ClassCard` helper in
+   between) — now has one, matching every other Phase 3 component.
+3. ✅ `EDIT_LOG.md` reviewed — 105 entries, all now have Type, Defect,
+   Behavior change, and Tests fields (one entry, the `classes.ts` vs
+   `adminClasses.ts` DOCUMENT resolution, was missing a `Tests:` line;
+   added `n/a — no code changed`).
+4. ✅ **Full end-to-end smoke test**, all three golden paths, live in a
+   browser (Playwright), zero console/page errors throughout:
+   - Member: `/schedule` loads and books; `/dashboard` shows membership +
+     corporate credit pool, Cancel and Reschedule both present, the
+     reschedule modal opens and lists candidate classes.
+   - Trainer: `/trainer/schedule` loads; roster expands (Booked/Waitlist
+     tabs) with working Check In buttons.
+   - Admin: `/admin/classes` shows Cancel Class + Swap Trainer on every
+     row; `/admin` dashboard renders all sections; `/admin/reports`
+     renders all sections; `/admin/members` (untouched by this
+     restructuring) still loads correctly.
+5. ✅ Final `tsc --noEmit` clean, `vitest run` 32/32 passing, `pnpm build`
+   clean (same route sizes as every prior phase checkpoint).
+   **`next lint` intentionally not run** — no ESLint config has ever
+   existed in this repo (pre-existing gap, not introduced this session);
+   `next lint`'s first-run setup is interactive and creating a new lint
+   config from scratch is a real tooling addition outside this
+   restructuring's scope, not something to silently add during a final
+   pass. Noted here rather than silently skipped.

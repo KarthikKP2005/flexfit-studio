@@ -10,6 +10,43 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — CHORE(restructure): Phase 6 final pass — architecture doc, Rule 10 audit, full E2E smoke test, final build
+
+**Type:** REFACTOR (one comment-only fix) + DOCUMENT (the rest)
+**Defect:** n/a
+**Behavior change:** no — one file changed (a missing header comment
+added), zero logic/JSX/output changed anywhere.
+**Files:**
+- `src/features/trainers/components/TrainerScheduleView.tsx` — added a
+  header comment directly above the exported `TrainerScheduleView`
+  component (previously only the file-top comment existed, and it only
+  described the Phase 3 move, not what the component does — a real
+  Rule 10 gap since the export sits ~200 lines below that comment, past
+  the `ClassCard` helper).
+- `documents/architecture-decisions.md` — added a "Final structure, as
+  actually built" entry reconciling `refactor-map.md`'s plan against
+  what actually landed (two component naming differences, two
+  planned-but-unneeded items, four defects found mid-refactor).
+- `documents/EDIT_LOG.md` (this file) — added the missing `Tests:` line
+  to the `classes.ts`/`adminClasses.ts` DOCUMENT entry.
+- `documents/restructure-plan.md` — Phase 6 marked done with the full
+  checklist results.
+**Tests:** full end-to-end smoke test across all three golden paths in
+a running dev server via Playwright (member books/cancels/reschedules;
+trainer expands a roster and checks someone in; admin views class
+scheduler/dashboard/reports) — zero console or page errors throughout.
+Final `tsc --noEmit` clean, `vitest run` 32/32 passing, `pnpm build`
+clean. `next lint` not run — no ESLint config exists in this repo
+(pre-existing, not introduced this session); creating one from scratch
+was judged out of scope for a restructuring final pass rather than
+silently added.
+
+This closes Phase 6 of `documents/restructure-plan.md` — all six
+phases (0 through 3, 5, 6) are now done; Phase 4 (route groups) remains
+explicitly skipped as optional/highest-risk.
+
+---
+
 ## 2026-08-15 — DOCUMENT(known-issues): Phase 5 triage of all 18 open defects, no code changed
 
 **Type:** DOCUMENT
@@ -363,6 +400,7 @@ fully complete.**
 **Behavior change:** no — no code touched.
 **Files:** `documents/architecture-decisions.md` — rewrote the Phase 0
 entry on this topic with the complete finding.
+**Tests:** n/a — no code changed, nothing to test.
 
 Attempted the actual consolidation this Phase 2 item called for — read
 both `classesRouter.create` and `adminClassesRouter.create` in full,

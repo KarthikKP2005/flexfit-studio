@@ -237,6 +237,12 @@ const DAYS = [
   "Saturday",
 ];
 
+/**
+ * Trainer-facing home: today's metric tiles (classes/attendees/spots),
+ * an Upcoming Classes / Weekly Availability tab switch, the class list
+ * (with name/date filters, expandable into `ClassCard`'s roster above),
+ * and the weekly availability day editor.
+ */
 export function TrainerScheduleView() {
   const utils = trpc.useUtils();
   const { data: classes, isLoading: classesLoading } =

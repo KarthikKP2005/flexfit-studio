@@ -493,3 +493,72 @@ both have schema-level fixes plan.md itself sketches (a
 `bookingSource` + two nullable FK columns on `checkins`; a
 `company_credit_transactions` table) — deliberately not attempted here,
 consistent with this decision.
+
+---
+
+## 2026-08-15 — Final structure, as actually built (supersedes `refactor-map.md`'s plan where they diverge)
+
+**Why this entry exists:** `refactor-map.md` was written *before* Phase
+2/3 moved anything, as a reviewable plan (🎯 = target, ✅ = already
+built). Phase 6 of `restructure-plan.md` calls for recording the real,
+final structure once everything landed, since a plan and its outcome
+aren't always identical — this is that record. `refactor-map.md` itself
+is left unedited (it's a snapshot of the plan-as-written, useful for
+seeing what changed and why); this entry is the authoritative "what's
+actually there."
+
+**Backend (`src/features/`) — built exactly as planned**, all six Phase
+2 items landed under the directories `refactor-map.md` named:
+`bookings/attendance-service.ts`, `bookings/booking-policy.ts`,
+`reschedules/reschedule-policy.ts`, `reports/utilisation-service.ts`,
+`reports/revenue-service.ts`, `attendance/no-show-service.ts` — plus the
+pre-existing `bookings/capacity-service.ts`, `bookings/waitlist-service.ts`,
+`bookings/class-cancellation-service.ts`, `trainers/availability-service.ts`,
+`memberships/current-membership.ts`. Two planned items were deliberately
+**not** built, both already explained in `restructure-plan.md`'s Phase 2
+log rather than silently dropped:
+- `src/lib/business-time.ts` (item 6) — checked first and found
+  unnecessary: none of plan.md #55's named functions except `hoursUntil`
+  were actually duplicated, so only `reschedules.ts`'s copy of
+  `hoursUntil` was pointed at `booking-policy.ts`'s existing one. No new
+  file needed for one already-shared function.
+- `src/features/classes/` consolidation (item 5) — resolved as a
+  **DOCUMENT**, not a REFACTOR: `classes.ts` and `adminClasses.ts`'s
+  `create` turned out to differ in three real, observable ways (see the
+  "resolved — kept separate" entry above), so consolidating would have
+  silently picked a winning behavior. Both routers were kept as they are.
+
+**Frontend (`src/features/*/components/`) — built exactly as planned,
+with two component names changed from the plan:**
+- `refactor-map.md` named the admin-dashboard and admin-reports
+  components `AdminOverview.tsx` and `ReportsView.tsx`; they were built
+  as `AdminDashboard.tsx` and `ReportsDashboard.tsx` instead, to match
+  the naming pattern every other Phase 3 extraction actually used
+  (`ClassScheduler`, `CompanyDetail`, `CompanyList`, `CheckInKiosk`,
+  `PlanManager`, `MemberDashboard`, `ScheduleBrowser`,
+  `TrainerScheduleView` — none of them are named `*View` or `*Overview`).
+  Purely a naming consistency call made during Phase 3 itself, not a
+  functional difference from the plan.
+- All 10 pages under `src/app/**` that Phase 3 targeted are now
+  route-level composition only, verified live in a browser for each —
+  see `EDIT_LOG.md`'s Phase 3 entries and `restructure-plan.md`'s Phase 3
+  table for the specific verification done per file.
+
+**Deliberately not restructured, unchanged from the plan:**
+`src/db/schema.ts` (see the "Data model: left as-is" entry above),
+route groups (Phase 4, not attempted — flagged optional/highest-risk and
+explicitly skipped this pass), `src/lib/format.ts`/`password.ts`
+(reviewed 2026-08-06, nothing to extract).
+
+**Defects found during the build that weren't in the original plan or
+audit:** `ADMIN-003` (drizzle correlated-subquery pattern always returns
+0 — found writing a Phase 2.4 characterization test), `ADMIN-004`
+(admin scheduler swallows mutation errors — found during the Phase 3
+`ClassScheduler` extraction), `CORP-006` (corporate check-ins always
+record `source: "front_desk"` — found during the Phase 2.1
+`attendance-service.ts` extraction), `AUTH-006` (`admin/plans` has no
+`RequireRole` gate at all — found during its Phase 3 extraction). All
+four are preserved exactly as found (Rule 3: a REFACTOR can't silently
+fix what it uncovers) and triaged in `known-issues.md`'s Phase 5
+section — `ADMIN-003` and `ADMIN-004` are both on the "worth fixing"
+list if this branch continues past this pass.
