@@ -33,13 +33,12 @@ export default function SchedulePage() {
   const [now] = useState(() => new Date().toISOString());
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
-  // Class schedule filter state (client-side only — same name/date/time
+  // Class schedule filter state (client-side only — same name/date
   // filter pattern used on admin/classes/page.tsx, trainer/schedule/page.tsx
   // and dashboard/page.tsx's upcoming bookings). Applied on top of the
   // existing day-of-week filter below, not replacing it.
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [filterTime, setFilterTime] = useState("");
 
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -148,11 +147,11 @@ export default function SchedulePage() {
         ))}
       </div>
 
-      {/* Class schedule filter bar: name/date/time, same client-side
+      {/* Class schedule filter bar: name/date, same client-side
           filtering pattern as admin/classes/page.tsx and
           trainer/schedule/page.tsx. Filters the already-fetched `classes`
           list, not a new query. */}
-      <div className="panel p-4 grid gap-4 sm:grid-cols-3">
+      <div className="panel p-4 grid gap-4 sm:grid-cols-2">
         <div>
           <label className="block text-sm muted mb-1">Filter by Name</label>
           <input
@@ -172,31 +171,16 @@ export default function SchedulePage() {
             onChange={(e) => setFilterDate(e.target.value)}
           />
         </div>
-        <div>
-          <label className="block text-sm muted mb-1">Filter by Time</label>
-          <input
-            className="input w-full"
-            type="time"
-            value={filterTime}
-            onChange={(e) => setFilterTime(e.target.value)}
-          />
-        </div>
       </div>
 
       <div className="space-y-2">
         {classes?.filter(c => {
           if (selectedDay !== null && new Date(c.startsAt).getDay() !== selectedDay) return false;
           if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
-          if (filterDate || filterTime) {
+          if (filterDate) {
             const d = new Date(c.startsAt);
-            if (filterDate) {
-              const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-              if (localDate !== filterDate) return false;
-            }
-            if (filterTime) {
-              const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-              if (localTime !== filterTime) return false;
-            }
+            const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            if (localDate !== filterDate) return false;
           }
           return true;
         }).length === 0 && (
@@ -205,16 +189,10 @@ export default function SchedulePage() {
         {classes?.filter(c => {
           if (selectedDay !== null && new Date(c.startsAt).getDay() !== selectedDay) return false;
           if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
-          if (filterDate || filterTime) {
+          if (filterDate) {
             const d = new Date(c.startsAt);
-            if (filterDate) {
-              const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-              if (localDate !== filterDate) return false;
-            }
-            if (filterTime) {
-              const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-              if (localTime !== filterTime) return false;
-            }
+            const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            if (localDate !== filterDate) return false;
           }
           return true;
         }).map((c) => (

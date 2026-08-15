@@ -32,13 +32,12 @@ export default function DashboardPage() {
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Upcoming bookings filter state (client-side only — same name/date/time
+  // Upcoming bookings filter state (client-side only — same name/date
   // filter pattern used on admin/classes/page.tsx and
   // trainer/schedule/page.tsx, applied here to the member's own upcoming
   // bookings list).
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [filterTime, setFilterTime] = useState("");
 
   const utils = trpc.useUtils();
   const { data: profile, isLoading } = trpc.members.profile.useQuery(undefined, {
@@ -176,11 +175,11 @@ export default function DashboardPage() {
           </p>
         )}
 
-        {/* Upcoming bookings filter bar: name/date/time, same client-side
+        {/* Upcoming bookings filter bar: name/date, same client-side
             filtering pattern as admin/classes/page.tsx and
             trainer/schedule/page.tsx. Filters the already-fetched
             `bookings` list, not a new query. */}
-        <div className="panel p-4 grid gap-4 sm:grid-cols-3">
+        <div className="panel p-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-sm muted mb-1">Filter by Name</label>
             <input
@@ -200,15 +199,6 @@ export default function DashboardPage() {
               onChange={(e) => setFilterDate(e.target.value)}
             />
           </div>
-          <div>
-            <label className="block text-sm muted mb-1">Filter by Time</label>
-            <input
-              className="input w-full"
-              type="time"
-              value={filterTime}
-              onChange={(e) => setFilterTime(e.target.value)}
-            />
-          </div>
         </div>
 
         {bookings && bookings.length > 0 ? (
@@ -217,16 +207,10 @@ export default function DashboardPage() {
               {bookings.filter(b => {
                 if (b.status === "cancelled") return false;
                 if (filterName && !b.className.toLowerCase().includes(filterName.toLowerCase())) return false;
-                if (filterDate || filterTime) {
+                if (filterDate) {
                   const d = new Date(b.startsAt);
-                  if (filterDate) {
-                    const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-                    if (localDate !== filterDate) return false;
-                  }
-                  if (filterTime) {
-                    const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-                    if (localTime !== filterTime) return false;
-                  }
+                  const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                  if (localDate !== filterDate) return false;
                 }
                 return true;
               }).map((b) => (
