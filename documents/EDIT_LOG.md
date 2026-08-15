@@ -10,6 +10,31 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(admin-companies): extract CompanyList, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, including a pre-existing unused
+`formatMoney` import (dead in the original file, not something this
+move fixes or removes).
+**Files:**
+- `src/features/admin-companies/components/CompanyList.tsx` (new) — the
+  entire previous contents of `admin/companies/page.tsx` (formerly
+  `CompaniesList`, now `CompanyList`), moved character-for-character.
+- `src/app/admin/companies/page.tsx` — now route-level composition
+  only: `RequireRole` wrapping `CompanyList`. Was 183 lines, now 19.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed both seeded companies (TechCorp Inc,
+FinServe Solutions) render with correct credit balances and active
+status, the "New Company" button opens the create form with all three
+fields, and Cancel closes it. Zero console errors. `tsc --noEmit` and
+`pnpm build` both clean, bundle size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, seventh item.
+
+---
+
 ## 2026-08-15 — REFACTOR(kiosk): extract CheckInKiosk, verified live in a browser
 
 **Type:** REFACTOR
