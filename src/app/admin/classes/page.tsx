@@ -121,7 +121,12 @@ export default function AdminClassesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm muted mb-1">Date & Time</label>
+              <label className="block text-sm muted mb-1 flex items-center gap-2">
+                Date & Time
+                <span className="text-xs px-1.5 py-0.5 rounded bg-white/10 muted normal-case">
+                  click date, then time
+                </span>
+              </label>
               <input
                 className="input w-full"
                 type="datetime-local"
