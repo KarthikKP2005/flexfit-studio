@@ -10,6 +10,30 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — CHORE(trainer): surface Check In/Admit mutation errors on the roster
+
+**Type:** CHORE
+**Defect:** n/a — UX gap found and fixed directly, not a behavior defect
+**Behavior change:** yes, but display-only — no tRPC procedure, schema, or
+business rule touched. `bookings.markAttended` already correctly rejects
+a check-in outside its configured window (`BAD_REQUEST`, "Check-in is
+only allowed from N minutes before class starts until it ends.") — that
+rule is untouched. The bug was that `ClassCard` in
+`trainer/schedule/page.tsx` never rendered any of its four mutations'
+`error` (`markAttended`, `markCorpAttended`, `admitFromWaitlist`,
+`admitCorpFromWaitlist`), so a legitimate server rejection looked
+identical to the button silently doing nothing.
+**Files touched:** `src/app/trainer/schedule/page.tsx` — added
+`actionError` (first non-null error across the four mutations) and
+render it as an inline panel above the Booked/Waitlist tabs, same
+"show `mutation.error.message` in a panel" pattern already used in
+`schedule/page.tsx` and `plans/page.tsx`. No other file touched.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope (pure frontend error display). Verified:
+`tsc --noEmit` clean (no errors, before or after).
+
+---
+
 ## 2026-08-14 — CHORE(navbar): hide role-based links, bell, and profile name on the home page
 
 **Type:** CHORE
