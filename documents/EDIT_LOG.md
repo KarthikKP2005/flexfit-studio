@@ -10,6 +10,32 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(kiosk): extract CheckInKiosk, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, including the pre-existing
+`selectedMember: any` (plan.md item #42) — preserved exactly, not fixed;
+Rule 9 governs new/touched logic, not a verbatim relocation.
+**Files:**
+- `src/features/kiosk/components/CheckInKiosk.tsx` (new) — the entire
+  previous contents of `kiosk/page.tsx` (formerly `KioskContent`, now
+  `CheckInKiosk` — plan.md item #54's own literal naming example for
+  this exact page), moved character-for-character.
+- `src/app/kiosk/page.tsx` — now route-level composition only:
+  `RequireRole` wrapping `CheckInKiosk`. Was 224 lines, now 20.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed the member search field, a real lookup
+match with a Select button, member selection, "Change member," and the
+"No classes in the next 2 hours" state (accurate given current seed
+data timing) all render and work correctly. Zero console errors.
+`tsc --noEmit` and `pnpm build` both clean, bundle size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, sixth item.
+
+---
+
 ## 2026-08-15 — REFACTOR(admin-companies): extract CompanyDetail, verified live in a browser
 
 **Type:** REFACTOR

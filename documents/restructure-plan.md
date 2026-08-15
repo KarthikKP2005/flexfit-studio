@@ -205,7 +205,7 @@ picked five pages from memory and missed six):
 | `dashboard/page.tsx` | ~~369~~ **8** | ✅ done (2026-08-15) — extracted to `MemberDashboard`, verified live |
 | `admin/classes/page.tsx` | ~~296~~ **11** | ✅ done (2026-08-15) — extracted to `ClassScheduler`, verified live. Found `ADMIN-004` (cancel/swap errors never surfaced) along the way, documented not fixed |
 | `admin/companies/[id]/page.tsx` | ~~285~~ **20** | ✅ done (2026-08-15) — extracted to `CompanyDetail`, verified live |
-| `kiosk/page.tsx` | 224 | |
+| `kiosk/page.tsx` | ~~224~~ **20** | ✅ done (2026-08-15) — extracted to `CheckInKiosk`, verified live |
 | `admin/companies/page.tsx` | 183 | added |
 | `admin/plans/page.tsx` | 176 | added |
 | `admin/page.tsx` (main dashboard) | 176 | added |

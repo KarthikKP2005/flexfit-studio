@@ -1,0 +1,219 @@
+"use client";
+
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { formatDateTime } from "@/lib/format";
+
+/**
+ * Phase 3 of restructure-plan.md: moved verbatim out of
+ * src/app/kiosk/page.tsx — no JSX, styling, trpc call, or logic
+ * changed, only the file location and component name
+ * (`KioskContent` → `CheckInKiosk`, plan.md item #54's own literal
+ * naming example for this exact page). The page itself is now
+ * route-level composition only, wrapping this in `RequireRole`.
+ *
+ * Front-desk check-in flow: look up a member, pick from their classes
+ * starting in the next 2 hours, mark attended. Not responsible for:
+ * corporate check-ins (KIOSK-002, documented not fixed — see
+ * known-issues.md) — only `bookings.upcomingForMember`/`markAttended`
+ * (personal) are called here, so a company-linked member's corporate
+ * bookings never show up at this kiosk.
+ *
+ * Behavior notes:
+ * - `selectedMember` is typed `any` (see plan.md item #42), losing the
+ *   type safety tRPC would otherwise provide end-to-end. Preserved
+ *   exactly by this move, not fixed — Rule 9 governs new/touched logic,
+ *   not a verbatim relocation.
+ * - The expired-membership/no-credits banners below are computed
+ *   client-side from `memberDetails.data.memberships[0]` (`members.byId`'s
+ *   full membership history, most-recent-startDate first — the first
+ *   entry isn't necessarily the currently-active one; a different, still-
+ *   open gap from MEMBER-002, which only covered `members.profile` and
+ *   is fixed). Neither is re-verified server-side by `markAttended` — it
+ *   only checks booking status and the check-in time window (see
+ *   bookings.ts) — so this UI is display-only, not a security boundary.
+ * - `hasNoCredits` no longer disables the Check-in button (KIOSK-001,
+ *   fixed): credits are spent at *booking* time, not check-in time, so a
+ *   member who spent their last credit booking this exact class still
+ *   holds a valid confirmed booking regardless of their credit balance
+ *   now. `isMembershipExpired` still disables it — untouched, out of
+ *   scope for KIOSK-001, a separate question about whether an expired
+ *   membership should also be allowed to check into a booking made while
+ *   it was still active.
+ */
+export function CheckInKiosk() {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedMember, setSelectedMember] = useState<any>(null);
+  const [checkinSuccess, setCheckinSuccess] = useState<{ memberName: string; className: string } | null>(null);
+
+  const lookupMember = trpc.members.lookupByEmailOrPhone.useQuery(
+    { query: searchQuery },
+    { enabled: !!searchQuery && searchQuery.length > 2 },
+  );
+
+  const upcomingClasses = trpc.bookings.upcomingForMember.useQuery(
+    { userId: selectedMember?.id || 0, hoursAhead: 2 },
+    { enabled: !!selectedMember },
+  );
+
+  const memberDetails = trpc.members.byId.useQuery(
+    { id: selectedMember?.id || 0 },
+    { enabled: !!selectedMember },
+  );
+
+  const markAttended = trpc.bookings.markAttended.useMutation({
+    onSuccess: (_, variables) => {
+      const classInfo = upcomingClasses.data?.find((c) => c.bookingId === variables.bookingId);
+      if (classInfo && selectedMember) {
+        setCheckinSuccess({
+          memberName: selectedMember.name,
+          className: classInfo.className,
+        });
+        setTimeout(() => {
+          setCheckinSuccess(null);
+          setSearchQuery("");
+          setSelectedMember(null);
+        }, 3000);
+        upcomingClasses.refetch();
+      }
+    },
+  });
+
+  const isMembershipExpired = memberDetails.data && memberDetails.data.memberships && memberDetails.data.memberships.length > 0
+    ? new Date(memberDetails.data.memberships[0].endDate) < new Date()
+    : false;
+
+  const hasNoCredits = memberDetails.data?.memberships?.[0]?.creditsRemaining === 0;
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Check-in Kiosk</h1>
+        <p className="muted mt-1 text-sm">Look up a member and check them in to upcoming classes</p>
+      </div>
+
+      {checkinSuccess && (
+        <div className="rounded border p-4" style={{ borderColor: "#16a34a", background: "#064e3b", color: "#bbf7d0" }}>
+          <div className="font-medium">✓ Check-in successful</div>
+          <div className="muted mt-1 text-sm">{checkinSuccess.memberName} checked in to {checkinSuccess.className}</div>
+        </div>
+      )}
+
+      <section className="space-y-3">
+        <h2 className="font-medium">Find Member</h2>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Email or phone number"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 rounded border px-3 py-2 text-sm"
+            style={{
+              borderColor: "var(--border)",
+              background: "var(--bg-secondary)",
+              color: "var(--fg)",
+            }}
+          />
+        </div>
+
+        {lookupMember.isLoading && <p className="muted text-sm">Searching...</p>}
+        {lookupMember.error && <p className="text-sm" style={{ color: "#ef4444" }}>Member not found</p>}
+        {lookupMember.data && !selectedMember && (
+          <div className="panel p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium">{lookupMember.data.name}</div>
+                <div className="muted text-xs mt-1">{lookupMember.data.email}</div>
+                {lookupMember.data.phone && <div className="muted text-xs">{lookupMember.data.phone}</div>}
+              </div>
+              <button
+                onClick={() => setSelectedMember(lookupMember.data)}
+                className="btn btn-primary btn-sm"
+              >
+                Select
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {selectedMember && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-medium">Member: {selectedMember.name}</h2>
+            <button
+              onClick={() => {
+                setSelectedMember(null);
+                setSearchQuery("");
+              }}
+              className="btn btn-sm"
+              style={{
+                background: "var(--bg-secondary)",
+                color: "var(--fg)",
+                borderColor: "var(--border)",
+              }}
+            >
+              Change member
+            </button>
+          </div>
+
+          {memberDetails.data?.memberships && memberDetails.data.memberships.length > 0 && (
+            <div className="space-y-2">
+              {isMembershipExpired && (
+                <div className="rounded border p-3 text-sm" style={{ borderColor: "#dc2626", background: "#7f1d1d", color: "#fca5a5" }}>
+                  ⚠ Membership has expired
+                </div>
+              )}
+              {hasNoCredits && (
+                // Informational only (KIOSK-001) — doesn't disable Check-in
+                // below. A member can be at zero credits and still hold a
+                // valid confirmed booking for the class they spent their
+                // last credit on; this just flags that they have none left
+                // for booking anything further.
+                <div className="rounded border p-3 text-sm" style={{ borderColor: "#dc2626", background: "#7f1d1d", color: "#fca5a5" }}>
+                  ⚠ No credits remaining
+                </div>
+              )}
+            </div>
+          )}
+
+          {upcomingClasses.isLoading && <p className="muted text-sm">Loading classes...</p>}
+          {upcomingClasses.data && upcomingClasses.data.length === 0 && (
+            <p className="muted text-sm">No classes in the next 2 hours</p>
+          )}
+          {upcomingClasses.data && upcomingClasses.data.length > 0 && (
+            <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
+              {upcomingClasses.data.map((cls) => (
+                <div key={cls.bookingId} className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="font-medium">{cls.className}</div>
+                      <div className="muted mt-1 text-sm">
+                        {formatDateTime(cls.startsAt)} · {cls.room} · {cls.durationMin} min
+                      </div>
+                      {cls.trainerName && (
+                        <div className="muted text-xs mt-1">Trainer: {cls.trainerName}</div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() =>
+                        markAttended.mutate({
+                          bookingId: cls.bookingId,
+                          source: "kiosk",
+                        })
+                      }
+                      disabled={markAttended.isPending || isMembershipExpired}
+                      className="btn btn-primary btn-sm ml-4"
+                    >
+                      Check in
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
