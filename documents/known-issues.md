@@ -244,6 +244,41 @@ behavior FIX into a comment-only DOCUMENT change.
 
 ---
 
+### AUTH-006 — `admin/plans` has no client-side role gate at all
+
+**Severity:** Low (same category as AUTH-004: `adminPlans.*` procedures
+are already `adminProcedure`-guarded server-side, so no real data is
+reachable — this is presentation only) — but notably this page was
+missed entirely by the AUTH-004 fix, not one of its four documented
+patterns.
+**Status:** Confirmed from source, not fixed
+**Area:** Frontend / Access control (client-side only — backend
+untouched)
+**File:** `src/app/admin/plans/page.tsx`
+
+**Current behavior:** Found while extracting this page's JSX verbatim
+into `PlanManager` (Phase 3 of `documents/restructure-plan.md`,
+REFACTOR only, no behavior change permitted in that pass). Unlike the
+7 pages AUTH-004 already wrapped in `RequireRole`
+(`admin`, `admin/attendance`, `admin/reports`, `admin/announcements`,
+`admin/companies` list + detail, `trainer/schedule`, `kiosk`),
+`admin/plans` was never included in that fix's file list. The page
+renders its full create-plan form and plan grid to any visitor,
+regardless of role — closest to AUTH-004's "fully functional, no gate"
+pattern (`admin/announcements`, pre-fix).
+
+**Why not fixed here:** This session's constraint for the file was
+"only refactor" (verbatim move, no behavior change) — adding
+`RequireRole` here would change what an unauthorized visitor sees,
+which is a FIX, not a move. Preserved exactly as found.
+
+**What "fixed" would look like:** wrap `PlanManager` in
+`src/app/admin/plans/page.tsx` with the existing `RequireRole`
+component, the same one-line change already applied to the other 7
+admin/staff pages — no new component needed.
+
+---
+
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
 
 **Severity:** Low (a deactivated user can't sign in to read it, so the

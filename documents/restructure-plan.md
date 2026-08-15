@@ -207,7 +207,7 @@ picked five pages from memory and missed six):
 | `admin/companies/[id]/page.tsx` | ~~285~~ **20** | ✅ done (2026-08-15) — extracted to `CompanyDetail`, verified live |
 | `kiosk/page.tsx` | ~~224~~ **20** | ✅ done (2026-08-15) — extracted to `CheckInKiosk`, verified live |
 | `admin/companies/page.tsx` | ~~183~~ **19** | ✅ done (2026-08-15) — extracted to `CompanyList`, verified live |
-| `admin/plans/page.tsx` | 176 | added |
+| `admin/plans/page.tsx` | ~~176~~ **16** | ✅ done (2026-08-15) — extracted to `PlanManager`, verified live. Found `AUTH-006` (no `RequireRole` gate at all — missed by the AUTH-004 fix), documented not fixed |
 | `admin/page.tsx` (main dashboard) | 176 | added |
 | `admin/reports/page.tsx` | 170 | added |
 

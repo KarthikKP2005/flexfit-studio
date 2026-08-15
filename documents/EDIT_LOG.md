@@ -10,6 +10,37 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(admin-plans): extract PlanManager, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/admin-plans/components/PlanManager.tsx` (new) — the
+  entire previous contents of `admin/plans/page.tsx`, moved
+  character-for-character, exported as `PlanManager`.
+- `src/app/admin/plans/page.tsx` — now route-level composition only:
+  renders `PlanManager`. Was 176 lines, now 16.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed all six seeded plans (Drop-in Pack,
+Monthly Unlimited, Quarterly Unlimited, Annual Unlimited, Student
+Monthly, Legacy Founder Plan) render with correct price/credits/
+duration and active/archived badges, "Create Plan" opens the form with
+all five fields, and "Archive Plan" / "Reactivate Plan" buttons are
+present per plan's active state. Zero console errors. `tsc --noEmit`,
+`pnpm build`, and `vitest run` (32/32) all clean.
+
+**Observation (not fixed, out of scope):** unlike every other admin
+page moved so far, the original `admin/plans/page.tsx` has no
+`RequireRole` wrapper at all — a pre-existing gap not covered by the
+earlier `AUTH-004` fix. Preserved exactly as found; adding one here
+would be a FIX, not a move.
+
+Phase 3 of `documents/restructure-plan.md`, eighth item.
+
+---
+
 ## 2026-08-15 — REFACTOR(admin-companies): extract CompanyList, verified live in a browser
 
 **Type:** REFACTOR
