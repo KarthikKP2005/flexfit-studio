@@ -17,13 +17,16 @@ function LoginForm() {
 
   const login = trpc.auth.login.useMutation({
     onSuccess: async (data) => {
+      // Refresh cached tRPC data so the session-dependent UI reflects the new user
       await utils.invalidate();
-      
+
+      // Honor an explicit redirect (e.g. ?redirect=/booking) before falling back to role-based routing
       if (redirectUrl) {
         router.push(redirectUrl);
         return;
       }
-      
+
+      // Route each role to its own landing page
       if (data.role === "trainer") {
         router.push("/trainer/schedule");
       } else if (data.role === "admin") {
@@ -73,6 +76,7 @@ function LoginForm() {
               required
               placeholder="••••••••"
             />
+            {/* Toggle button swaps the input type and icon to reveal/hide the password */}
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
