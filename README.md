@@ -80,6 +80,11 @@ Every change was verified to leave existing behavior untouched - live in a runni
 
 ## Contributors
 
-- [m-karthika14](https://github.com/m-karthika14)
-- [KarthikKP2005](https://github.com/KarthikKP2005)
-- [narenyash](https://github.com/narenyash)
+**[m-karthika14](https://github.com/m-karthika14)**
+Led the restructuring pass end to end (backend service extraction, frontend component extraction, defect triage, final verification). Also: consistent role-based access gating across staff pages, member signup flow, corporate booking UI, profile editing, class cancellation cleanup and notifications, roster privacy fix, waitlist-promotion notifications, expiring-membership reminders, and admin class scheduler fixes (cancel routing, mutation error surfacing).
+
+**[KarthikKP2005](https://github.com/KarthikKP2005)**
+Built the core admin panel (CRM, plans, classes, trainer overrides, analytics, studio settings, staff management, forgot-password flow) and led UI/UX passes across the app. Also: database indexing for schedule performance, transaction safety and waitlist-concurrency fixes, and trainer availability handling.
+
+**[narenyash](https://github.com/narenyash)**
+Fixed membership and payment correctness issues (current-membership resolution, refund cleanup, atomic subscribe with collision-resistant payment references, duplicate-subscription rejection), enforced one company per member, fixed kiosk check-in blocking on zero credits, and reworked the reschedule modal's state handling. Also added name/date/time filtering across the schedule, dashboard, trainer schedule, and admin classes views.
