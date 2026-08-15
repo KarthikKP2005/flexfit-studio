@@ -11,13 +11,12 @@ import { formatDateTime } from "@/lib/format";
  * changed, only the file location. The page itself is now route-level
  * composition only (plan.md item #54's own pattern).
  *
- * Behavior note (found during this move, not fixed — new, no formal
- * defect ID assigned yet): `cancelMutation.error` and
- * `swapMutation.error` are never rendered anywhere below. If
- * `adminClasses.cancel` or `swapTrainer` reject (e.g. `TRAINER-003`'s
- * `BAD_REQUEST` when the new trainer isn't available), "Cancel Class" /
- * "Confirm Swap" appear to silently do nothing — same shape as
- * `SCHED-001`, which this page doesn't yet have the fix for.
+ * ADMIN-004 fix: `createMutation`/`cancelMutation`/`swapMutation` now
+ * all surface their `.error` in a panel above the form — previously
+ * none were rendered anywhere, so a rejection (e.g. `TRAINER-003`'s
+ * `BAD_REQUEST` when the new trainer isn't available) looked identical
+ * to "Cancel Class"/"Confirm Swap"/"Schedule Class" silently doing
+ * nothing. Same pattern already used by `SCHED-001`'s fix elsewhere.
  */
 export function ClassScheduler() {
   const { data: classes, isLoading, refetch } = trpc.adminClasses.list.useQuery();
@@ -76,6 +75,13 @@ export function ClassScheduler() {
     },
   });
 
+  // ADMIN-004 fix: none of these three mutations surfaced their error to
+  // the admin before this — a rejected create/cancel/swap (e.g.
+  // TRAINER-003's "No availability set for this day.") looked identical
+  // to a silent no-op. Same "show mutation.error in a panel" pattern
+  // already used on schedule/page.tsx and trainer/schedule/page.tsx.
+  const actionError = createMutation.error ?? cancelMutation.error ?? swapMutation.error;
+
   if (isLoading) return <p className="muted">Loading schedule...</p>;
 
   return (
@@ -91,6 +97,12 @@ export function ClassScheduler() {
           </button>
         </div>
       </div>
+
+      {actionError && (
+        <p className="panel p-3 text-sm" style={{ color: "#f87171" }}>
+          {actionError.message}
+        </p>
+      )}
 
       {/* CREATE CLASS FORM */}
       {showForm && (

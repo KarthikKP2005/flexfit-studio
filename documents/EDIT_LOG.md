@@ -10,6 +10,35 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — FIX(admin-classes): surface create/cancel/swap-trainer mutation errors instead of failing silently
+
+**Type:** FIX
+**Defect:** ADMIN-004 (see `documents/known-issues.md` — closes the
+"documented, not fixed" gap Phase 3 found, and extends it: `create` had
+the identical gap, not just cancel/swap as originally named)
+**Behavior change:** yes — a rejected `adminClasses.create`/`cancel`/
+`swapTrainer` call now renders its error message on screen. Nothing
+about the mutations themselves changed (same inputs, same validation,
+same errors thrown) — only what the admin sees when one fails.
+**Files:**
+- `src/features/admin-classes/components/ClassScheduler.tsx` — added
+  `actionError` (`createMutation.error ?? cancelMutation.error ??
+  swapMutation.error`), rendered in a `panel` element above the create
+  form, same shape already used by `schedule/page.tsx`'s `bookingError`
+  and `trainer/schedule/page.tsx`'s `actionError`. Header comment
+  updated to reflect the fix instead of the prior "not fixed" note.
+**Reproduction:** reported live — "Schedule Class" appeared to do
+nothing when submitted for a trainer with no availability configured
+for the selected day. Confirmed via the network response that
+`adminClasses.create` was correctly rejecting with `BAD_REQUEST` ("No
+availability set for this day.") — the backend was working exactly as
+designed; the frontend just never displayed it.
+**Verified live:** re-ran the exact same repro (Playwright, headless
+Chromium) after the fix — the same `BAD_REQUEST` now renders on screen.
+`tsc --noEmit` clean, `vitest run` 32/32 passing, `next build` clean.
+
+---
+
 ## 2026-08-15 — CHORE(restructure): Phase 6 final pass — architecture doc, Rule 10 audit, full E2E smoke test, final build
 
 **Type:** REFACTOR (one comment-only fix) + DOCUMENT (the rest)

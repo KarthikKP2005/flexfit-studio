@@ -1413,13 +1413,12 @@ application of an existing pattern to two more call sites.
 
 ---
 
-### ADMIN-004 — Admin class scheduler never surfaces cancel/swap-trainer mutation errors
+### ADMIN-004 — Admin class scheduler never surfaces cancel/swap-trainer mutation errors — FIXED
 
 **Severity:** Medium (admin-facing — "Cancel Class" and "Confirm Swap"
 appear to silently do nothing on failure; the admin has no way to know
 why, or that anything went wrong at all)
-**Status:** Documented, not fixed (new — found during the Phase 3
-`ClassScheduler` extraction on branch `restructure-project1`)
+**Status:** Fixed (2026-08-15)
 **Area:** Admin / Classes / Frontend
 **File:** `src/features/admin-classes/components/ClassScheduler.tsx`
 (formerly `src/app/admin/classes/page.tsx`)
@@ -1436,22 +1435,28 @@ button click simply does nothing visible: no toast, no inline message,
 no state change. The admin has to infer failure from the UI *not*
 changing.
 
-**Why not fixed here:** found while doing a pure Phase 3 REFACTOR (JSX
-moved verbatim, no logic changes per Rule 3) — surfacing the error would
-be a real UI behavior change, not a move, so it's logged instead of
-folded into that commit.
+**Reported live:** "Schedule Class" appeared to do nothing when
+submitted for a trainer with no availability configured for the
+selected day — confirmed via the network response that
+`adminClasses.create` was correctly rejecting with `BAD_REQUEST` ("No
+availability set for this day."), the same missing-error-handling gap
+this entry already named for cancel/swap, just also true of `create`
+(not explicitly called out when this entry was first written).
 
-**What "fixed" would look like:** the same pattern already used
-elsewhere in this codebase — render `cancelMutation.error?.message` /
-`swapMutation.error?.message` in a `panel` element near the button, same
-shape as `schedule/page.tsx`'s `bookingError` or
-`trainer/schedule`'s `actionError`. Small, low-risk, good Phase 5
-candidate.
+**Fix:** added `actionError` (`createMutation.error ?? cancelMutation.error
+?? swapMutation.error`), rendered in a `panel` element above the create
+form — the same pattern already used by `schedule/page.tsx`'s
+`bookingError` and `trainer/schedule/page.tsx`'s `actionError`. Fixed
+create, cancel, and swap together since they're the same defect in the
+same file. No mutation, validation, or success-path logic touched —
+same inputs, same errors thrown, same success behavior; only what a
+failure now looks like on screen changed.
 
-**Phase 5 triage (2026-08-15):** worth fixing. Same pattern already
-applied to the trainer roster's Check In/Admit errors this session
-(`EDIT_LOG.md`, 2026-08-15 "CHORE(trainer)" entry) — apply it here too,
-same shape, one file.
+**Verified live:** reproduced the original repro (Playwright, headless
+Chromium — same trainer/date/time that produced the silent failure)
+after the fix: the same `BAD_REQUEST` now renders as "No availability
+set for this day." at the top of the page. `tsc --noEmit`, `vitest run`
+(32/32), and `next build` all clean.
 
 ---
 
