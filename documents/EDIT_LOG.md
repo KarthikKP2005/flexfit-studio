@@ -10,6 +10,31 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(dashboard): extract MemberDashboard, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/dashboard/components/MemberDashboard.tsx` (new) — the
+  entire previous contents of `dashboard/page.tsx`, moved
+  character-for-character except the component's own name.
+- `src/app/dashboard/page.tsx` — now route-level composition only. Was
+  369 lines, now 8.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as the company-linked seeded member. Confirmed both the
+personal membership card (plan, status, credits, renewal date) and the
+`COMPANY-002` corporate membership card (company name, status, credit
+pool balance) render, the upcoming-bookings name filter works, and
+reschedule history renders with correct from/to class/time/room detail.
+Zero console errors. `tsc --noEmit` and `pnpm build` both clean, bundle
+size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, third item.
+
+---
+
 ## 2026-08-15 — REFACTOR(schedule): extract ScheduleBrowser, verified live in a browser
 
 **Type:** REFACTOR

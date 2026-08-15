@@ -202,7 +202,7 @@ picked five pages from memory and missed six):
 |---|---|---|
 | **`trainer/schedule/page.tsx`** | ~~552~~ **25** | ✅ done (2026-08-15) — extracted to `TrainerScheduleView`, verified live in a browser (screenshots + zero console errors), see `EDIT_LOG.md` |
 | `schedule/page.tsx` | ~~369~~ **9** | ✅ done (2026-08-15) — extracted to `ScheduleBrowser`, verified live |
-| `dashboard/page.tsx` | 369 | |
+| `dashboard/page.tsx` | ~~369~~ **8** | ✅ done (2026-08-15) — extracted to `MemberDashboard`, verified live |
 | `admin/classes/page.tsx` | 296 | added — tied to Phase 2 item 5 |
 | `admin/companies/[id]/page.tsx` | 285 | |
 | `kiosk/page.tsx` | 224 | |
