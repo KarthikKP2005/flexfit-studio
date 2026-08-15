@@ -72,6 +72,24 @@ documents/      restructuring plan, defect log, and architecture decisions
 
 Client (Next.js App Router, role-based routes for member/trainer/admin/kiosk) talks to a single tRPC endpoint. Every procedure sits behind a role gate (`public`, `protected`, `staff`, `admin`), backed by Drizzle ORM over SQLite.
 
+**Request flow:**
+
+```mermaid
+flowchart TD
+    A[Member / Trainer / Admin / Front Desk] --> B[Next.js App Router - role-based routes]
+    B --> C[tRPC App Router - /api/trpc]
+    C --> D{Role gate}
+    D --> E[publicProcedure]
+    D --> F[protectedProcedure]
+    D --> G[staffProcedure - trainer or admin]
+    D --> H[adminProcedure]
+    E --> I[Drizzle ORM]
+    F --> I
+    G --> I
+    H --> I
+    I --> J[(SQLite - flexfit.db)]
+```
+
 ## Restructuring
 
 The original app worked correctly but had grown through five developers who never spoke to each other: oversized route files, and the same logic duplicated across routers. This codebase went through a full restructuring pass on top of that: route files were split into single-purpose modules under `src/features/*` (services on the backend, components on the frontend), and repeated logic was consolidated into one place per concern.
