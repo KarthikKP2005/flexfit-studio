@@ -72,7 +72,7 @@ documents/      restructuring plan, defect log, and architecture decisions
 
 Client (Next.js App Router, role-based routes for member/trainer/admin/kiosk) talks to a single tRPC endpoint. Every procedure sits behind a role gate (`public`, `protected`, `staff`, `admin`), backed by Drizzle ORM over SQLite.
 
-**Request flow:**
+**Overall flow:**
 
 ```mermaid
 flowchart TD
