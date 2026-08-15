@@ -60,7 +60,26 @@ src/
   app/          routes and pages
   components/   shared components
   db/           schema, client, seed data
+  features/     domain logic - backend services and frontend components, grouped by feature
   lib/          helpers
   server/       tRPC routers
-documents/      empty, for your own notes
+documents/      restructuring plan, defect log, and architecture decisions
 ```
+
+## System Architecture
+
+![FlexFit Studio system architecture](public/archi.png)
+
+Client (Next.js App Router, role-based routes for member/trainer/admin/kiosk) talks to a single tRPC endpoint. Every procedure sits behind a role gate (`public`, `protected`, `staff`, `admin`), backed by Drizzle ORM over SQLite.
+
+## Restructuring
+
+The original app worked correctly but had grown through five developers who never spoke to each other: oversized route files, and the same logic duplicated across routers. This codebase went through a full restructuring pass on top of that: route files were split into single-purpose modules under `src/features/*` (services on the backend, components on the frontend), and repeated logic was consolidated into one place per concern.
+
+Every change was verified to leave existing behavior untouched - live in a running browser for the frontend, before/after tests for the backend - except for a handful of real defects that were explicitly triaged and fixed, each logged with its own defect ID. The full change history, defect log, and reasoning behind every structural decision live in [`documents/`](documents/).
+
+## Contributors
+
+- [m-karthika14](https://github.com/m-karthika14)
+- [KarthikKP2005](https://github.com/KarthikKP2005)
+- [narenyash](https://github.com/narenyash)
