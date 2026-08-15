@@ -385,29 +385,58 @@ comment already documents (plan.md's broader "no transactions" finding)
 
 ---
 
-## 2026-08-15 — `classes.ts` vs `adminClasses.ts`: open duplication, not yet resolved
+## 2026-08-15 — `classes.ts` vs `adminClasses.ts`: resolved — kept separate, not consolidated
 
-**What's duplicated:** two separate routers both create classes —
-`classesRouter.create` (`src/server/routers/classes.ts`) and
-`adminClassesRouter.create` (`src/server/routers/adminClasses.ts`).
-`adminClasses.ts` also has `swapTrainer`, which `classesRouter` has no
-equivalent of. The admin UI (`admin/classes/page.tsx`) calls only the
-`adminClasses` versions — `classesRouter.create`/`update`/`cancel` have
-no frontend caller at all (confirmed while fixing `CLASS-005`, which
-found the same split: `classesRouter.cancel` was correctly fixed but
-had no UI caller, while `adminClasses.cancel` — the one the UI actually
-used — still had the bug).
+**Update (Phase 2 item 5 of `restructure-plan.md`):** read both
+`create` implementations in full, side by side, to actually attempt the
+consolidation this entry originally left as an open question. They are
+**not** simple duplicated logic — they differ in three real, observable
+ways:
 
-**Correction to `known-issues.md`'s `CLASS-005` entry:** that entry
-states this duplication was *"logged as an open question in
-architecture-decisions.md, not resolved here."* That was inaccurate —
-this is the first time it's actually been written down. Flagging the
-inaccuracy here rather than quietly backdating this entry, for the same
-reason as the test-harness correction above: a promised doc entry that
-doesn't exist is worse than an open question, because it looks resolved
-without being resolved.
+1. **`trainerId` optionality.** `classesRouter.create`'s input schema
+   has `trainerId: z.number().optional()` — a class can be created with
+   no trainer assigned. `adminClassesRouter.create`'s has
+   `trainerId: z.number()` — required.
+2. **Trainer-role validation.** `adminClassesRouter.create` always loads
+   the referenced user and throws `BAD_REQUEST` ("Selected user is not a
+   valid trainer.") if they don't exist or aren't role `"trainer"`.
+   `classesRouter.create` does no such check — it only calls
+   `isTrainerAvailable` if a `trainerId` was given at all, and never
+   verifies that id actually belongs to a trainer. This is exactly
+   `CLASS-003` (documented, not fixed) manifesting concretely: the two
+   routers disagree on whether this validation exists.
+3. **Return shape.** `classesRouter.create` returns the full inserted
+   class row. `adminClassesRouter.create` returns `{ ok: true }`.
 
-**Why not resolved yet:** two real options exist — (a) consolidate,
+**Decision: keep both routers, do not consolidate.** A shared extraction
+would have to either (a) parameterize away all three differences —
+at which point there's barely any logic left to actually share — or
+(b) pick one behavior as canonical, which would silently fix `CLASS-003`
+in one direction or reintroduce it in the other. Rule 3 requires a
+REFACTOR to be behavior-identical; neither option qualifies as one.
+This is a **DOCUMENT** resolution instead (Rule 3's third type): the
+duplication is real, understood precisely now, and deliberately left as
+two separate code paths rather than merged into one that would have to
+guess which validation strictness is "correct" — exactly the kind of
+call Rule 8 says not to make silently.
+
+**What would make this resolvable later:** deciding, as an explicit
+product/business call (not a refactor), whether `classesRouter.create`
+*should* require and validate a real trainer the same way
+`adminClassesRouter.create` does — i.e., actually fixing `CLASS-003` —
+at which point the two would already match on point 2, and 1/3 could be
+reconciled by a deliberate choice (require `trainerId` everywhere, or
+allow it optional everywhere) rather than this REFACTOR guessing it.
+
+**Correction to `known-issues.md`'s `CLASS-005` entry, unchanged from
+before:** that entry states this duplication was *"logged as an open
+question in architecture-decisions.md, not resolved here."* That was
+inaccurate at the time — this is the first time it was actually written
+down (Phase 0 of this branch). Left as its own note rather than quietly
+backdated, for the same reason as the test-harness correction above.
+
+**Why not resolved via consolidation (superseded framing, kept for
+history):** the original two options considered were (a) consolidate,
 deleting `adminClassesRouter.create` and pointing the admin UI at
 `classesRouter.create`/`update`, adding `swapTrainer`-equivalent
 functionality to `classesRouter` if kept; or (b) keep both, on the
@@ -415,11 +444,13 @@ theory that `classesRouter` is a staff-facing contract (trainers/admins
 building schedules) and `adminClassesRouter` is admin-only tooling with
 different validation needs — but nothing in the current code actually
 enforces or documents that distinction, so option (b) as it stands today
-is accidental duplication, not an intentional split.
+is accidental duplication, not an intentional split. (Superseded — see
+above: it isn't accidental duplication after all, it's three concrete,
+real behavioral differences, one of which is `CLASS-003` itself.)
 
-**Status:** open — tracked as a Phase 2 target in
-`documents/restructure-plan.md`. Not resolved in this entry; this entry
-exists to make the open question real instead of a broken promise.
+**Status:** resolved (DOCUMENT) — Phase 2 item 5 of
+`documents/restructure-plan.md`. No code changed; both routers kept
+exactly as they are, reasoning recorded above.
 
 ---
 

@@ -10,6 +10,37 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — DOCUMENT(classes): resolve classes.ts vs adminClasses.ts as an intentional split, not consolidated
+
+**Type:** DOCUMENT
+**Defect:** n/a — architecture finding, not a defect ID
+**Behavior change:** no — no code touched.
+**Files:** `documents/architecture-decisions.md` — rewrote the Phase 0
+entry on this topic with the complete finding.
+
+Attempted the actual consolidation this Phase 2 item called for — read
+both `classesRouter.create` and `adminClassesRouter.create` in full,
+side by side. They turned out not to be simple duplicated logic: they
+differ in `trainerId` optionality (optional vs. required), trainer-role
+validation (`adminClasses` validates the referenced user is an active
+trainer; `classes.ts` doesn't — this is `CLASS-003` manifesting
+concretely as a disagreement between the two routers), and return shape
+(full row vs. `{ ok: true }`). A shared extraction would have had to
+either parameterize away all three differences (leaving almost nothing
+shared) or pick one behavior as canonical — silently fixing or
+reintroducing `CLASS-003` in the process. Neither qualifies as a
+behavior-identical REFACTOR under Rule 3.
+
+**Resolution:** kept both routers exactly as they are. This is a
+DOCUMENT-type resolution, not a REFACTOR — the duplication is now
+precisely understood and recorded rather than merged based on a guess
+about which validation strictness is correct (Rule 8).
+
+Phase 2 item 5 of `documents/restructure-plan.md` — resolved via
+documentation rather than code consolidation.
+
+---
+
 ## 2026-08-15 — REFACTOR(admin): split classUtilisation/revenue/attendance queries out of admin.ts
 
 **Type:** REFACTOR

@@ -163,10 +163,13 @@ Ordered by value/risk:
    --noEmit`/`pnpm build` clean. `stats`/`trainerPayroll`/settings/
    `expiringMemberships`/`refundCount` intentionally left inline —
    outside this item's stated scope.
-5. **Resolve the `classes.ts` / `adminClasses.ts` duplication** (Phase 0
-   item #2) — consolidate the duplicate `create` logic, or explicitly
-   document why the two routers stay separate (staff-facing vs.
-   admin-facing contracts, if that's the real reason).
+5. ✅ **Resolved `classes.ts` / `adminClasses.ts`** — done (2026-08-15),
+   as DOCUMENT not REFACTOR. Turned out not to be simple duplication:
+   the two `create`s differ in `trainerId` optionality, trainer-role
+   validation (`CLASS-003` shows up as a concrete disagreement between
+   them), and return shape. Consolidating would have forced picking one
+   behavior as canonical — a FIX, not a REFACTOR. Kept both, reasoning
+   recorded in `architecture-decisions.md`. No code changed.
 6. **`business-time.ts`** (or similar, under `src/lib/`) — centralizes
    `hoursUntilClass`, `businessDate`, `isMembershipActive`,
    `isCancellationRefundable`, `formatBusinessDateTime`, currently
