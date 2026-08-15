@@ -33,6 +33,14 @@ export default function SchedulePage() {
   const [now] = useState(() => new Date().toISOString());
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
+  // Class schedule filter state (client-side only — same name/date/time
+  // filter pattern used on admin/classes/page.tsx, trainer/schedule/page.tsx
+  // and dashboard/page.tsx's upcoming bookings). Applied on top of the
+  // existing day-of-week filter below, not replacing it.
+  const [filterName, setFilterName] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+  const [filterTime, setFilterTime] = useState("");
+
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   const { data: classes, isLoading } = trpc.classes.list.useQuery({
@@ -140,11 +148,76 @@ export default function SchedulePage() {
         ))}
       </div>
 
+      {/* Class schedule filter bar: name/date/time, same client-side
+          filtering pattern as admin/classes/page.tsx and
+          trainer/schedule/page.tsx. Filters the already-fetched `classes`
+          list, not a new query. */}
+      <div className="panel p-4 grid gap-4 sm:grid-cols-3">
+        <div>
+          <label className="block text-sm muted mb-1">Filter by Name</label>
+          <input
+            className="input w-full"
+            type="text"
+            value={filterName}
+            onChange={(e) => setFilterName(e.target.value)}
+            placeholder="e.g. Yoga"
+          />
+        </div>
+        <div>
+          <label className="block text-sm muted mb-1">Filter by Date</label>
+          <input
+            className="input w-full"
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="block text-sm muted mb-1">Filter by Time</label>
+          <input
+            className="input w-full"
+            type="time"
+            value={filterTime}
+            onChange={(e) => setFilterTime(e.target.value)}
+          />
+        </div>
+      </div>
+
       <div className="space-y-2">
-        {classes?.filter(c => selectedDay === null || new Date(c.startsAt).getDay() === selectedDay).length === 0 && (
+        {classes?.filter(c => {
+          if (selectedDay !== null && new Date(c.startsAt).getDay() !== selectedDay) return false;
+          if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+          if (filterDate || filterTime) {
+            const d = new Date(c.startsAt);
+            if (filterDate) {
+              const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+              if (localDate !== filterDate) return false;
+            }
+            if (filterTime) {
+              const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+              if (localTime !== filterTime) return false;
+            }
+          }
+          return true;
+        }).length === 0 && (
           <p className="muted text-sm py-4">No classes scheduled for this day.</p>
         )}
-        {classes?.filter(c => selectedDay === null || new Date(c.startsAt).getDay() === selectedDay).map((c) => (
+        {classes?.filter(c => {
+          if (selectedDay !== null && new Date(c.startsAt).getDay() !== selectedDay) return false;
+          if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+          if (filterDate || filterTime) {
+            const d = new Date(c.startsAt);
+            if (filterDate) {
+              const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+              if (localDate !== filterDate) return false;
+            }
+            if (filterTime) {
+              const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+              if (localTime !== filterTime) return false;
+            }
+          }
+          return true;
+        }).map((c) => (
           <div
             key={c.id}
             className="panel flex items-center gap-4 p-4"
