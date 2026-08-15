@@ -10,6 +10,32 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(bookings): extract booking-policy.ts, dedupe class-validity/duplicate-booking checks
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first; all 9 new tests (17 total) pass
+identically before and after.
+**Files:**
+- `src/features/bookings/booking-policy.ts` (new) — `hoursUntil`,
+  `assertClassBookable`, `assertNoActiveBooking`. `hoursUntil` is
+  deduped between `bookings.ts` and `corporate-bookings.ts` only — a
+  third copy in `reschedules.ts` is left alone on purpose, deliberately
+  deferred to Phase 2 item 6 (`business-time.ts`) rather than closing 2
+  of 3 copies now and leaving a mismatched third.
+- `src/server/routers/bookings.ts` — `book` now calls the shared
+  functions; local `hoursUntil` removed (import used instead, still
+  used by `cancel` unchanged).
+- `src/server/routers/corporate-bookings.ts` — same extraction.
+**Tests:** `src/server/routers/booking.test.ts` (new, 9 tests) — written
+first against unmodified code; all still pass after. `tsc --noEmit` and
+`pnpm build` both clean.
+
+Phase 2 item 2 of `documents/restructure-plan.md`.
+
+---
+
 ## 2026-08-15 — REFACTOR(bookings): extract attendance-service.ts, dedupe markAttended
 
 **Type:** REFACTOR

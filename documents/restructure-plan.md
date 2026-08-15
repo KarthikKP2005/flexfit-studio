@@ -138,9 +138,13 @@ Ordered by value/risk:
    always record `source: "front_desk"` regardless of the real source) —
    preserved exactly, not silently fixed, per Rule 3. 8/8 characterization
    tests pass before and after. `tsc --noEmit`/`pnpm build` clean.
-2. **`booking-policy.ts`** (pure functions, no DB) — shared eligibility
-   checks (membership active, class not cancelled/started, duplicate
-   booking) duplicated across `bookings.book` and `corporateBookings.book`.
+2. ✅ **`booking-policy.ts`** (pure functions, no DB) — done (2026-08-15).
+   `hoursUntil`, `assertClassBookable`, `assertNoActiveBooking` shared
+   across `bookings.book` and `corporateBookings.book`. Membership vs.
+   company credit checks stay in each router (nothing shared there — two
+   genuinely different eligibility sources). `hoursUntil`'s third copy in
+   `reschedules.ts` deliberately left for item 6. 9/9 new tests
+   (17 total) pass before and after. `tsc --noEmit`/`pnpm build` clean.
 3. **`reschedule-policy.ts`** / `evaluateReschedule` extraction from
    `reschedules.ts` — closes plan.md item #53 (the `reschedule` mutation
    and `validateReschedule` query independently implementing the same

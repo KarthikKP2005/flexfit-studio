@@ -11,6 +11,11 @@ import {
   assertCheckInWindow,
   getCheckinWindowMinutes,
 } from "@/features/bookings/attendance-service";
+import {
+  hoursUntil,
+  assertClassBookable,
+  assertNoActiveBooking,
+} from "@/features/bookings/booking-policy";
 
 /**
  * Personal (membership-credit-funded) class bookings: browse, book,
@@ -23,6 +28,8 @@ import {
  * eligible to book against is resolved by the shared
  * `getCurrentMembership` (MEMBER-002, fixed) in
  * src/features/memberships/ — this file no longer keeps its own copy.
+ * `book`'s class-validity and duplicate-booking checks are now shared
+ * with corporate-bookings.ts via `booking-policy.ts` (Phase 2.2).
  */
 
 /**
@@ -33,11 +40,6 @@ export const FREE_CANCELLATION_HOURS = 12;
 
 /** Plans with this many credits are treated as unlimited and never decrement. */
 export const UNLIMITED_CREDITS = 999;
-
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
 
 export const bookingsRouter = router({
   /** The caller's own bookings, soonest first; past classes excluded unless includePast. */
@@ -95,18 +97,7 @@ export const bookingsRouter = router({
       if (!cls) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
-      if (cls.cancelled) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has been cancelled.",
-        });
-      }
-      if (hoursUntil(cls.startsAt) <= 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has already started.",
-        });
-      }
+      assertClassBookable(cls);
 
       // BOOK-DUP-001: this is a check-then-insert, app-level only — there's
       // no unique constraint on (userId, classId) WHERE status IN
@@ -130,12 +121,7 @@ export const bookingsRouter = router({
         )
         .get();
 
-      if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "You are already on the list for this class.",
-        });
-      }
+      assertNoActiveBooking(existing);
 
       const membership = await getCurrentMembership(ctx.db, ctx.user.id);
       if (!membership) {

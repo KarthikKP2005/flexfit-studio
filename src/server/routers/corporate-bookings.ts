@@ -17,6 +17,11 @@ import {
   assertCheckInWindow,
   getCheckinWindowMinutes,
 } from "@/features/bookings/attendance-service";
+import {
+  hoursUntil,
+  assertClassBookable,
+  assertNoActiveBooking,
+} from "@/features/bookings/booking-policy";
 
 /**
  * Corporate (company-credit-pool-funded) class bookings — structurally
@@ -24,7 +29,9 @@ import {
  * own credit handling. Capacity and waitlist order are both now
  * reconciled with the personal side — `book` shares `isClassFull`
  * (CORP-002, fixed) and `cancel` shares `promoteNextWaitlisted`
- * (CORP-003, fixed), both in src/features/bookings/.
+ * (CORP-003, fixed), both in src/features/bookings/. `book`'s
+ * class-validity and duplicate-booking checks are also now shared with
+ * bookings.ts via `booking-policy.ts` (Phase 2.2).
  * Not responsible for: linking/unlinking a member to a company (see
  * admin-companies.ts) — this file only reads that link via
  * `getCompanyForMember` below.
@@ -35,11 +42,6 @@ import {
  * the class starts. Cancelling later still frees the spot but forfeits the credit.
  */
 export const CORPORATE_FREE_CANCELLATION_HOURS = 24;
-
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
 
 /**
  * The company this user is linked to, if any and if it's active.
@@ -123,18 +125,7 @@ export const corporateBookingsRouter = router({
       if (!cls) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
-      if (cls.cancelled) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has been cancelled.",
-        });
-      }
-      if (hoursUntil(cls.startsAt) <= 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has already started.",
-        });
-      }
+      assertClassBookable(cls);
 
       const existing = await ctx.db
         .select()
@@ -148,12 +139,7 @@ export const corporateBookingsRouter = router({
         )
         .get();
 
-      if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "You are already on the list for this class.",
-        });
-      }
+      assertNoActiveBooking(existing);
 
       const companyRow = await getCompanyForMember(ctx.db, ctx.user.id);
       if (!companyRow) {
