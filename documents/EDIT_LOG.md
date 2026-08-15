@@ -10,6 +10,39 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(admin, admin-reports): extract AdminDashboard and ReportsDashboard, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim in both files.
+**Files:**
+- `src/features/admin-dashboard/components/AdminDashboard.tsx` (new) —
+  the entire previous `AdminDashboard` function body from
+  `admin/page.tsx`, moved character-for-character.
+- `src/app/admin/page.tsx` — now route-level composition only:
+  `RequireRole` wrapping `AdminDashboard`. Was 176 lines, now 21.
+- `src/features/admin-reports/components/ReportsDashboard.tsx` (new) —
+  the entire previous `ReportsDashboard` function body from
+  `admin/reports/page.tsx`, moved character-for-character.
+- `src/app/admin/reports/page.tsx` — now route-level composition only:
+  `RequireRole` wrapping `ReportsDashboard`. Was 170 lines, now 18.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. `/admin`: all six stat tiles, the Quick Action bar
+links, Class utilisation / Recent payments / Trainer Payroll /
+Studio Settings sections all present and rendering seeded data (the
+0% utilisation figures match the already-documented `ADMIN-003` bug,
+unchanged by this move). `/admin/reports`: all four stat tiles,
+Revenue by Month / by Payment Method tables, and the Memberships
+Expiring section with its "Send expiry reminders now" button all
+present and rendering seeded data. Zero console errors on either page.
+`tsc --noEmit`, `pnpm build`, and `vitest run` (32/32) all clean.
+
+Phase 3 of `documents/restructure-plan.md`, ninth and tenth (final)
+items — Phase 3 is now complete.
+
+---
+
 ## 2026-08-15 — REFACTOR(admin-plans): extract PlanManager, verified live in a browser
 
 **Type:** REFACTOR

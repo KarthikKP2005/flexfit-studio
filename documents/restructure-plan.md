@@ -208,14 +208,21 @@ picked five pages from memory and missed six):
 | `kiosk/page.tsx` | ~~224~~ **20** | ✅ done (2026-08-15) — extracted to `CheckInKiosk`, verified live |
 | `admin/companies/page.tsx` | ~~183~~ **19** | ✅ done (2026-08-15) — extracted to `CompanyList`, verified live |
 | `admin/plans/page.tsx` | ~~176~~ **16** | ✅ done (2026-08-15) — extracted to `PlanManager`, verified live. Found `AUTH-006` (no `RequireRole` gate at all — missed by the AUTH-004 fix), documented not fixed |
-| `admin/page.tsx` (main dashboard) | 176 | added |
-| `admin/reports/page.tsx` | 170 | added |
+| `admin/page.tsx` (main dashboard) | ~~176~~ **21** | ✅ done (2026-08-15) — extracted to `AdminDashboard`, verified live |
+| `admin/reports/page.tsx` | ~~170~~ **18** | ✅ done (2026-08-15) — extracted to `ReportsDashboard`, verified live |
 
 For each: extract business logic/local state into a feature component
 under `src/features/*/components/`, leave the page as route-level
 composition (plan.md item #54's own example: `export default function
 KioskPage() { return <CheckInKiosk /> }`). Verify with a real
 before/after click-through in the running app.
+
+**Phase 3 is complete.** All 10 files extracted and verified live in a
+browser. Two real, pre-existing gaps were found and documented (not
+fixed, per the refactor-only scope of this phase): `ADMIN-004` (admin
+class scheduler never surfaces cancel/swap mutation errors) and
+`AUTH-006` (`admin/plans` has no `RequireRole` gate, missed by the
+earlier `AUTH-004` fix).
 
 ---
 
