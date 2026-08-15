@@ -157,6 +157,17 @@ export const membersRouter = router({
    * sessions (see trpc.ts's createContext note) — deactivating someone
    * doesn't sign them out.
    */
+  /**
+   * Activates or deactivates a user account.
+   *
+   * Behavior note (AUTH-005, documented not fixed — see known-issues.md):
+   * this only flips `users.active`. It does not delete or invalidate any
+   * of that user's existing sessions, so a session token issued before
+   * deactivation keeps authenticating them via `createContext` (see
+   * trpc.ts) until it naturally expires — up to SESSION_DAYS (30) days
+   * later. `auth.login` does correctly reject `active: false` on a fresh
+   * sign-in attempt; only an already-issued session survives.
+   */
   setActive: adminProcedure
     .input(z.object({ id: z.number(), active: z.boolean() }))
     .mutation(async ({ ctx, input }) => {

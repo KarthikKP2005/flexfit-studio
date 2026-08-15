@@ -18,11 +18,11 @@ export const SESSION_COOKIE = "flexfit_session";
  * the session + user, and attaches `user` if the session exists and
  * hasn't expired.
  *
- * Behavior note: this only checks `expiresAt`, not `users.active` — a
- * session created before an admin deactivates the user stays valid until
- * it naturally expires (up to 30 days, see auth.ts's SESSION_DAYS). Login
- * itself does reject inactive users; only this existing-session path
- * doesn't re-check.
+ * Behavior note (AUTH-005, documented not fixed — see known-issues.md):
+ * this only checks `expiresAt`, not `users.active` — a session created
+ * before an admin deactivates the user stays valid until it naturally
+ * expires (up to 30 days, see auth.ts's SESSION_DAYS). Login itself does
+ * reject inactive users; only this existing-session path doesn't re-check.
  */
 export async function createContext(opts?: { req: Request }) {
   const store = await cookies();

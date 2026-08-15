@@ -10,6 +10,71 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — DOCUMENT(auth): log AUTH-005 (deactivating a user doesn't invalidate existing sessions)
+
+**Type:** DOCUMENT
+**Defect:** AUTH-005 (new — see `known-issues.md`)
+**Behavior change:** no — comments and documentation only, no logic
+touched.
+**Files touched:**
+- `documents/known-issues.md` — new `AUTH-005` entry: current behavior
+  (`setActive` never touches `sessions`; `createContext` only checks
+  `expiresAt`, never `user.active`), severity, and what a real fix would
+  need to do (delete sessions on deactivation and/or check `active` in
+  `createContext`).
+- `src/server/routers/members.ts` — added a header comment to
+  `setActive` (previously had none) naming `AUTH-005` directly.
+- `src/server/trpc.ts` — `createContext`'s existing comment (which
+  already described this exact gap in prose) now names `AUTH-005`
+  instead of standing alone with no defect-log pointer.
+**Tests:** n/a — comment/documentation-only change, no logic touched.
+
+---
+
+## 2026-08-15 — DOCUMENT(kiosk): log KIOSK-002 (kiosk never shows/checks in corporate bookings)
+
+**Type:** DOCUMENT
+**Defect:** KIOSK-002 (new — see `known-issues.md`)
+**Behavior change:** no — code behavior is identical; only comments
+changed.
+**Files touched:**
+- `documents/known-issues.md` — new `KIOSK-002` entry: current
+  behavior, why it's asymmetric with the trainer roster (which already
+  merges `bookings.rosterFor` and `corporateBookings.rosterFor`), and
+  why it's deliberately left unfixed for now (plan.md's own required
+  design is a unified check-in lookup + shared attendance service —
+  more surface than a local fix, and plan.md itself lists corporate
+  kiosk integration under "fix only with strong tests").
+- `src/app/kiosk/page.tsx` — one line in the existing file-header
+  comment now names `KIOSK-002` directly instead of describing the gap
+  with no defect-log pointer.
+**Tests:** n/a — comment/documentation-only change, no logic touched.
+
+---
+
+## 2026-08-15 — FIX(admin-classes): check trainer availability before swapTrainer reassigns a class
+
+**Type:** FIX
+**Defect:** TRAINER-003 (new — see `known-issues.md`)
+**Behavior change:** yes — `adminClasses.swapTrainer` now rejects with
+`BAD_REQUEST` if the new trainer isn't available at the class's time
+(no availability row for that day, outside working hours, or already
+double-booked), where before it reassigned unconditionally. Also now
+throws `NOT_FOUND` for a nonexistent class id, matching every other
+mutation in this router.
+**Files touched:**
+- `src/server/routers/adminClasses.ts` — `swapTrainer` now loads the
+  class first and calls `isTrainerAvailable` (the same service
+  `classes.ts`'s `create`/`update` and `adminClasses.ts`'s own `create`
+  already use) before updating `trainerId`.
+**Tests:** tRPC-caller-level verification via a temporary, untracked
+script (`_tmp-e2e-test.ts`, deleted after use, never committed) — run
+once against the unmodified code to reproduce TRAINER-003, then again
+after the fix to confirm it. Full detail in the TRAINER-003 entry in
+`known-issues.md`.
+
+---
+
 ## 2026-08-15 — FIX(admin-classes): route cancel through the shared cancelClass service
 
 **Type:** FIX

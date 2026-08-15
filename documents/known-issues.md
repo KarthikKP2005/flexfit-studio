@@ -212,6 +212,38 @@ before that resolves.
 
 ---
 
+### AUTH-005 — Deactivating a user doesn't invalidate their existing sessions
+
+**Severity:** High (security — a deactivated member, trainer, or admin
+keeps full access through any session token issued before deactivation,
+for up to `SESSION_DAYS` (30) days, regardless of why they were cut off)
+**Status:** Documented, not fixed (also flagged in plan.md, item #11,
+and plan.md's admin-flow item #16)
+**Area:** Auth / Sessions
+**Files:** `src/server/routers/members.ts` — `setActive`;
+`src/server/trpc.ts` — `createContext`
+
+**Current behavior:** `members.setActive` only runs
+`UPDATE users SET active = ?` — it never touches the `sessions` table.
+`createContext` (built on every request) joins `sessions` → `users` and
+checks exactly one condition before attaching `ctx.user`:
+`session.expiresAt > now()` — it never checks `user.active`. So a
+session token issued before an admin deactivates that user keeps
+authenticating them on every subsequent request until the session
+naturally expires. `auth.login`'s own `active` check (`FORBIDDEN` on a
+fresh sign-in attempt) is correct and unaffected — this gap is
+specifically about sessions that already existed before deactivation.
+
+**Why not fixed here / what "fixed" would look like:** per plan.md —
+both changes together, ideally in one transaction: `setActive` should
+delete all of that user's `sessions` rows when setting `active: false`
+(or `createContext` should also reject `!user.active`, or both, per
+plan.md's own required change). Left undone this round per Rule 8 —
+documenting the confirmed gap now rather than bundling a security-
+behavior FIX into a comment-only DOCUMENT change.
+
+---
+
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
 
 **Severity:** Low (a deactivated user can't sign in to read it, so the
@@ -846,6 +878,51 @@ cross-cutting change (also touches `bookings.ts`/`reschedules.ts`'s
 
 ---
 
+### TRAINER-003 — `swapTrainer` reassigns a class without checking the new trainer's availability
+
+**Severity:** Medium (an admin can silently double-book a trainer, or
+assign one to a class outside their working hours, purely because this
+one action skips a check every other scheduling path already has)
+**Status:** Fixed on branch `admin-update-two` (found while comparing
+plan.md's item #31 — "trainer availability is not enforced during class
+creation or update" — against the current code: `classes.ts`'s `create`
+and `update`, and `adminClasses.ts`'s own `create`, all call
+`isTrainerAvailable` today, so item #31 is largely already fixed. But
+`adminClasses.ts`'s `swapTrainer` — a newer admin-only mutation that
+didn't exist in the repo plan.md originally audited — was never given
+the same check.)
+**Area:** Classes (admin) / Trainer scheduling
+**File:** `src/server/routers/adminClasses.ts` — `swapTrainer`
+
+**Original behavior:** `swapTrainer` validated that `newTrainerId`
+belongs to an existing user with role `"trainer"`, then unconditionally
+updated `classes.trainerId` — no call to
+`isTrainerAvailable` (`src/features/trainers/availability-service.ts`),
+unlike `classes.ts`'s `create`/`update` and `adminClasses.ts`'s own
+`create`, all three of which already call it. Reproduced at the
+tRPC-caller level (temp script, deleted after use): a class assigned to
+a trainer with seeded Saturday availability, swapped onto a trainer with
+*zero* seeded availability rows for Saturday at all — the swap
+succeeded and `classes.trainerId` was updated regardless.
+
+**Fix:** `swapTrainer` now loads the class first (to get `startsAt` /
+`durationMin`), calls `isTrainerAvailable(ctx.db, input.newTrainerId,
+cls.startsAt, cls.durationMin, input.classId)` — same call shape
+`classes.ts`'s `update` already uses, including `excludeClassId` so the
+class being reassigned doesn't conflict with itself — and throws
+`BAD_REQUEST` with the service's own reason string if the new trainer
+isn't available. No output shape change; `NOT_FOUND` added for a
+missing class id, matching every other class mutation in this file.
+
+**Verified live — tRPC-caller level (Rule 6):** same temp script
+(`_tmp-e2e-test.ts`, deleted immediately after, never committed) run
+again after the fix, same seeded users and class shape. Result: the
+swap now throws `BAD_REQUEST` — "No availability set for this day." —
+and `classes.trainerId` is left unchanged at the original trainer.
+`tsc --noEmit` clean.
+
+---
+
 ### CLASS-001 — `byId` is public but returns the full roster (member names + emails)
 
 **Severity:** High (unauthenticated info exposure — anyone who can guess
@@ -1363,6 +1440,53 @@ looked at, not whether credits should gate check-in at all.
 booking status and the check-in window, never credits, so removing the
 client-side credit gate doesn't let the UI diverge from what the server
 already allows. `tsc --noEmit` shows no new errors.
+
+---
+
+### KIOSK-002 — Kiosk never shows or checks in corporate bookings
+
+**Severity:** Medium (member-facing — a company-linked member whose
+class was booked through their employer's credit pool cannot be checked
+in at the front desk at all; front-desk staff see no trace of that
+booking)
+**Status:** Documented, not fixed (also flagged in plan.md, item #14,
+and plan.md's admin-flow item #20)
+**Area:** Kiosk / Frontend / Corporate bookings
+**File:** `src/app/kiosk/page.tsx`
+
+**Current behavior:** the kiosk's member lookup only calls
+`bookings.upcomingForMember` and checks in only through
+`bookings.markAttended` — both operate on the personal `bookings` table
+exclusively. `corporateBookings` has its own parallel status/attendance
+model (`corporateBookings.markAttended`, per CORP-001/CORP-004) that
+this page never calls. A member linked to a company whose only booking
+for a given class is a `corporateBookings` row (not a personal
+`bookings` row) is invisible here: they won't appear in the kiosk's
+class list, and there's no button that could check them in even if they
+did.
+
+**Asymmetric with the trainer roster:** the trainer's per-class roster
+view already merges both sources — `bookings.rosterFor` **and**
+`corporateBookings.rosterFor` (`src/app/trainer/schedule/page.tsx`) — so
+a trainer can see a corporate attendee by name, but the kiosk still
+can't check that same person in. This wasn't true when plan.md's
+original audit was written (item #16 found the trainer side ignoring
+corporate bookings too); the trainer roster has since been partially
+fixed while the kiosk was not.
+
+**Why not fixed here / what "fixed" would look like:** per plan.md's
+own required design — a unified check-in lookup returning a
+`bookingSource: "membership" | "corporate"` per result, then a shared
+attendance service instead of two separate UI-specific mutations. That
+touches the kiosk page, a new/merged lookup procedure, and likely a
+shared service alongside `bookings.ts`'s and `corporate-bookings.ts`'s
+existing `markAttended` — more surface than a local one-file fix, and
+plan.md itself lists "corporate kiosk/check-in integration" under
+"fix only with strong tests" rather than the smaller, safe-to-do-now
+list. Left alone per Rule 8 rather than guessed at partially. The
+file's own header comment (updated alongside this entry) names this
+defect directly so the gap doesn't silently drift out of sync with
+`known-issues.md`.
 
 ---
 

@@ -112,15 +112,37 @@ export const adminClassesRouter = router({
       return { ok: true };
     }),
 
-  /** 
-   * Trainer Availability Override Feature:
+  /**
    * Swaps the assigned trainer for a specific scheduled class.
-   * WHY IT'S IMPLEMENTED: Admins need the flexibility to override normal schedules 
+   * WHY IT'S IMPLEMENTED: Admins need the flexibility to override normal schedules
    * if a trainer calls in sick or is unavailable for a specific instance.
+   *
+   * Behavior note (TRAINER-003, fixed): this previously reassigned the
+   * class without checking whether the new trainer is actually
+   * available at that time — the only one of the three trainer-
+   * assigning mutations in this codebase (this one, `classes.ts`'s
+   * `create`/`update`, and this file's own `create`) that skipped
+   * `isTrainerAvailable`. It now runs the same check as the others,
+   * excluding this class itself from the conflict scan since it's the
+   * one being reassigned, not a competing booking.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   * @throws BAD_REQUEST if the target user isn't an active trainer, or
+   *   the trainer isn't available at this class's time
    */
   swapTrainer: adminProcedure
     .input(z.object({ classId: z.number(), newTrainerId: z.number() }))
     .mutation(async ({ ctx, input }) => {
+      const cls = await ctx.db
+        .select()
+        .from(classes)
+        .where(eq(classes.id, input.classId))
+        .get();
+
+      if (!cls) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+      }
+
       const trainer = await ctx.db
         .select()
         .from(users)
@@ -132,6 +154,17 @@ export const adminClassesRouter = router({
           code: "BAD_REQUEST",
           message: "Selected user is not a valid trainer.",
         });
+      }
+
+      const check = await isTrainerAvailable(
+        ctx.db,
+        input.newTrainerId,
+        cls.startsAt,
+        cls.durationMin,
+        input.classId,
+      );
+      if (!check.available) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: check.reason });
       }
 
       await ctx.db
