@@ -4,6 +4,19 @@ import { trpc } from "@/lib/trpc";
 import Link from "next/link";
 import { formatDateTime } from "@/lib/format";
 
+/**
+ * Admin Members CRM page.
+ *
+ * Fetches and displays a list of all members for administrators.
+ * Each member's name, email, phone number, account status, and join date
+ * are shown in a read-only list.
+ *
+ * Administrators can open an individual member's profile using
+ * the "View Profile" link. Deactivated members are clearly marked.
+ *
+ * This page does not create, edit, activate, or deactivate members.
+ */
+
 export default function AdminMembersListPage() {
   const { data: members, isLoading } = trpc.adminMembers.list.useQuery();
 
