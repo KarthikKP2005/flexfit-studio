@@ -5,6 +5,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 
+
+/**
+ * Handles the complete signup flow:
+ * 1. Collects and validates registration details.
+ * 2. Creates the account through `auth.register`.
+ * 3. Automatically signs the new user in through `auth.login`.
+ * 4. Redirects the user to the original requested page or dashboard.
+ */
+
+
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
