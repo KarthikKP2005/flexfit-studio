@@ -10,6 +10,53 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(trainer-schedule): extract TrainerScheduleView, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, no rewrites. Verified against the
+real running dev server (not just `tsc`/`pnpm build`), per this file's
+own earlier note that the previous session had to defer this exact
+extraction for lack of browser access.
+**Files:**
+- `src/features/trainers/components/TrainerScheduleView.tsx` (new) —
+  the entire previous contents of `trainer/schedule/page.tsx` (`ClassCard`,
+  `DAYS`, and the main content component, now exported as
+  `TrainerScheduleView`), moved character-for-character except the
+  component's own name.
+- `src/app/trainer/schedule/page.tsx` — now route-level composition only
+  (plan.md item #54's own pattern): `RequireRole` wrapping
+  `TrainerScheduleView`. Was 552 lines, the single largest file in the
+  app; now 25.
+**Tests:** no unit tests apply to a pure JSX move. Verified live instead:
+launched the dev server, logged in as the seeded trainer
+(`arjun@flexfit.test`), and drove the actual page with a headless
+Chromium session (Playwright, since `chromium-cli` wasn't available in
+this environment) — confirmed the Trainer Dashboard header, all three
+metric cards, both tabs (Upcoming Classes / Weekly Availability), the
+name/date filters, expanding a class card's roster (Booked/Waitlist
+sub-tabs, member names, Check In buttons), and the availability day
+editor (Edit/Save/Cancel/Remove) all render and behave identically to
+before. Zero console errors. `tsc --noEmit` and `pnpm build` both clean;
+`/trainer/schedule`'s bundle size unchanged (3.88kB → 3.86kB, packaging
+noise only).
+
+**Gotcha hit, worth recording:** the first dev-server attempt 404'd on
+Next.js's own hydration chunks because a `pnpm build` (production build)
+had run immediately before `pnpm dev`, leaving a stale `.next/` in a
+state dev mode didn't expect — buttons rendered but had no attached
+React handlers. Fixed by deleting `.next/` before starting dev. Separately,
+port 3000 was still held by an earlier backgrounded dev server (`npm`
+wrapper doesn't forward `SIGTERM` to the child it spawns, so the `lsof`
+kill didn't reach it) — Next.js silently moved to port 3002 instead,
+which the driver script had to be pointed at explicitly.
+
+Phase 3 of `documents/restructure-plan.md`, first item — the largest
+frontend file in the app, done and verified live.
+
+---
+
 ## 2026-08-15 — REFACTOR(reschedules): close the last hoursUntil duplicate, no new business-time.ts module
 
 **Type:** REFACTOR
