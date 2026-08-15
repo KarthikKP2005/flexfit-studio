@@ -267,12 +267,11 @@ function TrainerScheduleContent() {
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 20;
 
-  // Upcoming Classes filter state (client-side only — same name/date/time
+  // Upcoming Classes filter state (client-side only — same name/date
   // filter pattern used on admin/classes/page.tsx, applied here to the
   // trainer's own upcoming-classes list instead of the admin class list).
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [filterTime, setFilterTime] = useState("");
 
   const setAvailability = trpc.trainers.setAvailability.useMutation({
     onSuccess: async () => {
@@ -321,22 +320,16 @@ function TrainerScheduleContent() {
   const expectedAttendees = todayClasses.reduce((acc, c) => acc + (c.capacity - c.spotsLeft), 0);
   const remainingCapacity = todayClasses.reduce((acc, c) => acc + c.spotsLeft, 0);
 
-  // Narrow the trainer's upcoming classes down to whatever the name/date/time
+  // Narrow the trainer's upcoming classes down to whatever the name/date
   // filters currently specify. Only affects what's displayed/paginated in the
   // "Upcoming Classes" tab below — does not touch the top metrics bar (those
   // stay based on the full, unfiltered `classes` list).
   const filteredClasses = classes?.filter((c) => {
     if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
-    if (filterDate || filterTime) {
+    if (filterDate) {
       const d = new Date(c.startsAt);
-      if (filterDate) {
-        const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        if (localDate !== filterDate) return false;
-      }
-      if (filterTime) {
-        const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-        if (localTime !== filterTime) return false;
-      }
+      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (localDate !== filterDate) return false;
     }
     return true;
   });
@@ -393,10 +386,10 @@ function TrainerScheduleContent() {
 
       {activeSection === "upcoming" && (
         <section className="space-y-4">
-          {/* Upcoming Classes filter bar: name/date/time, same client-side
+          {/* Upcoming Classes filter bar: name/date, same client-side
               filtering pattern as admin/classes/page.tsx. Filtering the
               already-fetched `classes` list, not a new query. */}
-          <div className="panel p-4 grid gap-4 sm:grid-cols-3">
+          <div className="panel p-4 grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm muted mb-1">Filter by Name</label>
               <input
@@ -414,15 +407,6 @@ function TrainerScheduleContent() {
                 type="date"
                 value={filterDate}
                 onChange={(e) => { setFilterDate(e.target.value); setPage(1); }}
-              />
-            </div>
-            <div>
-              <label className="block text-sm muted mb-1">Filter by Time</label>
-              <input
-                className="input w-full"
-                type="time"
-                value={filterTime}
-                onChange={(e) => { setFilterTime(e.target.value); setPage(1); }}
               />
             </div>
           </div>
