@@ -78,8 +78,13 @@ export function NavBar() {
         {/*
           WHY IT'S IMPLEMENTED: NavBar Cleanup.
           Trainers/admins shouldn't see member-specific links.
+
+          Home-page note: all role-based links, the notification bell,
+          and the profile-name link are hidden on `/` (isHome) — the
+          landing page shows only the logo and Sign in/Sign out, per
+          direct request. Every other route is unaffected.
         */}
-        {user?.role === "member" && (
+        {!isHome && user?.role === "member" && (
           <>
             <Link href="/dashboard" className={linkClass("/dashboard")}>
               My bookings
@@ -93,13 +98,13 @@ export function NavBar() {
           </>
         )}
 
-        {user?.role === "trainer" && (
+        {!isHome && user?.role === "trainer" && (
           <Link href="/trainer/schedule" className={linkClass("/trainer/schedule")}>
             My schedule
           </Link>
         )}
 
-        {user?.role === "admin" && (
+        {!isHome && user?.role === "admin" && (
           <>
             <Link href="/admin" className={linkClass("/admin")}>
               Admin
@@ -110,14 +115,14 @@ export function NavBar() {
           </>
         )}
 
-        {(user?.role === "admin" || user?.role === "trainer") && (
+        {!isHome && (user?.role === "admin" || user?.role === "trainer") && (
           <Link href="/kiosk" className={linkClass("/kiosk")}>
             Kiosk
           </Link>
         )}
 
         <div className="ml-auto flex items-center gap-3">
-          {user && (
+          {!isHome && user && (
             <Link href="/notifications" className="inline-flex items-center gap-1.5">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
@@ -134,9 +139,11 @@ export function NavBar() {
           )}
           {user ? (
             <>
-              <Link href="/profile" className={linkClass("/profile")}>
-                {user.name}
-              </Link>
+              {!isHome && (
+                <Link href="/profile" className={linkClass("/profile")}>
+                  {user.name}
+                </Link>
+              )}
               <button
                 className="btn"
                 onClick={() => logout.mutate()}

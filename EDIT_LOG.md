@@ -10,6 +10,170 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — DOCUMENT(bookings): comment BOOK-DUP-001 (no uniqueness on active bookings)
+
+**Type:** DOCUMENT
+**Defect:** BOOK-DUP-001 (new — discovered while diagnosing the kiosk
+showing "Advanced Spin" twice for Farhan Ahmed on 2026-08-15; see the
+prior TEST entry above for how it was found)
+**Behavior change:** no — comments only, no logic touched.
+**Files touched:**
+- `src/db/schema.ts` — inline comment on the `bookings` table, next to
+  the existing `bookings_class_id_idx` index, noting there's no unique
+  constraint (partial unique index on `(userId, classId) WHERE status IN
+  ('booked','waitlisted')` would be the literal fix) stopping the same
+  user from holding two simultaneous active bookings on one class.
+- `src/server/routers/bookings.ts` — inline comment on `book`'s existing
+  duplicate check (the `select ... where userId, classId, status in
+  (booked, waitlisted) ... then insert` block), noting it's a
+  check-then-insert race (app-level only, no DB backing) that also can't
+  protect rows inserted outside this mutation — which is exactly how the
+  seed data ended up with Farhan's two active bookings on class 849.
+**Tests:** n/a — comment-only change.
+**Scope note:** explicitly asked to add *only* these two inline
+comments this round — no `known-issues.md` entry was added despite that
+normally being this repo's required home for a DOCUMENT-type defect
+(Rule 3/8). Flagging that gap here so it's visible rather than silently
+missing if `known-issues.md` is audited later.
+
+---
+
+## 2026-08-15 — TEST(trainer/kiosk): end-to-end verification of roster check-in/admit and kiosk check-in
+
+**Type:** TEST
+**Defect:** n/a — verification of existing behavior, no code changed
+**Behavior change:** no — no source file was edited in this entry. Only
+the local dev DB (`flexfit.db`, gitignored) was touched, and only in
+ways described below.
+
+**What was verified, at the tRPC caller level (per Rule 6):**
+Wrote a temporary, untracked script (`_tmp-e2e-test.ts`, deleted
+immediately after the run — never committed) that built a real
+`appRouter.createCaller(...)` context for a seeded trainer and a seeded
+admin, then exercised the exact procedures the UI calls:
+- `trainers.upcomingClasses` — confirms a trainer's own upcoming class
+  is returned.
+- `bookings.rosterFor` — confirms booked/waitlisted status is reported
+  accurately per member.
+- `bookings.markAttended` (source `"trainer"`) — confirms a booked
+  member flips to `attended` and a `checkins` row is written.
+- `bookings.admitFromWaitlist` — confirms a waitlisted member flips to
+  `booked` and is charged the class's `creditCost`.
+- A second `markAttended` call on an already-`attended` booking —
+  confirms it's rejected `BAD_REQUEST`, "Only confirmed bookings can be
+  checked in." (no silent success).
+- `members.lookupByEmailOrPhone`, `bookings.upcomingForMember`, and
+  `bookings.markAttended` (source `"kiosk"`) — the same three procedures
+  `kiosk/page.tsx` calls, confirming the kiosk check-in flow independent
+  of the trainer flow above.
+
+All 16 assertions passed. The script created its own fully isolated temp
+class + 3 temp bookings (using real seeded member/trainer users, but
+brand-new class/booking rows) so it never touched the real seeded
+"Sunrise Yoga" data — confirmed by re-querying class 850's bookings
+inside the same script run and showing them unchanged. Every row the
+script created (class, 3 bookings, 2 checkins) was deleted in a
+`finally` block, verified empty afterward, and the script file itself
+was deleted from the project root — `git status` shows a clean tree
+before and after.
+
+**Frontend wiring cross-check:** re-read `trainer/schedule/page.tsx`'s
+`ClassCard` and `kiosk/page.tsx` line-by-line against the procedures/
+input shapes exercised above — every `useQuery`/`useMutation` call
+(`rosterFor({classId})`, `markAttended({bookingId, source})`,
+`admitFromWaitlist({bookingId})`, `lookupByEmailOrPhone({query})`,
+`upcomingForMember({userId, hoursAhead})`) matches exactly, so the UI is
+wired to call the same procedures with the same shapes just verified at
+the caller level. Also confirmed `/trainer/schedule`, `/kiosk`, and `/`
+all render `200` server-side against the running dev server.
+
+**Known limitation, stated explicitly rather than glossed over:** this
+session has no browser-automation tool (no Playwright/Puppeteer
+available), so I could not literally click "Check In"/"Admit" in a live
+browser and watch the DOM update — the tRPC-caller tests above and the
+static wiring cross-check are as close as this session can get without
+one. A manual click-through in the browser is still the way to see the
+actual UI states (button disable states, roster re-render, error card,
+etc.) render live.
+
+**Also this entry:** nudged the real "Sunrise Yoga" (class 850)
+`startsAt` forward by 5 minutes (`2026-08-15T04:37:10.529Z`) — its
+previous `startsAt` (set two turns ago so it'd be inside the check-in
+window) had drifted into the past, which silently drops a class out of
+`trainers.upcomingClasses`'s `startsAt >= now` filter even though
+`markAttended`'s post-start check-in window would still accept it. Left
+Meera Nair's waitlisted booking on that class untouched. This is local
+dev-data only, done via another temporary, deleted script — no schema,
+seed, or source file changed.
+
+**Tests:** none added to the repo (no vitest config/test files exist on
+this branch, consistent with every prior entry in this log) — this
+entry's "test" is the temporary caller-level script described above,
+by design not committed.
+
+**Follow-up (same day):** the 5-minute nudge above was too tight — by
+the time it was actually checked in a browser, real time had passed the
+5-minute mark and the class had silently fallen out of
+`trainers.upcomingClasses` again. Also confirmed via a temporary
+diagnostic script that the seed data has no other classes at all for
+this trainer on 2026-08-15 — every other class that day belongs to
+2026-08-14 (already past) or 2026-08-16+ (later). Re-nudged class 850's
+`startsAt` to `+25 minutes` from the fix (`2026-08-15T05:02:27.651Z`),
+comfortably inside both the upcoming-classes filter and the 30-min
+pre-start check-in window for the full buffer, not just ~1 minute of it.
+Diagnostic and nudge scripts were both temporary and deleted immediately
+after use, same as before.
+
+---
+
+## 2026-08-15 — CHORE(trainer): surface Check In/Admit mutation errors on the roster
+
+**Type:** CHORE
+**Defect:** n/a — UX gap found and fixed directly, not a behavior defect
+**Behavior change:** yes, but display-only — no tRPC procedure, schema, or
+business rule touched. `bookings.markAttended` already correctly rejects
+a check-in outside its configured window (`BAD_REQUEST`, "Check-in is
+only allowed from N minutes before class starts until it ends.") — that
+rule is untouched. The bug was that `ClassCard` in
+`trainer/schedule/page.tsx` never rendered any of its four mutations'
+`error` (`markAttended`, `markCorpAttended`, `admitFromWaitlist`,
+`admitCorpFromWaitlist`), so a legitimate server rejection looked
+identical to the button silently doing nothing.
+**Files touched:** `src/app/trainer/schedule/page.tsx` — added
+`actionError` (first non-null error across the four mutations) and
+render it as an inline panel above the Booked/Waitlist tabs, same
+"show `mutation.error.message` in a panel" pattern already used in
+`schedule/page.tsx` and `plans/page.tsx`. No other file touched.
+**Tests:** no tRPC procedure changed, so nothing to characterize at the
+caller level per Rule 6's scope (pure frontend error display). Verified:
+`tsc --noEmit` clean (no errors, before or after).
+
+---
+
+## 2026-08-14 — CHORE(navbar): hide role-based links, bell, and profile name on the home page
+
+**Type:** CHORE
+**Defect:** n/a — UI request made directly by the user, not tied to a
+known defect
+**Behavior change:** yes, client-side only — on `/` (home) the navbar
+now shows only the FlexFit logo and Sign in/Sign out, regardless of
+role or login state. Every other route is byte-for-byte unchanged
+(same role-based links, notification bell, profile-name link as
+before). No tRPC procedure, query, or mutation touched — purely which
+existing JSX blocks render, gated by the `isHome` flag `NavBar.tsx`
+already computed for its transparent-over-hero styling.
+**Files touched:** `src/components/NavBar.tsx` (wrapped the member/
+trainer/admin link blocks, the notifications bell, and the profile-name
+link in `!isHome &&`; header comment updated)
+**Tests:** no tRPC procedure changed, nothing to characterize. Verified
+live (Playwright, headless Chromium against the running dev server):
+logged in as a seeded member, screenshotted the navbar on `/dashboard`
+(unchanged — logo, My bookings/Schedule/Waitlist, bell, name, Sign out
+all present) and on `/` (only logo + Sign out, everything else
+correctly hidden). `tsc --noEmit` clean.
+
+---
+
 ## 2026-08-13 — FIX(schedule): stop the Book/Join-waitlist button from getting clipped on a narrower window
 
 **Type:** FIX

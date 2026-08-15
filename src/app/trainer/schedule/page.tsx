@@ -33,6 +33,17 @@ function ClassCard({ classId, className, startsAt, room, durationMin, cancelled 
     onSuccess: () => utils.corporateBookings.rosterFor.invalidate({ classId })
   });
 
+  // None of these four mutations had their error surfaced anywhere before
+  // this change — a rejection (e.g. clicking Check In outside the
+  // check-in window) looked exactly like the button doing nothing. Same
+  // "show mutation.error in a panel" pattern already used on
+  // schedule/page.tsx and plans/page.tsx.
+  const actionError =
+    markAttended.error ??
+    markCorpAttended.error ??
+    admitFromWaitlist.error ??
+    admitCorpFromWaitlist.error;
+
   const activeRoster = roster?.filter((r) => r.status === "booked" || r.status === "attended") || [];
   const activeCorpRoster = corpRoster?.filter((r) => r.status === "booked" || r.status === "attended") || [];
 
@@ -77,6 +88,12 @@ function ClassCard({ classId, className, startsAt, room, durationMin, cancelled 
 
       {showRoster && !cancelled && (
         <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+          {actionError && (
+            <p className="panel p-3 text-sm mb-3" style={{ color: "#f87171" }}>
+              {actionError.message}
+            </p>
+          )}
+
           <div className="flex gap-4 mb-3 border-b pb-2">
             <button 
               className={`text-xs font-semibold uppercase tracking-wider ${activeTab === 'booked' ? 'text-primary' : 'muted'}`}

@@ -141,6 +141,14 @@ export const bookings = sqliteTable("bookings", {
   // PERF-01: Index on classId to optimize the O(N) table scan in `classes.list`.
   // Converts the `spotsLeft` correlated subquery into an instant O(1) lookup.
   index("bookings_class_id_idx").on(table.classId)
+  // BOOK-DUP-001: no unique constraint here stops the same user from
+  // having two simultaneous active bookings on the same class. Only
+  // bookings.ts's `book` mutation checks this, and only at the
+  // application level (see the comment there) — this table itself would
+  // happily store any number of (userId, classId) rows with
+  // status IN ('booked', 'waitlisted'). A partial unique index on
+  // (userId, classId) WHERE status IN ('booked', 'waitlisted') is the
+  // literal fix, if/when this gets picked up — see known-issues.md.
 ]);
 
 /**
