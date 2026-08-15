@@ -57,8 +57,7 @@ function AnnouncementsForm() {
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 border rounded"
-              style={{ borderColor: "var(--border)" }}
+              className="input"
               placeholder="Announcement title"
               disabled={broadcast.isPending}
             />
@@ -69,8 +68,7 @@ function AnnouncementsForm() {
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              className="w-full px-3 py-2 border rounded"
-              style={{ borderColor: "var(--border)" }}
+              className="input"
               placeholder="Announcement message"
               rows={6}
               disabled={broadcast.isPending}
