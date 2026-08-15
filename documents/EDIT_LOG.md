@@ -25,6 +25,38 @@ lines respectively, matching the pre-move originals).
 
 ---
 
+## 2026-08-15 — TEST(infra): build the real, minimal tRPC-caller harness
+
+**Type:** TEST
+**Defect:** n/a — infrastructure, not a bug fix
+**Behavior change:** no — application code untouched; adds test tooling
+and one new test file only.
+**Files:**
+- `vitest.config.ts` (new) — path alias + `DB_FILE` env override so the
+  whole test run points at a disposable database, never `flexfit.db`.
+- `drizzle.test.config.ts` (new) — same schema as `drizzle.config.ts`,
+  pointed at `flexfit.test.db`.
+- `package.json` — added `db:test:push` script.
+- `src/tests/setup.ts` (new) — `createTestCaller(user)` and `resetDb()`,
+  two functions total. Deliberately does not include the global-setup/
+  fixtures/mock-next-headers ceremony the (fabricated) prior design
+  described — see `architecture-decisions.md`'s 2026-08-15 correction
+  entry.
+- `src/server/routers/adminClasses.test.ts` (new) — first real,
+  committed test file, covering `TRAINER-003` (`swapTrainer` rejects an
+  unavailable trainer, succeeds for an available one, `NOT_FOUND` for a
+  missing class id) at the tRPC-caller level per Rule 6.
+**Tests:** 3 new tests, all passing (`pnpm test`). `tsc --noEmit` and
+`pnpm build` both clean afterward.
+
+This is Phase 0 of `documents/restructure-plan.md` — the prerequisite
+for every REFACTOR in Phase 2, since Rule 5 requires a real
+characterization test before touching a file's behavior, and up to now
+that requirement was only being satisfied by temporary, untracked,
+deleted-after-use scripts.
+
+---
+
 ## 2026-08-15 — DOCUMENT(auth): log AUTH-005 (deactivating a user doesn't invalidate existing sessions)
 
 **Type:** DOCUMENT

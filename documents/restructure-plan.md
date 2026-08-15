@@ -39,37 +39,44 @@ These three are genuinely open and should be picked before Phase 2 begins:
 
 ---
 
-## Phase 0 — Foundation
+## Phase 0 — Foundation — ✅ done (2026-08-15)
 
 Must happen first; nothing else is safe to build on top of it.
 
-1. **Correct the fabricated `architecture-decisions.md` test-harness
-   entries.** They describe (in confident past tense) a `tests/setup/`
-   harness — `test-db-path.ts`, `global-setup.ts`, `reset-db.ts`,
-   `test-caller.ts`, fixtures, sequential-execution tuning — that was
-   verified (full history search, every branch) to have **never been
-   created**. Rewrite those entries to say plainly: planned, never built.
+1. ✅ **Corrected the fabricated `architecture-decisions.md` test-harness
+   entries.** Turned out to be more nuanced than first assumed — see that
+   file's two 2026-08-15 entries for the full story (a smaller, real,
+   stale attempt exists on `origin/fix/testing`; the specific elaborate
+   `tests/setup/` design described in the five original entries still
+   never existed anywhere, confirmed including dangling/unreachable
+   commits, not just branch tips).
 
-2. **Correct the second fabricated promise.** `known-issues.md`'s
-   `CLASS-005` entry claims the `classes.ts`/`adminClasses.ts`
-   duplicate-`create`-logic question was *"logged as an open question in
-   architecture-decisions.md."* It was not — checked, no such entry
-   exists. Either write that entry now, or fold the resolution into
-   Phase 2's `adminClasses` consolidation item below and reference the
-   defect ID instead of a promise.
+2. ✅ **Corrected the second fabricated promise.** Wrote the
+   `classes.ts`/`adminClasses.ts` duplication entry into
+   `architecture-decisions.md` that `CLASS-005` had promised but never
+   delivered. Resolution itself still open — tracked below in Phase 2
+   item 5, unchanged.
 
-3. **Build the real, minimal test harness** — only what Rule 6 actually
-   asks for:
-   - `createTestCaller(user)` → `appRouter.createCaller({ db, user,
-     token: null, ip: "test" })`.
-   - A DB-reset helper between tests (reuse the pattern already proven
-     manually this session for `CLASS-005`/`TRAINER-003`'s temp scripts).
-   - **No** global-setup ceremony, fixture library, or `next/headers`
-     mock — add only if a specific test actually needs it later.
+3. ✅ **Built the real, minimal test harness.** `vitest.config.ts`,
+   `drizzle.test.config.ts`, `src/tests/setup.ts`
+   (`createTestCaller`/`resetDb`, two functions, nothing else), and a
+   first real test file (`adminClasses.test.ts`, 3 tests covering
+   `TRAINER-003`) — all passing. Full detail in `EDIT_LOG.md`'s
+   2026-08-15 `TEST(infra)` entry.
 
-4. **Formal build/lint gate**, run at every phase boundary from here on:
-   `tsc --noEmit`, `pnpm build`, `next lint`. Not optional per-step —
-   a checklist item every phase must clear before moving to the next.
+4. ✅ **Build/lint gate confirmed clean**: `tsc --noEmit`, `pnpm test`,
+   `pnpm build` all pass as of this phase's completion. `pnpm lint`
+   (`next lint`) is **not actually configured in this project** — running
+   it triggers an interactive "set up ESLint" wizard rather than linting
+   anything, and can't run non-interactively. Pre-existing gap, not
+   something this phase broke; out of scope to set up mid-restructure.
+   Noted here so it isn't silently assumed to be a passing gate later.
+
+**Also discovered mid-phase, not originally planned:** several
+root-level docs (`AGENT_RULES.md`, `EDIT_LOG.md`, `plan.md`) were moved
+into `documents/` for consolidation — noted here since every reference
+to those files elsewhere in this plan should now be read as
+`documents/AGENT_RULES.md` etc.
 
 ---
 
