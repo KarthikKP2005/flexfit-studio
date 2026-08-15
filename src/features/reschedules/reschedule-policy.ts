@@ -12,11 +12,16 @@ import { UNLIMITED_CREDITS } from "@/server/routers/bookings";
  * returned decision; `validateReschedule` maps the same decision to its
  * own `{valid, reason}`/`{valid, targetIsFull}` shape.
  *
- * `FREE_RESCHEDULE_HOURS` and `hoursUntil` still live in
- * `reschedules.ts` (not moved here) — `hoursUntil` has a third copy
- * there beyond `bookings.ts`'s/`corporate-bookings.ts`'s, deliberately
- * left for Phase 2 item 6 (`business-time.ts`) rather than partially
- * deduping it mid-way through this extraction.
+ * `FREE_RESCHEDULE_HOURS` stays in `reschedules.ts`. `hoursUntil` is
+ * passed in as a parameter here rather than imported directly, so this
+ * module doesn't need to know where it lives — `reschedules.ts` now
+ * imports it from `booking-policy.ts` (Phase 2.6 closed the third copy
+ * that used to live locally there). No dedicated `business-time.ts`
+ * module was needed since no other function plan.md item #55 named
+ * (`businessDate`, `isMembershipActive`, `isCancellationRefundable`,
+ * `formatBusinessDateTime`) actually exists as duplicated code anywhere
+ * — `isMembershipActive`'s job is already covered by
+ * `getCurrentMembership`.
  *
  * Known, minor, non-behavioral difference from the original two
  * call sites: the original `validateReschedule` only fetched the

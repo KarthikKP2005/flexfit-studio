@@ -10,6 +10,42 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(reschedules): close the last hoursUntil duplicate, no new business-time.ts module
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — identical one-line function body, existing
+`reschedule.test.ts` (9 tests exercising `hoursUntil` via the window and
+target-started checks) re-run unchanged.
+**Files:**
+- `src/server/routers/reschedules.ts` — removed its local `hoursUntil`
+  definition, now imports it from `@/features/bookings/booking-policy`
+  (already used by `bookings.ts`/`corporate-bookings.ts` since Phase 2
+  item 2).
+- `src/features/bookings/booking-policy.ts`,
+  `src/features/reschedules/reschedule-policy.ts` — header comments
+  updated; both previously said this dedup was deferred to "Phase 2 item
+  6 / business-time.ts."
+**Tests:** none new — `hoursUntil` was already covered by
+`reschedule.test.ts`'s existing 9 tests. `tsc --noEmit` and `pnpm build`
+both clean.
+
+**Scope note, per explicit instruction not to refactor beyond what's
+actually needed:** checked whether the rest of plan.md item #55's named
+functions (`businessDate`, `isMembershipActive`,
+`isCancellationRefundable`, `formatBusinessDateTime`) exist as real
+duplicated code anywhere in the current codebase — they don't.
+`isMembershipActive`'s job is already covered by the already-extracted
+`getCurrentMembership`. No dedicated `business-time.ts` module was
+created; `hoursUntil` now lives in `booking-policy.ts`, which is where
+it already was. Phase 2 item 6 is complete with this one small change,
+not a new module.
+
+Phase 2 item 6 of `documents/restructure-plan.md` — **Phase 2 is now
+fully complete.**
+
+---
+
 ## 2026-08-15 — DOCUMENT(classes): resolve classes.ts vs adminClasses.ts as an intentional split, not consolidated
 
 **Type:** DOCUMENT

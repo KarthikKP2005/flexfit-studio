@@ -11,10 +11,9 @@ import { TRPCError } from "@trpc/server";
  * extract there) or capacity/waitlist decisions (`capacity-service.ts`,
  * `waitlist-service.ts`).
  *
- * `hoursUntil` is also duplicated a third time in `reschedules.ts` —
- * left alone here on purpose. That's Phase 2 item 6's job
- * (`business-time.ts`, plan.md item #55), not this one; deduping it here
- * would only close 2 of 3 copies and still leave a mismatched third.
+ * `hoursUntil` is also imported from here by `reschedules.ts` (Phase 2
+ * item 6 closed what used to be a third local copy there) — no separate
+ * `business-time.ts` module was needed; see that item's log entry.
  */
 
 /** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */

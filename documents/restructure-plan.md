@@ -170,14 +170,19 @@ Ordered by value/risk:
    them), and return shape. Consolidating would have forced picking one
    behavior as canonical — a FIX, not a REFACTOR. Kept both, reasoning
    recorded in `architecture-decisions.md`. No code changed.
-6. **`business-time.ts`** (or similar, under `src/lib/`) — centralizes
-   `hoursUntilClass`, `businessDate`, `isMembershipActive`,
-   `isCancellationRefundable`, `formatBusinessDateTime`, currently
-   scattered across `bookings.ts`, `corporate-bookings.ts`,
-   `reschedules.ts`, `plans.ts`, `trainers.ts`, and `src/lib/format.ts`
-   (plan.md item #55). **Do not change timezone semantics while doing
-   this** — pure move, `TRAINER-002`'s UTC-vs-local bug stays exactly as
-   documented, not silently fixed here.
+6. ✅ **Closed the last `hoursUntil` duplicate** — done (2026-08-15), no
+   `business-time.ts` module created. Checked first (per explicit
+   instruction to only refactor what's actually needed): none of plan.md
+   item #55's other named functions (`businessDate`, `isMembershipActive`,
+   `isCancellationRefundable`, `formatBusinessDateTime`) exist as real
+   duplicated code — `isMembershipActive`'s job is already covered by
+   `getCurrentMembership`. So the only real remaining work was
+   `reschedules.ts`'s local `hoursUntil` copy, now importing the same one
+   `bookings.ts`/`corporate-bookings.ts` already use from
+   `booking-policy.ts`. `TRAINER-002`'s UTC-vs-local bug untouched, as
+   planned. `tsc --noEmit`/`pnpm build` clean, existing tests unchanged.
+
+**Phase 2 is complete.**
 7. **Lower priority, only if time remains:** `admin-companies.ts`,
    `members.ts`, `classes.ts`, `trainers.ts` — smaller, less duplicated.
 

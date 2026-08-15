@@ -11,6 +11,7 @@ import { router, protectedProcedure } from "../trpc";
 import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
 import { UNLIMITED_CREDITS } from "./bookings";
 import { evaluateReschedule } from "@/features/reschedules/reschedule-policy";
+import { hoursUntil } from "@/features/bookings/booking-policy";
 
 /**
  * Moving a personal booking from one class instance to another
@@ -44,11 +45,6 @@ import { evaluateReschedule } from "@/features/reschedules/reschedule-policy";
  * original class starts. This is more generous than cancellation policy.
  */
 export const FREE_RESCHEDULE_HOURS = 4;
-
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
 
 /**
  * The membership this user should reschedule against: status "active"
