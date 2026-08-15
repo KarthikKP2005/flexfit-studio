@@ -145,10 +145,14 @@ Ordered by value/risk:
    genuinely different eligibility sources). `hoursUntil`'s third copy in
    `reschedules.ts` deliberately left for item 6. 9/9 new tests
    (17 total) pass before and after. `tsc --noEmit`/`pnpm build` clean.
-3. **`reschedule-policy.ts`** / `evaluateReschedule` extraction from
-   `reschedules.ts` — closes plan.md item #53 (the `reschedule` mutation
-   and `validateReschedule` query independently implementing the same
-   rules). Biggest single file, most duplicated logic in the repo.
+3. ✅ **`reschedule-policy.ts`** / `evaluateReschedule` — done
+   (2026-08-15). Closes plan.md item #53. Single decision function now
+   used by both `reschedule` and `validateReschedule`; the mutation
+   still re-derives its own decision rather than trusting a client
+   preview. 9/9 new tests (26 total) pass before and after, covering all
+   four credit-transition outcomes (RESCH-001/002), RESCH-004's
+   equal-cost check, and RESCH-003's waitlist promotion. `tsc --noEmit`/
+   `pnpm build` clean. Biggest, highest-risk item in the plan — done.
 4. **Split `admin.ts`** (384 lines, several unrelated concerns) —
    utilisation reporting, revenue reporting, attendance/no-show, into
    `src/features/reports/` and `src/features/attendance/`; router stays

@@ -10,6 +10,59 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — REFACTOR(reschedules): extract evaluateReschedule, close the reschedule/validateReschedule duplication
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction, closes plan.md item #53's duplication
+finding (not a defect ID, an architecture finding)
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first; all 9 new tests (26 total across the
+suite) pass identically before and after.
+**Files:**
+- `src/features/reschedules/reschedule-policy.ts` (new) —
+  `evaluateReschedule(db, userId, input, freeRescheduleHours,
+  hoursUntil)`, a single side-effect-free decision function used by both
+  `reschedule` (mutation) and `validateReschedule` (query), which
+  previously implemented the same ~130 lines of validation
+  independently. Returns a discriminated `RescheduleDecision` — either
+  `{valid: false, code, reason}` (mutation throws `TRPCError({code,
+  message: reason})`; query returns `{valid: false, reason}`, dropping
+  `code`) or the full decision object the mutation's write steps need
+  (`originalBooking`, `originalClass`, `targetClass`, `targetIsFull`,
+  `becomingConfirmed`, `becomingWaitlisted`, `membership`,
+  `newCreditsUsed`).
+- `src/server/routers/reschedules.ts` — both `reschedule` and
+  `validateReschedule` now call `evaluateReschedule`; `reschedule` keeps
+  all its write steps (insert/update/cancel/promote/history-record)
+  unchanged, just fed by the shared decision instead of inline
+  validation. Removed now-unused `isClassFull` import. File header
+  comment updated — it previously documented *why* this duplication was
+  being left alone; that's no longer true.
+**Tests:** `src/server/routers/reschedule.test.ts` (new, 9 tests) —
+covers all four credit-transition outcomes (RESCH-001/002), the
+equal-cost check (RESCH-004), original-class waitlist promotion
+(RESCH-003), and that `validateReschedule`'s preview matches
+`reschedule`'s real outcome for both a rejection and a success case.
+`tsc --noEmit` and `pnpm build` both clean.
+
+**Known, minor, non-behavioral difference, documented in
+`reschedule-policy.ts`'s own header comment:** the original
+`validateReschedule` only fetched the membership row when
+`becomingConfirmed` was true; `evaluateReschedule` always fetches it
+when `membershipId` exists (matching the mutation's original behavior),
+so a preview call that isn't `becomingConfirmed` now runs one extra read
+query it didn't before. No output or DB-write difference — a `SELECT`
+has no side effects, and neither returned shape changed. Noted for
+honesty per this branch's own standard (see `CORP-006`'s precedent),
+not hidden.
+
+Phase 2 item 3 of `documents/restructure-plan.md` — the biggest, highest-
+risk item in the plan (largest file, most previously-fixed defects
+riding on this exact logic). All four credit-transition bugs stayed
+fixed through the extraction.
+
+---
+
 ## 2026-08-15 — REFACTOR(bookings): extract booking-policy.ts, dedupe class-validity/duplicate-booking checks
 
 **Type:** REFACTOR

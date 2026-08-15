@@ -8,35 +8,35 @@ import {
   memberships,
 } from "@/db/schema";
 import { router, protectedProcedure } from "../trpc";
-import { isClassFull } from "@/features/bookings/capacity-service";
 import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
 import { UNLIMITED_CREDITS } from "./bookings";
+import { evaluateReschedule } from "@/features/reschedules/reschedule-policy";
 
 /**
  * Moving a personal booking from one class instance to another
  * same-named one. Same-named classes are not required to share a
  * `creditCost` (see the header comment on `classes` in `schema.ts`) —
- * `reschedule`/`validateReschedule` now reject a target whose cost
- * doesn't match the original's (RESCH-004, fixed; see `reschedule`
- * below for the Rule 8 policy chosen). Target-class capacity *is*
- * shared with bookings.ts/corporate-bookings.ts (CORP-002, fixed) —
- * both `reschedule` and `validateReschedule` below now call the same
- * `isClassFull`. The two transitions that change confirmation status
- * keep the `creditsUsed: 0` <=> "unspent, waitlisted" invariant the
- * rest of the app already relies on: waitlisted -> confirmed charges
- * the target's cost up front (RESCH-001, fixed) and confirmed ->
- * waitlisted refunds what was already charged (RESCH-002, fixed) — see
- * `reschedule` below for both. Cancelling a confirmed original booking
- * also now promotes that class's own waitlist (RESCH-003, fixed), the
- * same way `bookings.ts`'s/`corporate-bookings.ts`'s own `cancel` already
- * do, via the shared `promoteNextWaitlisted`.
+ * `reschedule`/`validateReschedule` reject a target whose cost doesn't
+ * match the original's (RESCH-004, fixed). Target-class capacity is
+ * shared with bookings.ts/corporate-bookings.ts (CORP-002, fixed). The
+ * two transitions that change confirmation status keep the
+ * `creditsUsed: 0` <=> "unspent, waitlisted" invariant the rest of the
+ * app already relies on: waitlisted -> confirmed charges the target's
+ * cost up front (RESCH-001, fixed) and confirmed -> waitlisted refunds
+ * what was already charged (RESCH-002, fixed). Cancelling a confirmed
+ * original booking also promotes that class's own waitlist (RESCH-003,
+ * fixed), the same way `bookings.ts`'s/`corporate-bookings.ts`'s own
+ * `cancel` already do, via the shared `promoteNextWaitlisted`.
  *
- * `reschedule` (mutation) and `validateReschedule` (query) intentionally
- * duplicate the same validation steps rather than sharing one function —
- * see plan.md item #53. Left as-is in this pass (a REFACTOR extracting a
- * shared `evaluateReschedule` would be reasonable follow-up work, but
- * risks behavior drift between the preview and the real mutation if not
- * done carefully with its own characterization tests).
+ * `reschedule` (mutation) and `validateReschedule` (query) now share one
+ * decision function, `evaluateReschedule`
+ * (`src/features/reschedules/reschedule-policy.ts`, Phase 2.3 of
+ * restructure-plan.md, closing plan.md item #53's duplication) —
+ * previously each independently implemented the same validation steps.
+ * The mutation still re-derives its own decision by calling
+ * `evaluateReschedule` again rather than trusting a client-supplied
+ * preview result, so a stale client-side preview can't be replayed into
+ * a write with a decision that's no longer true.
  */
 
 /**
@@ -150,162 +150,27 @@ export const reschedulesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Get the original booking with its class details
-      const originalRow = await ctx.db
-        .select({
-          booking: bookings,
-          cls: classes,
-        })
-        .from(bookings)
-        .innerJoin(classes, eq(bookings.classId, classes.id))
-        .where(eq(bookings.id, input.fromBookingId))
-        .get();
-
-      if (!originalRow) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Booking not found.",
-        });
+      const decision = await evaluateReschedule(
+        ctx.db,
+        ctx.user.id,
+        input,
+        FREE_RESCHEDULE_HOURS,
+        hoursUntil,
+      );
+      if (!decision.valid) {
+        throw new TRPCError({ code: decision.code, message: decision.reason });
       }
 
-      const originalBooking = originalRow.booking;
-      const originalClass = originalRow.cls;
-
-      // Verify ownership
-      if (originalBooking.userId !== ctx.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You cannot reschedule this booking.",
-        });
-      }
-
-      // Verify booking is still active
-      if (originalBooking.status !== "booked" && originalBooking.status !== "waitlisted") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This booking is no longer active.",
-        });
-      }
-
-      // Verify reschedule is allowed (within 4 hours of original class)
-      const hoursBeforeOriginal = hoursUntil(originalClass.startsAt);
-      if (hoursBeforeOriginal < FREE_RESCHEDULE_HOURS) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `You can only reschedule up to ${FREE_RESCHEDULE_HOURS} hours before the class starts.`,
-        });
-      }
-
-      // Get target class
-      const targetClass = await ctx.db
-        .select()
-        .from(classes)
-        .where(eq(classes.id, input.toClassId))
-        .get();
-
-      if (!targetClass) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Target class not found.",
-        });
-      }
-
-      // Verify target class has the same name
-      if (targetClass.name !== originalClass.name) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "You can only reschedule to a class with the same name.",
-        });
-      }
-
-      // RESCH-004, fixed: same-named classes aren't required to share a
-      // creditCost — reject the reschedule outright on a mismatch rather
-      // than silently over/under-charging on any of the four transitions.
-      if (targetClass.creditCost !== originalClass.creditCost) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "You can only reschedule to a class with the same credit cost.",
-        });
-      }
-
-      // Verify target class is not the same class
-      if (targetClass.id === originalClass.id) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "You are already booked for this class.",
-        });
-      }
-
-      // Verify target class hasn't started
-      if (hoursUntil(targetClass.startsAt) <= 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has already started.",
-        });
-      }
-
-      // Verify target class is not cancelled
-      if (targetClass.cancelled) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has been cancelled.",
-        });
-      }
-
-      // Check if user already has an active booking for this class
-      const existingBooking = await ctx.db
-        .select()
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.classId, targetClass.id),
-            eq(bookings.userId, ctx.user.id),
-            sql`${bookings.status} in ('booked', 'waitlisted')`,
-          ),
-        )
-        .get();
-
-      if (existingBooking) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "You already have an active booking for this class.",
-        });
-      }
-
-      // Check if target class is full (CORP-002, fixed — combined
-      // personal + corporate occupancy, not personal bookings alone).
-      const targetIsFull = await isClassFull(ctx.db, targetClass.id, targetClass.capacity);
-
-      // Only the two status-changing transitions touch credits (RESCH-001
-      // charges on the way in, RESCH-002 refunds on the way out) — a
-      // transition that keeps the same status just carries the original
-      // creditsUsed forward unchanged, as before.
-      const becomingConfirmed = originalBooking.status === "waitlisted" && !targetIsFull;
-      const becomingWaitlisted = originalBooking.status === "booked" && targetIsFull;
-
-      const membership = originalBooking.membershipId
-        ? await ctx.db
-            .select()
-            .from(memberships)
-            .where(eq(memberships.id, originalBooking.membershipId))
-            .get()
-        : null;
-
-      if (becomingConfirmed && membership) {
-        const unlimited = membership.creditsRemaining >= UNLIMITED_CREDITS;
-        if (!unlimited && membership.creditsRemaining < targetClass.creditCost) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Not enough class credits remaining.",
-          });
-        }
-      }
-
-      const newCreditsUsed = becomingConfirmed
-        ? targetClass.creditCost
-        : becomingWaitlisted
-          ? 0 // RESCH-002: waitlisted always means unspent, never a carried-over charge
-          : originalBooking.creditsUsed; // Keep the same credits used
+      const {
+        originalBooking,
+        originalClass,
+        targetClass,
+        targetIsFull,
+        becomingConfirmed,
+        becomingWaitlisted,
+        membership,
+        newCreditsUsed,
+      } = decision;
 
       // Create the new booking
       const newBooking = await ctx.db
@@ -411,21 +276,13 @@ export const reschedulesRouter = router({
   }),
 
   /**
-   * Preview version of `reschedule` — same checks, but returns
-   * { valid: false, reason } instead of throwing, and never writes
-   * anything. See the file header for why this duplicates `reschedule`'s
-   * logic instead of sharing it, and note that because the mutation
-   * re-runs its own checks rather than trusting this preview, the two
-   * paths can only drift apart silently if one is edited without the
-   * other — there's no shared source of truth to keep them in sync.
-   *
-   * Includes the same RESCH-001 credit check as the mutation: a
-   * waitlisted original reschedule into a non-full target now previews
-   * as invalid (with the same "Not enough class credits remaining."
-   * reason) if the membership can't afford the target class's cost,
-   * instead of always previewing as valid. Also includes the same
-   * RESCH-004 creditCost-match check, so a same-named target with a
-   * different cost previews as invalid rather than reschedulable.
+   * Preview version of `reschedule` — same checks (now literally the
+   * same function, `evaluateReschedule`, Phase 2.3 — previously an
+   * independently-maintained duplicate, plan.md item #53), but returns
+   * `{ valid: false, reason }` instead of throwing, and never writes
+   * anything. The mutation still re-derives its own decision by calling
+   * `evaluateReschedule` again rather than trusting a client-supplied
+   * preview result, so a stale preview can't be replayed into a write.
    */
   validateReschedule: protectedProcedure
     .input(
@@ -435,146 +292,16 @@ export const reschedulesRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Get the original booking with its class details
-      const originalRow = await ctx.db
-        .select({
-          booking: bookings,
-          cls: classes,
-        })
-        .from(bookings)
-        .innerJoin(classes, eq(bookings.classId, classes.id))
-        .where(eq(bookings.id, input.fromBookingId))
-        .get();
-
-      if (!originalRow) {
-        return { valid: false, reason: "Booking not found." };
+      const decision = await evaluateReschedule(
+        ctx.db,
+        ctx.user.id,
+        input,
+        FREE_RESCHEDULE_HOURS,
+        hoursUntil,
+      );
+      if (!decision.valid) {
+        return { valid: false, reason: decision.reason };
       }
-
-      const originalBooking = originalRow.booking;
-      const originalClass = originalRow.cls;
-
-      // Verify ownership
-      if (originalBooking.userId !== ctx.user.id) {
-        return { valid: false, reason: "You cannot reschedule this booking." };
-      }
-
-      // Verify booking is still active
-      if (
-        originalBooking.status !== "booked" &&
-        originalBooking.status !== "waitlisted"
-      ) {
-        return {
-          valid: false,
-          reason: "This booking is no longer active.",
-        };
-      }
-
-      // Verify reschedule is allowed (within 4 hours of original class)
-      const hoursBeforeOriginal = hoursUntil(originalClass.startsAt);
-      if (hoursBeforeOriginal < FREE_RESCHEDULE_HOURS) {
-        return {
-          valid: false,
-          reason: `You can only reschedule up to ${FREE_RESCHEDULE_HOURS} hours before the class starts.`,
-        };
-      }
-
-      // Get target class
-      const targetClass = await ctx.db
-        .select()
-        .from(classes)
-        .where(eq(classes.id, input.toClassId))
-        .get();
-
-      if (!targetClass) {
-        return { valid: false, reason: "Target class not found." };
-      }
-
-      // Verify target class has the same name
-      if (targetClass.name !== originalClass.name) {
-        return {
-          valid: false,
-          reason: "You can only reschedule to a class with the same name.",
-        };
-      }
-
-      // Mirrors the mutation's RESCH-004 check.
-      if (targetClass.creditCost !== originalClass.creditCost) {
-        return {
-          valid: false,
-          reason: "You can only reschedule to a class with the same credit cost.",
-        };
-      }
-
-      // Verify target class is not the same class
-      if (targetClass.id === originalClass.id) {
-        return {
-          valid: false,
-          reason: "You are already booked for this class.",
-        };
-      }
-
-      // Verify target class hasn't started
-      if (hoursUntil(targetClass.startsAt) <= 0) {
-        return {
-          valid: false,
-          reason: "This class has already started.",
-        };
-      }
-
-      // Verify target class is not cancelled
-      if (targetClass.cancelled) {
-        return {
-          valid: false,
-          reason: "This class has been cancelled.",
-        };
-      }
-
-      // Check if user already has an active booking for this class
-      const existingBooking = await ctx.db
-        .select()
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.classId, targetClass.id),
-            eq(bookings.userId, ctx.user.id),
-            sql`${bookings.status} in ('booked', 'waitlisted')`,
-          ),
-        )
-        .get();
-
-      if (existingBooking) {
-        return {
-          valid: false,
-          reason: "You already have an active booking for this class.",
-        };
-      }
-
-      // Check if target class is full (CORP-002, fixed — combined
-      // personal + corporate occupancy, not personal bookings alone).
-      const targetIsFull = await isClassFull(ctx.db, targetClass.id, targetClass.capacity);
-
-      // Mirrors the mutation's RESCH-001 check: only a waitlisted ->
-      // confirmed transition needs credits verified up front.
-      const becomingConfirmed = originalBooking.status === "waitlisted" && !targetIsFull;
-      if (becomingConfirmed && originalBooking.membershipId) {
-        const membership = await ctx.db
-          .select()
-          .from(memberships)
-          .where(eq(memberships.id, originalBooking.membershipId))
-          .get();
-
-        const unlimited = membership && membership.creditsRemaining >= UNLIMITED_CREDITS;
-        if (membership && !unlimited && membership.creditsRemaining < targetClass.creditCost) {
-          return {
-            valid: false,
-            reason: "Not enough class credits remaining.",
-          };
-        }
-      }
-
-      return {
-        valid: true,
-        targetIsFull,
-      };
+      return { valid: true, targetIsFull: decision.targetIsFull };
     }),
 });
