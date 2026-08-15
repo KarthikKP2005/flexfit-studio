@@ -10,6 +10,661 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — CHORE(restructure): Phase 6 final pass — architecture doc, Rule 10 audit, full E2E smoke test, final build
+
+**Type:** REFACTOR (one comment-only fix) + DOCUMENT (the rest)
+**Defect:** n/a
+**Behavior change:** no — one file changed (a missing header comment
+added), zero logic/JSX/output changed anywhere.
+**Files:**
+- `src/features/trainers/components/TrainerScheduleView.tsx` — added a
+  header comment directly above the exported `TrainerScheduleView`
+  component (previously only the file-top comment existed, and it only
+  described the Phase 3 move, not what the component does — a real
+  Rule 10 gap since the export sits ~200 lines below that comment, past
+  the `ClassCard` helper).
+- `documents/architecture-decisions.md` — added a "Final structure, as
+  actually built" entry reconciling `refactor-map.md`'s plan against
+  what actually landed (two component naming differences, two
+  planned-but-unneeded items, four defects found mid-refactor).
+- `documents/EDIT_LOG.md` (this file) — added the missing `Tests:` line
+  to the `classes.ts`/`adminClasses.ts` DOCUMENT entry.
+- `documents/restructure-plan.md` — Phase 6 marked done with the full
+  checklist results.
+**Tests:** full end-to-end smoke test across all three golden paths in
+a running dev server via Playwright (member books/cancels/reschedules;
+trainer expands a roster and checks someone in; admin views class
+scheduler/dashboard/reports) — zero console or page errors throughout.
+Final `tsc --noEmit` clean, `vitest run` 32/32 passing, `pnpm build`
+clean. `next lint` not run — no ESLint config exists in this repo
+(pre-existing, not introduced this session); creating one from scratch
+was judged out of scope for a restructuring final pass rather than
+silently added.
+
+This closes Phase 6 of `documents/restructure-plan.md` — all six
+phases (0 through 3, 5, 6) are now done; Phase 4 (route groups) remains
+explicitly skipped as optional/highest-risk.
+
+---
+
+## 2026-08-15 — DOCUMENT(known-issues): Phase 5 triage of all 18 open defects, no code changed
+
+**Type:** DOCUMENT
+**Defect:** n/a — a triage pass across all 18 currently
+`Confirmed`/`Documented, not fixed` items in `known-issues.md`
+(`AUTH-001`, `AUTH-005`, `AUTH-006`, `NOTIF-001`, `PLAN-004`,
+`MEMBER-001`, `MEMBER-003`, `TRAINER-001`, `TRAINER-002`, `CLASS-002`,
+`CLASS-003`, `ADMIN-001`, `ADMIN-002`, `ADMIN-003`, `ADMIN-004`,
+`KIOSK-002`, `CORP-004`, `CORP-006`).
+**Behavior change:** no — this is a documentation-only pass. Per the
+user's explicit choice, no fixes were implemented this round.
+**Files:**
+- `documents/known-issues.md` — added a "Phase 5 triage" summary
+  section up top (two tables: worth-fixing vs. staying-documented, with
+  reasoning), plus a `Phase 5 triage:` line on each of the 18 items'
+  own entries carrying the same verdict.
+- `documents/restructure-plan.md` — Phase 5 section updated with the
+  triage verdict and pointer to `known-issues.md`.
+**Verdict:** 12 items judged worth fixing (severity × fix cost — several
+Low-severity items are cheap one-liners with an exact template already
+proven elsewhere in the codebase; `ADMIN-003` and `AUTH-005` are High
+severity and contained). 6 items staying documented because a safe fix
+needs a schema migration, is cross-cutting across 3+ files, or plan.md
+itself flags them as needing strong tests before touching.
+**Tests:** n/a — no code touched.
+
+---
+
+## 2026-08-15 — REFACTOR(admin, admin-reports): extract AdminDashboard and ReportsDashboard, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim in both files.
+**Files:**
+- `src/features/admin-dashboard/components/AdminDashboard.tsx` (new) —
+  the entire previous `AdminDashboard` function body from
+  `admin/page.tsx`, moved character-for-character.
+- `src/app/admin/page.tsx` — now route-level composition only:
+  `RequireRole` wrapping `AdminDashboard`. Was 176 lines, now 21.
+- `src/features/admin-reports/components/ReportsDashboard.tsx` (new) —
+  the entire previous `ReportsDashboard` function body from
+  `admin/reports/page.tsx`, moved character-for-character.
+- `src/app/admin/reports/page.tsx` — now route-level composition only:
+  `RequireRole` wrapping `ReportsDashboard`. Was 170 lines, now 18.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. `/admin`: all six stat tiles, the Quick Action bar
+links, Class utilisation / Recent payments / Trainer Payroll /
+Studio Settings sections all present and rendering seeded data (the
+0% utilisation figures match the already-documented `ADMIN-003` bug,
+unchanged by this move). `/admin/reports`: all four stat tiles,
+Revenue by Month / by Payment Method tables, and the Memberships
+Expiring section with its "Send expiry reminders now" button all
+present and rendering seeded data. Zero console errors on either page.
+`tsc --noEmit`, `pnpm build`, and `vitest run` (32/32) all clean.
+
+Phase 3 of `documents/restructure-plan.md`, ninth and tenth (final)
+items — Phase 3 is now complete.
+
+---
+
+## 2026-08-15 — REFACTOR(admin-plans): extract PlanManager, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/admin-plans/components/PlanManager.tsx` (new) — the
+  entire previous contents of `admin/plans/page.tsx`, moved
+  character-for-character, exported as `PlanManager`.
+- `src/app/admin/plans/page.tsx` — now route-level composition only:
+  renders `PlanManager`. Was 176 lines, now 16.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed all six seeded plans (Drop-in Pack,
+Monthly Unlimited, Quarterly Unlimited, Annual Unlimited, Student
+Monthly, Legacy Founder Plan) render with correct price/credits/
+duration and active/archived badges, "Create Plan" opens the form with
+all five fields, and "Archive Plan" / "Reactivate Plan" buttons are
+present per plan's active state. Zero console errors. `tsc --noEmit`,
+`pnpm build`, and `vitest run` (32/32) all clean.
+
+**Observation (not fixed, out of scope):** unlike every other admin
+page moved so far, the original `admin/plans/page.tsx` has no
+`RequireRole` wrapper at all — a pre-existing gap not covered by the
+earlier `AUTH-004` fix. Preserved exactly as found; adding one here
+would be a FIX, not a move.
+
+Phase 3 of `documents/restructure-plan.md`, eighth item.
+
+---
+
+## 2026-08-15 — REFACTOR(admin-companies): extract CompanyList, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, including a pre-existing unused
+`formatMoney` import (dead in the original file, not something this
+move fixes or removes).
+**Files:**
+- `src/features/admin-companies/components/CompanyList.tsx` (new) — the
+  entire previous contents of `admin/companies/page.tsx` (formerly
+  `CompaniesList`, now `CompanyList`), moved character-for-character.
+- `src/app/admin/companies/page.tsx` — now route-level composition
+  only: `RequireRole` wrapping `CompanyList`. Was 183 lines, now 19.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed both seeded companies (TechCorp Inc,
+FinServe Solutions) render with correct credit balances and active
+status, the "New Company" button opens the create form with all three
+fields, and Cancel closes it. Zero console errors. `tsc --noEmit` and
+`pnpm build` both clean, bundle size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, seventh item.
+
+---
+
+## 2026-08-15 — REFACTOR(kiosk): extract CheckInKiosk, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, including the pre-existing
+`selectedMember: any` (plan.md item #42) — preserved exactly, not fixed;
+Rule 9 governs new/touched logic, not a verbatim relocation.
+**Files:**
+- `src/features/kiosk/components/CheckInKiosk.tsx` (new) — the entire
+  previous contents of `kiosk/page.tsx` (formerly `KioskContent`, now
+  `CheckInKiosk` — plan.md item #54's own literal naming example for
+  this exact page), moved character-for-character.
+- `src/app/kiosk/page.tsx` — now route-level composition only:
+  `RequireRole` wrapping `CheckInKiosk`. Was 224 lines, now 20.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed the member search field, a real lookup
+match with a Select button, member selection, "Change member," and the
+"No classes in the next 2 hours" state (accurate given current seed
+data timing) all render and work correctly. Zero console errors.
+`tsc --noEmit` and `pnpm build` both clean, bundle size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, sixth item.
+
+---
+
+## 2026-08-15 — REFACTOR(admin-companies): extract CompanyDetail, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, including the `useParams()` call
+(still resolves correctly from any client component under the
+`/admin/companies/[id]` dynamic segment, regardless of which file
+defines the component).
+**Files:**
+- `src/features/admin-companies/components/CompanyDetail.tsx` (new) —
+  the entire previous contents of `admin/companies/[id]/page.tsx`
+  (formerly named `CompanyDetails`, now exported as `CompanyDetail`),
+  moved character-for-character.
+- `src/app/admin/companies/[id]/page.tsx` — now route-level composition
+  only: `RequireRole` wrapping `CompanyDetail`. Was 285 lines, now 20.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin, navigated via the real companies list to a real
+company detail page. Confirmed the Deactivate/Activate button, credit
+pool balance + Top Up form, linked-members list with Remove buttons,
+Add Member search form, and Recent Corporate Bookings list all render
+and are wired correctly. Zero console errors. `tsc --noEmit` and
+`pnpm build` both clean, bundle size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, fifth item.
+
+---
+
+## 2026-08-15 — REFACTOR(admin-classes): extract ClassScheduler, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction (found `ADMIN-004` along the way, not
+fixed here)
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/admin-classes/components/ClassScheduler.tsx` (new) —
+  the entire previous contents of `admin/classes/page.tsx`, moved
+  character-for-character except the component's own name.
+- `src/app/admin/classes/page.tsx` — now route-level composition only.
+  Was 296 lines, now 11.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as admin. Confirmed the create-class form (all fields, trainer
+select), the swap-trainer inline form, the cancel-class button, and the
+name filter all render and are wired correctly. Zero console errors.
+`tsc --noEmit` and `pnpm build` both clean, bundle size unchanged.
+
+**Found, not fixed, while doing this:** `ADMIN-004` — neither
+`cancelMutation.error` nor `swapMutation.error` is read or rendered
+anywhere in this component. A rejected cancel or trainer-swap (e.g.
+`TRAINER-003`'s `BAD_REQUEST` for an unavailable trainer) currently
+looks like the button did nothing. New `known-issues.md` entry,
+preserved exactly per Rule 3, left as a Phase 5 FIX candidate.
+
+Phase 3 of `documents/restructure-plan.md`, fourth item.
+
+---
+
+## 2026-08-15 — REFACTOR(dashboard): extract MemberDashboard, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/dashboard/components/MemberDashboard.tsx` (new) — the
+  entire previous contents of `dashboard/page.tsx`, moved
+  character-for-character except the component's own name.
+- `src/app/dashboard/page.tsx` — now route-level composition only. Was
+  369 lines, now 8.
+**Tests:** verified live — dev server + headless Chromium (Playwright),
+logged in as the company-linked seeded member. Confirmed both the
+personal membership card (plan, status, credits, renewal date) and the
+`COMPANY-002` corporate membership card (company name, status, credit
+pool balance) render, the upcoming-bookings name filter works, and
+reschedule history renders with correct from/to class/time/room detail.
+Zero console errors. `tsc --noEmit` and `pnpm build` both clean, bundle
+size unchanged.
+
+Phase 3 of `documents/restructure-plan.md`, third item.
+
+---
+
+## 2026-08-15 — REFACTOR(schedule): extract ScheduleBrowser, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim.
+**Files:**
+- `src/features/schedule/components/ScheduleBrowser.tsx` (new) — the
+  entire previous contents of `schedule/page.tsx` (`ScheduleBrowser` +
+  `BookButton`), moved character-for-character except the main
+  component's own name.
+- `src/app/schedule/page.tsx` — now route-level composition only. Was
+  369 lines, now 9.
+**Tests:** verified live — dev server + headless Chromium (Playwright).
+Checked signed-out view (day filter, name/date filters, "Sign in to
+book a class"), the name filter actually narrowing results ("Yoga" →
+only Sunrise Yoga rows), and signed-in as a company-linked member:
+confirmed the `BookButton`'s click-to-expand behavior still works
+exactly as coded — a company-linked member's first click expands to
+"Personal credits"/"TechCorp Inc credits" rather than booking
+immediately, matching `CORP-005`'s documented behavior precisely,
+nothing guessed. Zero console errors. `tsc --noEmit` and `pnpm build`
+both clean; `/schedule`'s bundle size unchanged (2.9kB → 2.92kB, noise).
+
+**Environment note:** two dev-server instances from earlier sessions
+were still listening on ports 3000-3003 (`lsof`-based kills weren't
+reaching them on this Windows/git-bash setup), causing the Playwright
+driver script to hit whichever stale instance answered first on
+whatever port it happened to occupy. Fixed with a `netstat`-based PID
+lookup + `taskkill //F`,
+confirming exactly one server on exactly one port before driving it —
+worth doing this way going forward for any further Phase 3 items.
+
+Phase 3 of `documents/restructure-plan.md`, second item.
+
+---
+
+## 2026-08-15 — REFACTOR(trainer-schedule): extract TrainerScheduleView, verified live in a browser
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — every JSX element, className, trpc call, and
+piece of state logic moved verbatim, no rewrites. Verified against the
+real running dev server (not just `tsc`/`pnpm build`), per this file's
+own earlier note that the previous session had to defer this exact
+extraction for lack of browser access.
+**Files:**
+- `src/features/trainers/components/TrainerScheduleView.tsx` (new) —
+  the entire previous contents of `trainer/schedule/page.tsx` (`ClassCard`,
+  `DAYS`, and the main content component, now exported as
+  `TrainerScheduleView`), moved character-for-character except the
+  component's own name.
+- `src/app/trainer/schedule/page.tsx` — now route-level composition only
+  (plan.md item #54's own pattern): `RequireRole` wrapping
+  `TrainerScheduleView`. Was 552 lines, the single largest file in the
+  app; now 25.
+**Tests:** no unit tests apply to a pure JSX move. Verified live instead:
+launched the dev server, logged in as the seeded trainer
+(`arjun@flexfit.test`), and drove the actual page with a headless
+Chromium session (Playwright, since `chromium-cli` wasn't available in
+this environment) — confirmed the Trainer Dashboard header, all three
+metric cards, both tabs (Upcoming Classes / Weekly Availability), the
+name/date filters, expanding a class card's roster (Booked/Waitlist
+sub-tabs, member names, Check In buttons), and the availability day
+editor (Edit/Save/Cancel/Remove) all render and behave identically to
+before. Zero console errors. `tsc --noEmit` and `pnpm build` both clean;
+`/trainer/schedule`'s bundle size unchanged (3.88kB → 3.86kB, packaging
+noise only).
+
+**Gotcha hit, worth recording:** the first dev-server attempt 404'd on
+Next.js's own hydration chunks because a `pnpm build` (production build)
+had run immediately before `pnpm dev`, leaving a stale `.next/` in a
+state dev mode didn't expect — buttons rendered but had no attached
+React handlers. Fixed by deleting `.next/` before starting dev. Separately,
+port 3000 was still held by an earlier backgrounded dev server (`npm`
+wrapper doesn't forward `SIGTERM` to the child it spawns, so the `lsof`
+kill didn't reach it) — Next.js silently moved to port 3002 instead,
+which the driver script had to be pointed at explicitly.
+
+Phase 3 of `documents/restructure-plan.md`, first item — the largest
+frontend file in the app, done and verified live.
+
+---
+
+## 2026-08-15 — REFACTOR(reschedules): close the last hoursUntil duplicate, no new business-time.ts module
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — identical one-line function body, existing
+`reschedule.test.ts` (9 tests exercising `hoursUntil` via the window and
+target-started checks) re-run unchanged.
+**Files:**
+- `src/server/routers/reschedules.ts` — removed its local `hoursUntil`
+  definition, now imports it from `@/features/bookings/booking-policy`
+  (already used by `bookings.ts`/`corporate-bookings.ts` since Phase 2
+  item 2).
+- `src/features/bookings/booking-policy.ts`,
+  `src/features/reschedules/reschedule-policy.ts` — header comments
+  updated; both previously said this dedup was deferred to "Phase 2 item
+  6 / business-time.ts."
+**Tests:** none new — `hoursUntil` was already covered by
+`reschedule.test.ts`'s existing 9 tests. `tsc --noEmit` and `pnpm build`
+both clean.
+
+**Scope note, per explicit instruction not to refactor beyond what's
+actually needed:** checked whether the rest of plan.md item #55's named
+functions (`businessDate`, `isMembershipActive`,
+`isCancellationRefundable`, `formatBusinessDateTime`) exist as real
+duplicated code anywhere in the current codebase — they don't.
+`isMembershipActive`'s job is already covered by the already-extracted
+`getCurrentMembership`. No dedicated `business-time.ts` module was
+created; `hoursUntil` now lives in `booking-policy.ts`, which is where
+it already was. Phase 2 item 6 is complete with this one small change,
+not a new module.
+
+Phase 2 item 6 of `documents/restructure-plan.md` — **Phase 2 is now
+fully complete.**
+
+---
+
+## 2026-08-15 — DOCUMENT(classes): resolve classes.ts vs adminClasses.ts as an intentional split, not consolidated
+
+**Type:** DOCUMENT
+**Defect:** n/a — architecture finding, not a defect ID
+**Behavior change:** no — no code touched.
+**Files:** `documents/architecture-decisions.md` — rewrote the Phase 0
+entry on this topic with the complete finding.
+**Tests:** n/a — no code changed, nothing to test.
+
+Attempted the actual consolidation this Phase 2 item called for — read
+both `classesRouter.create` and `adminClassesRouter.create` in full,
+side by side. They turned out not to be simple duplicated logic: they
+differ in `trainerId` optionality (optional vs. required), trainer-role
+validation (`adminClasses` validates the referenced user is an active
+trainer; `classes.ts` doesn't — this is `CLASS-003` manifesting
+concretely as a disagreement between the two routers), and return shape
+(full row vs. `{ ok: true }`). A shared extraction would have had to
+either parameterize away all three differences (leaving almost nothing
+shared) or pick one behavior as canonical — silently fixing or
+reintroducing `CLASS-003` in the process. Neither qualifies as a
+behavior-identical REFACTOR under Rule 3.
+
+**Resolution:** kept both routers exactly as they are. This is a
+DOCUMENT-type resolution, not a REFACTOR — the duplication is now
+precisely understood and recorded rather than merged based on a guess
+about which validation strictness is correct (Rule 8).
+
+Phase 2 item 5 of `documents/restructure-plan.md` — resolved via
+documentation rather than code consolidation.
+
+---
+
+## 2026-08-15 — REFACTOR(admin): split classUtilisation/revenue/attendance queries out of admin.ts
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first; all 6 new tests (32 total) pass
+identically before and after, including the `ADMIN-003` bug (see below),
+preserved exactly.
+**Files:**
+- `src/features/reports/utilisation-service.ts` (new) —
+  `getClassUtilisation`.
+- `src/features/reports/revenue-service.ts` (new) — `getRevenueByMonth`,
+  `getRevenueByMethod`.
+- `src/features/attendance/no-show-service.ts` (new) —
+  `getCheckinsPerDay`, `getTopTrainers`, `getNoShowList`.
+- `src/server/routers/admin.ts` — those six procedures are now one-line
+  calls into the services above; removed now-unused `desc`/`inArray`
+  imports. `stats`, `trainerPayroll`, `settings`/`updateSettings`,
+  `runMembershipExpiryCheck`, `expiringMemberships`, `refundCount` stay
+  inline — outside this extraction's stated scope (see
+  `restructure-plan.md` Phase 2 item 4).
+**Tests:** `src/server/routers/admin-reports.test.ts` (new, 6 tests).
+`tsc --noEmit` and `pnpm build` both clean.
+
+**Found, not fixed, while writing the characterization test:** `ADMIN-003`
+— `classUtilisation`'s `booked` count always evaluates to `0`, confirmed
+against the real `flexfit.db` (not just the test DB) for classes with
+real double-digit booking counts. Root cause isolated to how drizzle-orm
+compiles a correlated subquery used as a selected column — raw SQL with
+the identical shape returns correct counts. `classes.list`'s `spotsLeft`
+uses the exact same buggy pattern (a second call site, not touched by
+this extraction, documented as the same defect). Not an overbooking
+risk — `capacity-service.ts`'s actual capacity enforcement uses a
+different, unaffected query shape — but it is a real, previously-
+undiscovered display bug on both the admin dashboard and the public
+`/schedule` page. Preserved exactly per Rule 3, new `known-issues.md`
+entry written, left as a Phase 5 FIX candidate.
+
+Phase 2 item 4 of `documents/restructure-plan.md`.
+
+---
+
+## 2026-08-15 — REFACTOR(reschedules): extract evaluateReschedule, close the reschedule/validateReschedule duplication
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction, closes plan.md item #53's duplication
+finding (not a defect ID, an architecture finding)
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first; all 9 new tests (26 total across the
+suite) pass identically before and after.
+**Files:**
+- `src/features/reschedules/reschedule-policy.ts` (new) —
+  `evaluateReschedule(db, userId, input, freeRescheduleHours,
+  hoursUntil)`, a single side-effect-free decision function used by both
+  `reschedule` (mutation) and `validateReschedule` (query), which
+  previously implemented the same ~130 lines of validation
+  independently. Returns a discriminated `RescheduleDecision` — either
+  `{valid: false, code, reason}` (mutation throws `TRPCError({code,
+  message: reason})`; query returns `{valid: false, reason}`, dropping
+  `code`) or the full decision object the mutation's write steps need
+  (`originalBooking`, `originalClass`, `targetClass`, `targetIsFull`,
+  `becomingConfirmed`, `becomingWaitlisted`, `membership`,
+  `newCreditsUsed`).
+- `src/server/routers/reschedules.ts` — both `reschedule` and
+  `validateReschedule` now call `evaluateReschedule`; `reschedule` keeps
+  all its write steps (insert/update/cancel/promote/history-record)
+  unchanged, just fed by the shared decision instead of inline
+  validation. Removed now-unused `isClassFull` import. File header
+  comment updated — it previously documented *why* this duplication was
+  being left alone; that's no longer true.
+**Tests:** `src/server/routers/reschedule.test.ts` (new, 9 tests) —
+covers all four credit-transition outcomes (RESCH-001/002), the
+equal-cost check (RESCH-004), original-class waitlist promotion
+(RESCH-003), and that `validateReschedule`'s preview matches
+`reschedule`'s real outcome for both a rejection and a success case.
+`tsc --noEmit` and `pnpm build` both clean.
+
+**Known, minor, non-behavioral difference, documented in
+`reschedule-policy.ts`'s own header comment:** the original
+`validateReschedule` only fetched the membership row when
+`becomingConfirmed` was true; `evaluateReschedule` always fetches it
+when `membershipId` exists (matching the mutation's original behavior),
+so a preview call that isn't `becomingConfirmed` now runs one extra read
+query it didn't before. No output or DB-write difference — a `SELECT`
+has no side effects, and neither returned shape changed. Noted for
+honesty per this branch's own standard (see `CORP-006`'s precedent),
+not hidden.
+
+Phase 2 item 3 of `documents/restructure-plan.md` — the biggest, highest-
+risk item in the plan (largest file, most previously-fixed defects
+riding on this exact logic). All four credit-transition bugs stayed
+fixed through the extraction.
+
+---
+
+## 2026-08-15 — REFACTOR(bookings): extract booking-policy.ts, dedupe class-validity/duplicate-booking checks
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first; all 9 new tests (17 total) pass
+identically before and after.
+**Files:**
+- `src/features/bookings/booking-policy.ts` (new) — `hoursUntil`,
+  `assertClassBookable`, `assertNoActiveBooking`. `hoursUntil` is
+  deduped between `bookings.ts` and `corporate-bookings.ts` only — a
+  third copy in `reschedules.ts` is left alone on purpose, deliberately
+  deferred to Phase 2 item 6 (`business-time.ts`) rather than closing 2
+  of 3 copies now and leaving a mismatched third.
+- `src/server/routers/bookings.ts` — `book` now calls the shared
+  functions; local `hoursUntil` removed (import used instead, still
+  used by `cancel` unchanged).
+- `src/server/routers/corporate-bookings.ts` — same extraction.
+**Tests:** `src/server/routers/booking.test.ts` (new, 9 tests) — written
+first against unmodified code; all still pass after. `tsc --noEmit` and
+`pnpm build` both clean.
+
+Phase 2 item 2 of `documents/restructure-plan.md`.
+
+---
+
+## 2026-08-15 — REFACTOR(bookings): extract attendance-service.ts, dedupe markAttended
+
+**Type:** REFACTOR
+**Defect:** n/a — pure extraction, no defect fixed (see CORP-006 below
+for a real bug *found* while doing this, deliberately not fixed here)
+**Behavior change:** no — verified via characterization tests written
+against the unmodified code first (Rule 5), then re-run unchanged
+against the extraction; all 8 pass identically before and after.
+**Files:**
+- `src/features/bookings/attendance-service.ts` (new) —
+  `assertBookingCheckable`, `assertCheckInWindow`,
+  `getCheckinWindowMinutes`. The shared check-in policy both
+  `bookings.markAttended` and `corporateBookings.markAttended` had
+  independently, byte-for-byte.
+- `src/server/routers/bookings.ts` — `markAttended` now calls the shared
+  functions; removed unused `studioSettings` import; corrected a stale
+  comment that incorrectly claimed no server-side check-in window
+  existed (it always has).
+- `src/server/routers/corporate-bookings.ts` — same extraction; removed
+  unused `studioSettings` import; comment documents the `source`-field
+  quirk found during this work (see `CORP-006`).
+- `vitest.config.ts` — added `fileParallelism: false`. Reproduced
+  `SQLITE_BUSY` directly once a second test file existed (two files
+  opening concurrent connections to the same `flexfit.test.db`) —
+  necessary infrastructure fix, not scope creep.
+**Tests:** `src/server/routers/attendance.test.ts` (new, 5 tests) —
+written first, against unmodified code, before any extraction; all
+still pass after.
+
+**Found, not fixed, while doing this:** `CORP-006` — corporate
+check-ins never pass `source` to the `checkins` insert, so they always
+record `"front_desk"` regardless of the real source. New
+`known-issues.md` entry; separate FIX candidate for Phase 5.
+
+Phase 2 item 1 of `documents/restructure-plan.md`.
+
+---
+
+## 2026-08-15 — DOCUMENT(restructure): Phase 1 docs — system map, behavior inventory, refactor map, schema-stance decision
+
+**Type:** DOCUMENT
+**Defect:** n/a — planning documentation, per `restructure-plan.md` Phase 1
+**Behavior change:** no — documentation only, no application code touched.
+**Files:**
+- `documents/system-map.md` (new) — Page → tRPC procedure → validation →
+  business rules → DB → side-effects for all 75+ procedures across 16
+  routers, built from a fresh grep of every router's procedure list
+  cross-referenced against every `trpc.*.useQuery/useMutation` call
+  actually found under `src/app/**`/`src/components/**`, so the
+  backend-only-procedure list (`plans.setActive`, `classes.create`/
+  `update`/`cancel`, `members.setActive`/`setRole`, `payments.mine`/
+  `markPaid`/`refund`) is verified, not remembered.
+- `documents/behavior-inventory.md` (new) — plan.md's own requested
+  table format (role/input/output/error/DB/UI/edge-cases), scoped to
+  exactly the features Phase 2 will touch (attendance, booking,
+  waitlist promotion, reschedule, class scheduling, admin reports) —
+  the concrete "must not change" reference each extraction gets
+  verified against.
+- `documents/refactor-map.md` (new) — the target `src/features/` and
+  `src/features/*/components/` trees, one line of *why* per module,
+  written before any Phase 2/3 file move.
+- `documents/architecture-decisions.md` — added the schema-stance
+  decision (core schema left as-is; the `bookings`/`corporateBookings`
+  two-table split was considered for consolidation and explicitly kept,
+  reasoning recorded).
+- `documents/restructure-plan.md` — Phase 0 and Phase 1 both marked done
+  with what actually landed.
+**Tests:** n/a — documentation only. `tsc --noEmit` and `pnpm test`
+re-run to confirm no application code was touched; both clean.
+
+---
+
+## 2026-08-15 — CHORE: consolidate root-level docs into documents/
+
+**Type:** CHORE
+**Defect:** n/a
+**Behavior change:** no — file moves only, no application code touched.
+**Files:** `AGENT_RULES.md`, `EDIT_LOG.md`, `plan.md`,
+`finallist_phase1.docx` moved from repo root into `documents/`; a stray
+duplicate `architecture-decisions.md` that existed at root (separate
+from the canonical `documents/architecture-decisions.md`) removed.
+Content verified line-for-line identical after the move (2585/264/1698
+lines respectively, matching the pre-move originals).
+**Tests:** n/a — no code affected.
+
+---
+
+## 2026-08-15 — TEST(infra): build the real, minimal tRPC-caller harness
+
+**Type:** TEST
+**Defect:** n/a — infrastructure, not a bug fix
+**Behavior change:** no — application code untouched; adds test tooling
+and one new test file only.
+**Files:**
+- `vitest.config.ts` (new) — path alias + `DB_FILE` env override so the
+  whole test run points at a disposable database, never `flexfit.db`.
+- `drizzle.test.config.ts` (new) — same schema as `drizzle.config.ts`,
+  pointed at `flexfit.test.db`.
+- `package.json` — added `db:test:push` script.
+- `src/tests/setup.ts` (new) — `createTestCaller(user)` and `resetDb()`,
+  two functions total. Deliberately does not include the global-setup/
+  fixtures/mock-next-headers ceremony the (fabricated) prior design
+  described — see `architecture-decisions.md`'s 2026-08-15 correction
+  entry.
+- `src/server/routers/adminClasses.test.ts` (new) — first real,
+  committed test file, covering `TRAINER-003` (`swapTrainer` rejects an
+  unavailable trainer, succeeds for an available one, `NOT_FOUND` for a
+  missing class id) at the tRPC-caller level per Rule 6.
+**Tests:** 3 new tests, all passing (`pnpm test`). `tsc --noEmit` and
+`pnpm build` both clean afterward.
+
+This is Phase 0 of `documents/restructure-plan.md` — the prerequisite
+for every REFACTOR in Phase 2, since Rule 5 requires a real
+characterization test before touching a file's behavior, and up to now
+that requirement was only being satisfied by temporary, untracked,
+deleted-after-use scripts.
+
+---
+
 ## 2026-08-15 — DOCUMENT(auth): log AUTH-005 (deactivating a user doesn't invalidate existing sessions)
 
 **Type:** DOCUMENT

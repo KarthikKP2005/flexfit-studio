@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, gte, sql, lte, desc, inArray } from "drizzle-orm";
+import { and, eq, gte, sql, lte } from "drizzle-orm";
 import {
   users,
   memberships,
@@ -13,13 +13,22 @@ import {
 } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 import { notifyExpiringMemberships } from "../jobs/membership-expiry";
+import { getClassUtilisation } from "@/features/reports/utilisation-service";
+import { getRevenueByMonth, getRevenueByMethod } from "@/features/reports/revenue-service";
+import { getCheckinsPerDay, getTopTrainers, getNoShowList } from "@/features/attendance/no-show-service";
 
 /**
  * Read-only admin dashboard/report queries. Not responsible for: any
  * mutation (see plans.ts/payments.ts/classes.ts/members.ts for those) or
  * accounting for corporate bookings/revenue — every aggregate here reads
  * from `bookings`/`payments` only, never `corporateBookings` (see
- * ADMIN-001/ADMIN-002 in known-issues.md).
+ * ADMIN-001/ADMIN-002 in known-issues.md). Utilisation, revenue, and
+ * attendance/no-show query logic live in `src/features/reports/` and
+ * `src/features/attendance/` (Phase 2.4 of restructure-plan.md) — this
+ * router just validates input and calls them. `stats`, `trainerPayroll`,
+ * `settings`/`updateSettings`, `runMembershipExpiryCheck`,
+ * `expiringMemberships`, and `refundCount` stay inline here — smaller,
+ * less duplicated, not part of that extraction's stated scope.
  */
 
 export const adminRouter = router({
@@ -87,33 +96,14 @@ export const adminRouter = router({
    * bookings on the same class are invisible to this number. There's
    * also no ordering, so which classes fill the `limit` slots isn't
    * defined as "soonest" or "highest utilisation" — whatever order the
-   * database happens to return them in.
+   * database happens to return them in. Separately, ADMIN-003
+   * (documented not fixed): `booked` always evaluates to 0 regardless of
+   * real booking counts, a drizzle-orm correlated-subquery-as-column
+   * compilation issue — see `utilisation-service.ts`.
    */
   classUtilisation: adminProcedure
     .input(z.object({ limit: z.number().default(10) }).default({}))
-    .query(async ({ ctx, input }) => {
-      const rows = await ctx.db
-        .select({
-          id: classes.id,
-          name: classes.name,
-          startsAt: classes.startsAt,
-          capacity: classes.capacity,
-          booked: sql<number>`(
-            select count(*) from ${bookings}
-            where ${bookings.classId} = ${classes.id}
-              and ${bookings.status} in ('booked','attended')
-          )`.as("booked"),
-        })
-        .from(classes)
-        .where(eq(classes.cancelled, false))
-        .limit(input.limit);
-
-      return rows.map((r) => ({
-        ...r,
-        booked: Number(r.booked),
-        utilisation: r.capacity ? Number(r.booked) / r.capacity : 0,
-      }));
-    }),
+    .query(({ ctx, input }) => getClassUtilisation(ctx.db, input.limit)),
 
   /**
    * Total paid-payment revenue grouped by month, newest first.
@@ -122,42 +112,10 @@ export const adminRouter = router({
    * corporate credit top-ups (admin-companies.ts's topUp) never create a
    * payments row, so they're invisible here.
    */
-  revenueByMonth: adminProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.db
-      .select({
-        month: sql<string>`strftime('%Y-%m', ${payments.createdAt})`,
-        totalCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)`,
-      })
-      .from(payments)
-      .where(eq(payments.status, "paid"))
-      .groupBy(sql`strftime('%Y-%m', ${payments.createdAt})`)
-      .orderBy(sql`strftime('%Y-%m', ${payments.createdAt}) DESC`);
-
-    return rows.map((r) => ({
-      month: r.month,
-      totalCents: Number(r.totalCents),
-    }));
-  }),
+  revenueByMonth: adminProcedure.query(({ ctx }) => getRevenueByMonth(ctx.db)),
 
   /** Total paid-payment revenue and count grouped by payment method, highest first. */
-  revenueByMethod: adminProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.db
-      .select({
-        method: payments.method,
-        totalCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)`,
-        count: sql<number>`count(*)`,
-      })
-      .from(payments)
-      .where(eq(payments.status, "paid"))
-      .groupBy(payments.method)
-      .orderBy(sql`sum(${payments.amountCents}) DESC`);
-
-    return rows.map((r) => ({
-      method: r.method,
-      totalCents: Number(r.totalCents),
-      count: Number(r.count),
-    }));
-  }),
+  revenueByMethod: adminProcedure.query(({ ctx }) => getRevenueByMethod(ctx.db)),
 
   /**
    * Trainer Payroll (Total Heads).
@@ -263,60 +221,10 @@ export const adminRouter = router({
   }),
 
   /** Check-in counts grouped by calendar date, over the last 14 days. */
-  checkinsPerDay: adminProcedure.query(async ({ ctx }) => {
-    const start = new Date();
-    start.setDate(start.getDate() - 14);
-    const startStr = start.toISOString().slice(0, 10);
-
-    const rows = await ctx.db
-      .select({
-        date: sql<string>`date(${checkins.checkedInAt})`,
-        count: sql<number>`count(*)`,
-      })
-      .from(checkins)
-      .where(sql`date(${checkins.checkedInAt}) >= ${startStr}`)
-      .groupBy(sql`date(${checkins.checkedInAt})`)
-      .orderBy(sql`date(${checkins.checkedInAt}) DESC`);
-
-    return rows.map((r) => ({
-      date: r.date,
-      count: Number(r.count),
-    }));
-  }),
+  checkinsPerDay: adminProcedure.query(({ ctx }) => getCheckinsPerDay(ctx.db)),
 
   /** Top 10 trainers by attended-booking count over the last 14 days. */
-  topTrainers: adminProcedure.query(async ({ ctx }) => {
-    const start = new Date();
-    start.setDate(start.getDate() - 14);
-    const startStr = start.toISOString().slice(0, 10);
-
-    const rows = await ctx.db
-      .select({
-        trainerId: classes.trainerId,
-        trainerName: users.name,
-        classCount: sql<number>`count(distinct ${bookings.classId})`,
-        attendedCount: sql<number>`count(${bookings.id})`,
-      })
-      .from(bookings)
-      .innerJoin(classes, eq(bookings.classId, classes.id))
-      .innerJoin(users, eq(classes.trainerId, users.id))
-      .where(
-        and(
-          eq(bookings.status, "attended"),
-          sql`date(${classes.startsAt}) >= ${startStr}`,
-        ),
-      )
-      .groupBy(classes.trainerId, users.name)
-      .orderBy(sql`count(${bookings.id}) DESC`)
-      .limit(10);
-
-    return rows.map((r) => ({
-      trainerId: r.trainerId,
-      trainerName: r.trainerName,
-      classCount: Number(r.classCount),
-      attendedCount: Number(r.attendedCount),
-    }));
-  }),
+  topTrainers: adminProcedure.query(({ ctx }) => getTopTrainers(ctx.db)),
 
   /**
    * Bookings marked `no_show` in the last 14 days, with trainer name
@@ -328,57 +236,5 @@ export const adminRouter = router({
    * class passes, so in a live (non-seeded) system this list stays
    * empty indefinitely.
    */
-  noShowList: adminProcedure.query(async ({ ctx }) => {
-    const start = new Date();
-    start.setDate(start.getDate() - 14);
-    const startStr = start.toISOString().slice(0, 10);
-
-    const rows = await ctx.db
-      .select({
-        bookingId: bookings.id,
-        memberId: users.id,
-        memberName: users.name,
-        memberEmail: users.email,
-        className: classes.name,
-        classDate: classes.startsAt,
-        trainerId: classes.trainerId,
-      })
-      .from(bookings)
-      .innerJoin(classes, eq(bookings.classId, classes.id))
-      .innerJoin(users, eq(bookings.userId, users.id))
-      .where(
-        and(
-          eq(bookings.status, "no_show"),
-          sql`date(${classes.startsAt}) >= ${startStr}`,
-        ),
-      )
-      .orderBy(sql`${classes.startsAt} DESC`);
-
-    const trainerIds = [...new Set(rows.map((r) => r.trainerId).filter((id) => id != null))];
-    const trainers = new Map<number | null, string>();
-
-    // Resolve every distinct trainerId seen across the no-show rows to a
-    // name in one batched lookup, rather than one query per row.
-    if (trainerIds.length > 0) {
-      const trainerRows = await ctx.db
-        .select({ id: users.id, name: users.name })
-        .from(users)
-        .where(inArray(users.id, trainerIds as number[]));
-
-      trainerRows.forEach((t) => {
-        trainers.set(t.id, t.name);
-      });
-    }
-
-    return rows.map((r) => ({
-      bookingId: r.bookingId,
-      memberId: r.memberId,
-      memberName: r.memberName,
-      memberEmail: r.memberEmail,
-      className: r.className,
-      classDate: r.classDate,
-      trainerId: r.trainerId,
-      trainerName: r.trainerId ? trainers.get(r.trainerId) : undefined,
-    }));
-  }),
+  noShowList: adminProcedure.query(({ ctx }) => getNoShowList(ctx.db)),
 });

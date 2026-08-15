@@ -8,11 +8,20 @@ import {
   companyMembers,
   checkins,
   users,
-  studioSettings,
 } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
 import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
+import {
+  assertBookingCheckable,
+  assertCheckInWindow,
+  getCheckinWindowMinutes,
+} from "@/features/bookings/attendance-service";
+import {
+  hoursUntil,
+  assertClassBookable,
+  assertNoActiveBooking,
+} from "@/features/bookings/booking-policy";
 
 /**
  * Corporate (company-credit-pool-funded) class bookings — structurally
@@ -20,7 +29,9 @@ import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
  * own credit handling. Capacity and waitlist order are both now
  * reconciled with the personal side — `book` shares `isClassFull`
  * (CORP-002, fixed) and `cancel` shares `promoteNextWaitlisted`
- * (CORP-003, fixed), both in src/features/bookings/.
+ * (CORP-003, fixed), both in src/features/bookings/. `book`'s
+ * class-validity and duplicate-booking checks are also now shared with
+ * bookings.ts via `booking-policy.ts` (Phase 2.2).
  * Not responsible for: linking/unlinking a member to a company (see
  * admin-companies.ts) — this file only reads that link via
  * `getCompanyForMember` below.
@@ -31,11 +42,6 @@ import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
  * the class starts. Cancelling later still frees the spot but forfeits the credit.
  */
 export const CORPORATE_FREE_CANCELLATION_HOURS = 24;
-
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
 
 /**
  * The company this user is linked to, if any and if it's active.
@@ -119,18 +125,7 @@ export const corporateBookingsRouter = router({
       if (!cls) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
-      if (cls.cancelled) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has been cancelled.",
-        });
-      }
-      if (hoursUntil(cls.startsAt) <= 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has already started.",
-        });
-      }
+      assertClassBookable(cls);
 
       const existing = await ctx.db
         .select()
@@ -144,12 +139,7 @@ export const corporateBookingsRouter = router({
         )
         .get();
 
-      if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "You are already on the list for this class.",
-        });
-      }
+      assertNoActiveBooking(existing);
 
       const companyRow = await getCompanyForMember(ctx.db, ctx.user.id);
       if (!companyRow) {
@@ -339,8 +329,19 @@ export const corporateBookingsRouter = router({
    * table, so the inserted checkin always has `bookingId: null` — it can
    * never be traced back to this corporate booking.
    *
+   * Related, previously-undocumented quirk found during the Phase 2.1
+   * extraction (`attendance-service.ts`): the checkin insert below never
+   * passes `source`, so it always lands on the `checkins.source` column
+   * default (`"front_desk"`) regardless of `input.source` — unlike the
+   * personal `bookings.markAttended`, which does record the real source.
+   * `input.source` is accepted here but effectively ignored. Preserved
+   * exactly as this extraction found it, not fixed — see
+   * `attendance.test.ts` for the characterization test that locks this
+   * in, and `known-issues.md` for a formal defect entry to be added.
+   *
    * @throws NOT_FOUND if the booking doesn't exist
-   * @throws BAD_REQUEST if the booking isn't currently "booked"
+   * @throws BAD_REQUEST if the booking isn't currently "booked", or if
+   *   outside the check-in window
    */
   markAttended: staffProcedure
     .input(
@@ -359,12 +360,7 @@ export const corporateBookingsRouter = router({
       if (!booking) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found." });
       }
-      if (booking.status !== "booked") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Only confirmed bookings can be checked in.",
-        });
-      }
+      assertBookingCheckable(booking.status);
 
       const cls = await ctx.db
         .select()
@@ -376,18 +372,8 @@ export const corporateBookingsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
-      let settingsRow = await ctx.db.select().from(studioSettings).limit(1).get();
-      const windowMinutes = settingsRow?.checkinWindowMinutes ?? 30;
-
-      const now = Date.now();
-      const startMs = new Date(cls.startsAt).getTime();
-      const endMs = startMs + cls.durationMin * 60000;
-      if (now < startMs - windowMinutes * 60000 || now > endMs) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Check-in is only allowed from ${windowMinutes} minutes before class starts until it ends.`,
-        });
-      }
+      const windowMinutes = await getCheckinWindowMinutes(ctx.db);
+      assertCheckInWindow(cls, windowMinutes);
 
       await ctx.db
         .update(corporateBookings)

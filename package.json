@@ -10,6 +10,7 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "node -e \"require('fs').rmSync('flexfit.db',{force:true})\" && npm run db:push && npm run db:seed",
+    "db:test:push": "drizzle-kit push --config drizzle.test.config.ts",
     "cron": "tsx src/server/cron.ts",
     "test": "vitest run"
   },

@@ -1,0 +1,374 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { trpc } from "@/lib/trpc";
+import { formatDateTime } from "@/lib/format";
+import { BookingConfirmModal } from "@/components/booking-confirm-modal";
+
+/**
+ * Phase 3 of restructure-plan.md: moved verbatim out of
+ * src/app/schedule/page.tsx — no JSX, styling, trpc call, or logic
+ * changed, only the file location. The page itself is now route-level
+ * composition only (plan.md item #54's own pattern).
+ *
+ * Public class browser and booking entry point. Books against the
+ * caller's personal membership credits via `bookings.book` by default;
+ * for a member linked to an active company (CORP-005), the book button
+ * also offers a company-credits option via `corporateBookings.book`.
+ * Clicking Book/Personal credits/Company credits opens a confirmation
+ * popup (class details + credits to be deducted) before either mutation
+ * actually fires — previously it booked immediately on click.
+ * Not responsible for: reconciling personal and corporate capacity —
+ * `spotsLeft`/`full` below reflect personal bookings only, same as
+ * before (see CORP-002 in known-issues.md, not changed here).
+ */
+export function ScheduleBrowser() {
+  const router = useRouter();
+  const utils = trpc.useUtils();
+  const { data: user } = trpc.auth.me.useQuery();
+  const { data: myCompany } = trpc.corporateBookings.myCompany.useQuery(undefined, {
+    enabled: !!user,
+  });
+  // FIX: Stabilize the "from" date so React Query gets a consistent query key.
+  // Previously `new Date().toISOString()` was called on every render, producing
+  // a slightly different timestamp each time (milliseconds apart). React Query
+  // treats each unique input as a new query → re-fetches → re-render → new
+  // timestamp → infinite loop. useState(() => ...) runs once on mount only.
+  const [now] = useState(() => new Date().toISOString());
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+
+  // Class schedule filter state (client-side only — same name/date
+  // filter pattern used on admin/classes/page.tsx, trainer/schedule/page.tsx
+  // and dashboard/page.tsx's upcoming bookings). Applied on top of the
+  // existing day-of-week filter below, not replacing it.
+  const [filterName, setFilterName] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const { data: classes, isLoading } = trpc.classes.list.useQuery({
+    from: now,
+  });
+
+  const book = trpc.bookings.book.useMutation({
+    onSuccess: async () => {
+      await utils.classes.list.invalidate();
+      await utils.bookings.mine.invalidate();
+    },
+  });
+
+  const bookCorporate = trpc.corporateBookings.book.useMutation({
+    onSuccess: async () => {
+      await utils.classes.list.invalidate();
+      await utils.corporateBookings.mine.invalidate();
+    },
+  });
+
+  const bookingError = book.error ?? bookCorporate.error;
+  const isBooking = book.isPending || bookCorporate.isPending;
+
+  // Which class + credit source the confirm popup is currently showing,
+  // or null when it's closed. Set by BookButton's callbacks below;
+  // cleared on Cancel, overlay click, or a successful booking.
+  const [confirmTarget, setConfirmTarget] = useState<{
+    classId: number;
+    className: string;
+    startsAt: string;
+    room: string;
+    creditCost: number;
+    full: boolean;
+    source: "personal" | "corporate";
+  } | null>(null);
+
+  // SCHED-001: clears any leftover error from a previous failed attempt
+  // (react-query only resets a mutation's own error on its *next*
+  // .mutate() call) — without this, closing the popup after a failure
+  // and reopening it for a different class could still show the old
+  // error message. Same reset-on-every-exit-path shape as RESCH-007's
+  // fix in reschedule-modal.tsx.
+  function closeConfirm() {
+    setConfirmTarget(null);
+    book.reset();
+    bookCorporate.reset();
+  }
+
+  function handleConfirm() {
+    if (!confirmTarget) return;
+    if (confirmTarget.source === "corporate") {
+      bookCorporate.mutate(
+        { classId: confirmTarget.classId },
+        { onSuccess: closeConfirm },
+      );
+    } else {
+      book.mutate(
+        { classId: confirmTarget.classId },
+        { onSuccess: closeConfirm },
+      );
+    }
+  }
+
+  if (isLoading) return <p className="muted">Loading schedule...</p>;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Class schedule</h1>
+        <p className="muted mt-1 text-sm">
+          {classes?.length ?? 0} upcoming classes
+        </p>
+      </div>
+
+      {bookingError && (
+        <p className="panel p-3 text-sm" style={{ color: "#f87171" }}>
+          {bookingError.message}
+        </p>
+      )}
+
+      {/* Day Filter */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        <button
+          onClick={() => setSelectedDay(null)}
+          className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+            selectedDay === null
+              ? "bg-green-500/10 text-green-400 border border-green-500/20"
+              : "bg-[#12141a] text-gray-400 border border-transparent hover:text-gray-200"
+          }`}
+        >
+          All Days
+        </button>
+        {DAYS.map((day, idx) => (
+          <button
+            key={day}
+            onClick={() => setSelectedDay(idx)}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+              selectedDay === idx
+                ? "bg-green-500/10 text-green-400 border border-green-500/20"
+                : "bg-[#12141a] text-gray-400 border border-transparent hover:text-gray-200"
+            }`}
+          >
+            {day}
+          </button>
+        ))}
+      </div>
+
+      {/* Class schedule filter bar: name/date, same client-side
+          filtering pattern as admin/classes/page.tsx and
+          trainer/schedule/page.tsx. Filters the already-fetched `classes`
+          list, not a new query. */}
+      <div className="panel p-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="block text-sm muted mb-1">Filter by Name</label>
+          <input
+            className="input w-full"
+            type="text"
+            value={filterName}
+            onChange={(e) => setFilterName(e.target.value)}
+            placeholder="e.g. Yoga"
+          />
+        </div>
+        <div>
+          <label className="block text-sm muted mb-1">Filter by Date</label>
+          <input
+            className="input w-full"
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {classes?.filter(c => {
+          if (selectedDay !== null && new Date(c.startsAt).getDay() !== selectedDay) return false;
+          if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+          if (filterDate) {
+            const d = new Date(c.startsAt);
+            const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            if (localDate !== filterDate) return false;
+          }
+          return true;
+        }).length === 0 && (
+          <p className="muted text-sm py-4">No classes scheduled for this day.</p>
+        )}
+        {classes?.filter(c => {
+          if (selectedDay !== null && new Date(c.startsAt).getDay() !== selectedDay) return false;
+          if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+          if (filterDate) {
+            const d = new Date(c.startsAt);
+            const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            if (localDate !== filterDate) return false;
+          }
+          return true;
+        }).map((c) => (
+          <div
+            key={c.id}
+            className="panel flex items-center gap-4 p-4"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h2 className="font-medium">{c.name}</h2>
+                {c.full && (
+                  <span className="rounded px-1.5 py-0.5 text-xs" style={{ background: "#3a2a1a", color: "#fbbf24" }}>
+                    Full
+                  </span>
+                )}
+              </div>
+              <p className="muted mt-0.5 text-sm">
+                {formatDateTime(c.startsAt)} &middot; {c.room} &middot;{" "}
+                {c.trainerName ?? "Unassigned"} &middot; {c.durationMin} min
+              </p>
+            </div>
+
+            <div className="text-right text-sm muted shrink-0">
+              <div>
+                {c.spotsLeft} / {c.capacity} left
+              </div>
+              <div>
+                {c.creditCost} credit{c.creditCost === 1 ? "" : "s"}
+              </div>
+            </div>
+
+            {/* Signed-out visitors get a clickable Book button that sends
+                them to sign in, instead of a disabled button — they no
+                longer have to notice the small "Sign in to book a class"
+                line below to know what to do. Signed-in behavior
+                (book/waitlist, personal vs. company credits) is
+                unchanged. */}
+            <BookButton
+              full={c.full}
+              disabled={isBooking}
+              company={myCompany ?? null}
+              onBookPersonal={() =>
+                user
+                  ? setConfirmTarget({
+                      classId: c.id,
+                      className: c.name,
+                      startsAt: c.startsAt,
+                      room: c.room,
+                      creditCost: c.creditCost,
+                      full: c.full,
+                      source: "personal",
+                    })
+                  : router.push("/login")
+              }
+              onBookCompany={() =>
+                user
+                  ? setConfirmTarget({
+                      classId: c.id,
+                      className: c.name,
+                      startsAt: c.startsAt,
+                      room: c.room,
+                      creditCost: c.creditCost,
+                      full: c.full,
+                      source: "corporate",
+                    })
+                  : router.push("/login")
+              }
+            />
+          </div>
+        ))}
+      </div>
+
+      {!user && (
+        <p className="muted text-sm">Sign in to book a class.</p>
+      )}
+
+      <BookingConfirmModal
+        isOpen={confirmTarget !== null}
+        className={confirmTarget?.className ?? ""}
+        classTime={confirmTarget?.startsAt ?? ""}
+        room={confirmTarget?.room ?? ""}
+        creditCost={confirmTarget?.creditCost ?? 0}
+        full={confirmTarget?.full ?? false}
+        source={confirmTarget?.source ?? "personal"}
+        companyName={myCompany?.name}
+        isPending={isBooking}
+        errorMessage={bookingError?.message}
+        onConfirm={handleConfirm}
+        onClose={closeConfirm}
+      />
+    </div>
+  );
+}
+
+/**
+ * Book button for one class row. A member with no active company link
+ * (the common case) sees the exact same single button as before this
+ * change. A company-linked member sees a button that expands on
+ * hover/click into two options — personal vs. company credits — so the
+ * choice is explicit rather than silently picked (see CORP-005).
+ * Expanding on click too (not just hover) so it also works on touch
+ * devices, which don't fire hover events.
+ *
+ * SCHED-002: when `full`, the expanded personal/company buttons are
+ * labeled "Join waitlist (…)" instead of "… credits" — previously they
+ * always said "Personal credits"/"{company} credits" regardless of
+ * `full`, so a company-linked member had no indication a full class's
+ * expanded buttons would join a waitlist rather than book a confirmed
+ * spot (the collapsed single button already said "Join waitlist"
+ * correctly; only the expanded state lost that wording).
+ */
+function BookButton({
+  full,
+  disabled,
+  company,
+  onBookPersonal,
+  onBookCompany,
+}: {
+  full: boolean;
+  disabled: boolean;
+  company: { id: number; name: string; creditPoolBalance: number } | null;
+  onBookPersonal: () => void;
+  onBookCompany: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!company) {
+    return (
+      <button className="btn btn-primary shrink-0 mr-1" disabled={disabled} onClick={onBookPersonal}>
+        {full ? "Join waitlist" : "Book"}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="relative flex justify-end shrink-0 mr-1"
+      onMouseEnter={() => setExpanded(true)}
+      onMouseLeave={() => setExpanded(false)}
+    >
+      <div
+        className="flex gap-1.5 overflow-hidden transition-all duration-200"
+        style={{ maxWidth: expanded ? 420 : 96 }}
+      >
+        {!expanded ? (
+          <button
+            className="btn btn-primary whitespace-nowrap"
+            disabled={disabled}
+            onClick={() => setExpanded(true)}
+          >
+            {full ? "Join waitlist" : "Book"}
+          </button>
+        ) : (
+          <>
+            <button
+              className="btn btn-primary whitespace-nowrap text-sm"
+              disabled={disabled}
+              onClick={onBookPersonal}
+            >
+              {full ? "Join waitlist (personal)" : "Personal credits"}
+            </button>
+            <button
+              className="btn whitespace-nowrap text-sm"
+              disabled={disabled}
+              onClick={onBookCompany}
+            >
+              {full ? `Join waitlist (${company.name})` : `${company.name} credits`}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

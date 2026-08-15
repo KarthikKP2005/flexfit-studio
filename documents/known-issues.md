@@ -11,6 +11,49 @@ Format follows plan.md's suggested defect template.
 
 ---
 
+## Phase 5 triage (2026-08-15)
+
+Per `documents/restructure-plan.md`'s Phase 5: with Phases 0–3 done,
+re-triaged all 18 items below still `Confirmed`/`Documented, not fixed`
+to decide which are actually worth fixing before submission vs. staying
+logged-and-left. This pass is triage only — no code changed here; each
+item's own entry below carries a `Phase 5 triage:` line with the same
+verdict and reasoning. Decisions were made on severity × fix cost ×
+blast radius, not severity alone — several Low-severity items are cheap,
+template-following one-liners worth doing anyway, while a couple of
+Medium/High items are correctly staying documented because a safe fix
+needs a schema migration or touches too many files this close to a
+deadline.
+
+**Recommended if time allows, cheapest/highest-value first:**
+
+| Defect | Severity | Why it's worth it |
+|---|---|---|
+| `ADMIN-003` | High | Wrong "spots left" on the public `/schedule` page, for every class, always — highest-visibility bug on the list. Fix pattern already proven in `capacity-service.ts`. |
+| `AUTH-005` | High | Deactivated users keep working sessions for up to 30 days — real security gap, contained to two files. |
+| `CORP-006` | Low | One missing field (`source: input.source`) — the sibling `bookings.ts` mutation already shows the exact fix. |
+| `AUTH-006` | Low | One line (`RequireRole` wrap) — identical to 7 pages already fixed under `AUTH-004`. |
+| `AUTH-001` | Medium | One destructure, same pattern `members.byId` already uses to omit `passwordHash`. |
+| `ADMIN-004` | Medium | Render `.error?.message`, same pattern `schedule/page.tsx` and the trainer roster already use. |
+| `PLAN-004` / `MEMBER-003` | Low | Same one-line `NOT_FOUND`-on-missing-row fix, twice. |
+| `CLASS-003` | Low | Reuse the existing trainer-role check `TRAINER-003`'s fix already calls elsewhere. |
+| `TRAINER-001` | Low | Zod regex + a comparison — self-contained. |
+| `NOTIF-001` | Low | One `eq(users.active, true)` clause added to an existing `where`. |
+| `CLASS-002` | Medium | Contained to one file; real correctness gap (capacity can go below occupancy). |
+
+**Staying documented — bigger than a safe pre-deadline change:**
+
+| Defect | Severity | Why it's staying open |
+|---|---|---|
+| `MEMBER-001` | Medium | Fix changes the response shape (single row → list) and needs a kiosk UI update to consume it — not a local fix. |
+| `TRAINER-002` | Medium | Needs an actual business-timezone concept, cross-cutting into `bookings.ts`/`reschedules.ts`/`format.ts` — plan.md itself calls this out as non-local. |
+| `ADMIN-001` | Medium | Needs a shared occupancy service (corporate + personal); its own effect is largely masked by `ADMIN-003` returning 0 regardless today — better tackled once `ADMIN-003` lands, not bundled with it. |
+| `ADMIN-002` | Low | Needs a new ledger table + migration — schema change, explicitly flagged by plan.md as out of scope for a pass like this. |
+| `KIOSK-002` | Medium | Needs a merged personal+corporate lookup and a shared attendance service; plan.md itself lists this under "fix only with strong tests," not the safe-now list. |
+| `CORP-004` | Low | Needs a schema migration (new FK column(s) on `checkins`) — out of scope without a migration story. |
+
+---
+
 ### AUTH-001 — `auth.me` returns the full user row, including `passwordHash`, to the client
 
 **Severity:** Medium (info exposure, not directly exploitable — the hash
@@ -43,6 +86,10 @@ signed in` — passes today, documenting the leak.
 
 **What "fixed" would look like:** `me` omits `passwordHash` the same way
 `members.byId` already does, e.g. destructuring it out before returning.
+
+**Phase 5 triage (2026-08-15):** worth fixing. Cheapest possible fix —
+one destructure, exact template already proven in `members.byId` — for
+a real (if low-severity) info leak.
 
 ---
 
@@ -242,6 +289,51 @@ plan.md's own required change). Left undone this round per Rule 8 —
 documenting the confirmed gap now rather than bundling a security-
 behavior FIX into a comment-only DOCUMENT change.
 
+**Phase 5 triage (2026-08-15):** worth fixing — highest-severity item on
+this list still open. Contained to `members.setActive` and
+`createContext`, both already read and understood; no schema migration
+needed (deleting `sessions` rows or adding an `active` check uses
+existing columns).
+
+---
+
+### AUTH-006 — `admin/plans` has no client-side role gate at all
+
+**Severity:** Low (same category as AUTH-004: `adminPlans.*` procedures
+are already `adminProcedure`-guarded server-side, so no real data is
+reachable — this is presentation only) — but notably this page was
+missed entirely by the AUTH-004 fix, not one of its four documented
+patterns.
+**Status:** Confirmed from source, not fixed
+**Area:** Frontend / Access control (client-side only — backend
+untouched)
+**File:** `src/app/admin/plans/page.tsx`
+
+**Current behavior:** Found while extracting this page's JSX verbatim
+into `PlanManager` (Phase 3 of `documents/restructure-plan.md`,
+REFACTOR only, no behavior change permitted in that pass). Unlike the
+7 pages AUTH-004 already wrapped in `RequireRole`
+(`admin`, `admin/attendance`, `admin/reports`, `admin/announcements`,
+`admin/companies` list + detail, `trainer/schedule`, `kiosk`),
+`admin/plans` was never included in that fix's file list. The page
+renders its full create-plan form and plan grid to any visitor,
+regardless of role — closest to AUTH-004's "fully functional, no gate"
+pattern (`admin/announcements`, pre-fix).
+
+**Why not fixed here:** This session's constraint for the file was
+"only refactor" (verbatim move, no behavior change) — adding
+`RequireRole` here would change what an unauthorized visitor sees,
+which is a FIX, not a move. Preserved exactly as found.
+
+**What "fixed" would look like:** wrap `PlanManager` in
+`src/app/admin/plans/page.tsx` with the existing `RequireRole`
+component, the same one-line change already applied to the other 7
+admin/staff pages — no new component needed.
+
+**Phase 5 triage (2026-08-15):** worth fixing. Trivially cheap —
+identical one-line change to the 7 pages `AUTH-004` already fixed,
+closes the gap that fix missed.
+
 ---
 
 ### NOTIF-001 — `broadcast` sends to deactivated members despite the `activeMembers` variable name
@@ -273,6 +365,10 @@ test per Rule 1.1/3.
 
 **What "fixed" would look like:** add `eq(users.active, true)` to the
 query's `where` alongside the existing role filter.
+
+**Phase 5 triage (2026-08-15):** worth fixing. One clause added to an
+existing `where`; characterization test already exists and just needs
+its expectation flipped.
 
 ---
 
@@ -531,6 +627,10 @@ plan id, no error thrown`.
 **What "fixed" would look like:** match the pattern used elsewhere —
 throw `NOT_FOUND` when the updated row comes back empty.
 
+**Phase 5 triage (2026-08-15):** worth fixing. Same one-line
+`NOT_FOUND` pattern as `MEMBER-003` below — do both together, they're
+the same shape of bug in sibling files.
+
 ---
 
 ### PAY-001 — `refund` cancels the membership but leaves bookings and credits untouched
@@ -612,6 +712,12 @@ matching substring, returns an arbitrary single one, not a list`.
 
 **What "fixed" would look like:** per plan.md — exact normalized
 email/phone match, or return a list and require staff selection.
+
+**Phase 5 triage (2026-08-15):** staying documented. Either fix option
+changes the return shape (single object → list, or narrows matching
+semantics) and requires a corresponding kiosk UI update to consume the
+new shape — bigger than a local, low-risk change this close to
+submission.
 
 ---
 
@@ -700,6 +806,9 @@ input.
 
 **What "fixed" would look like:** same pattern as PLAN-004's fix — throw
 `NOT_FOUND` when the updated row comes back empty.
+
+**Phase 5 triage (2026-08-15):** worth fixing — pair with `PLAN-004`,
+same one-line pattern in two places.
 
 ---
 
@@ -848,6 +957,10 @@ regex-constrained zod schema plus a `startTime < endTime` check. A
 validation change is a behavior change (new rejections for previously
 accepted input), so it's a FIX, not a refactor.
 
+**Phase 5 triage (2026-08-15):** worth fixing. Self-contained zod schema
+change in one file; existing test already documents the accepted-nonsense
+case to flip.
+
 ---
 
 ### TRAINER-002 — Availability is checked against UTC day/hour, not a trainer's local time
@@ -875,6 +988,11 @@ single defined business timezone used consistently across booking
 cutoffs, trainer availability, reports, and display. This is a
 cross-cutting change (also touches `bookings.ts`/`reschedules.ts`'s
 `hoursUntil` and `src/lib/format.ts`'s display formatting), not a local fix.
+
+**Phase 5 triage (2026-08-15):** staying documented. Needs an actual
+business-timezone concept touching three-plus files at once
+(`trainers.ts`, `bookings.ts`, `reschedules.ts`, `format.ts`) — too
+broad to change safely this close to submission.
 
 ---
 
@@ -982,6 +1100,11 @@ already-confirmed bookings`.
 reject a capacity below combined confirmed occupancy, or require an
 explicit documented override.
 
+**Phase 5 triage (2026-08-15):** worth fixing. Contained to `classes.ts`'s
+`update`; `capacity-service.ts`'s safe occupancy-counting pattern
+(already proven correct, unlike the buggy pattern in `ADMIN-003`) is
+directly reusable here.
+
 ---
 
 ### CLASS-003 — `create`'s `trainerId` is not validated as an existing, active trainer
@@ -1003,6 +1126,10 @@ non-trainer user...`
 **Why not fixed here / what "fixed" would look like:** per plan.md —
 validate the referenced user exists, is active, and has role "trainer"
 before assigning.
+
+**Phase 5 triage (2026-08-15):** worth fixing. `TRAINER-003`'s fix
+already added a trainer-role existence check elsewhere in this file
+(`swapTrainer`) — this is the same check, reused, for `create`.
 
 ---
 
@@ -1165,6 +1292,13 @@ application bug, via a raw-SQL cross-check).
 shared occupancy service counting both booking sources, used consistently
 by `classUtilisation`, `classes.list`'s spotsLeft, and the trainer roster.
 
+**Phase 5 triage (2026-08-15):** staying documented, for now. Needs a
+real shared occupancy service across `bookings` and `corporateBookings`
+— a bigger change than a local fix, and its practical effect is
+currently masked anyway: `ADMIN-003`'s bug already makes the base
+`booked` count 0 regardless of corporate bookings. Revisit once
+`ADMIN-003` is fixed and the base count is trustworthy again.
+
 ---
 
 ### ADMIN-002 — Revenue reports never include corporate credit top-ups
@@ -1187,6 +1321,137 @@ top-ups never appear in revenue, only payments rows do`.
 `company_credit_transactions` ledger table. A schema change, out of scope
 for this pass; documenting is the safer choice per plan.md's own
 recommendation given the time available.
+
+**Phase 5 triage (2026-08-15):** staying documented. Needs a new ledger
+table and migration — plan.md itself already recommends documenting
+over attempting this without dedicated migration time.
+
+---
+
+### ADMIN-003 — Correlated-subquery-as-column pattern always returns 0, affecting `admin.classUtilisation` and `classes.list`'s `spotsLeft`
+
+**Severity:** High (both a member-facing and admin-facing display bug —
+confirmed to make the public `/schedule` page's "spots left" and the
+admin dashboard's "booked" numbers wrong for every class, always. Not a
+data-integrity or overbooking risk — see below.)
+**Status:** Confirmed from source, root cause isolated (new — found
+while writing characterization tests for the Phase 2.4
+`admin.ts` split on branch `restructure-project1`; not previously
+documented anywhere, including plan.md's original 56-item audit)
+**Area:** Reporting / Schedule display
+**Files:** `src/server/routers/admin.ts` — `classUtilisation`;
+`src/server/routers/classes.ts` — `list`
+
+**Current behavior:** both procedures select a `booked` column computed
+as a correlated subquery referencing the outer row:
+```ts
+booked: sql<number>`(
+  select count(*) from ${bookings}
+  where ${bookings.classId} = ${classes.id}
+    and ${bookings.status} in ('booked','attended')
+)`.as("booked"),
+```
+This always evaluates to `0`, regardless of how many real `booked`/
+`attended` rows exist for that class.
+
+**Verified real, not a test artifact:** reproduced directly against the
+live `flexfit.db` (not just the disposable test database) — classes with
+4, 8, and 17 real confirmed bookings (verified via a separate, direct
+`count(*)` query) all report `booked: 0` through this query shape.
+Removing `.limit()` didn't change it. The exact same subquery run as raw
+SQL via `db.all(sql\`...\`)` — no drizzle query-builder involved — returns
+the correct counts (4, 8, 17). The bug is isolated specifically to how
+drizzle-orm's query builder compiles a `sql<T>` tagged-template
+correlated subquery when used as a selected column and referencing an
+outer-query column (`${classes.id}`) from inside it; not present when
+the same subquery is issued as raw SQL, and not present in
+`capacity-service.ts`'s `getConfirmedOccupancy`, which uses a plain
+`.select({count: sql<number>\`count(*)\`}).from(bookings).where(...)` —
+no correlation, no column-embedded subquery — and returns correct counts.
+
+**Not a security/overbooking issue:** actual capacity enforcement
+(`bookings.book`, `corporateBookings.book`) goes through
+`capacity-service.ts`'s safe, separate query shape — confirmed
+unaffected. This bug is display-only: `/schedule` always shows every
+class as if `0` people had booked (so `spotsLeft` always equals full
+`capacity`, and a class is never shown as visually "full" even when it
+is), and the admin dashboard's utilisation report always shows `0%`
+for every class. A member could still be correctly waitlisted by `book`
+even though the page told them there was room.
+
+**Not yet confirmed:** whether this reproduces against a real Turso
+cloud database (`dialect: "turso"` in `drizzle.config.ts`) as opposed to
+the local file-based `@libsql/client` driver both the dev database and
+this test harness use — no way to test that from this environment. If
+it's driver-specific, production behavior on real Turso could differ
+from what's reproduced here; flagged as an open question, not assumed
+either way.
+
+**Why not fixed here:** found while writing a *characterization* test
+for a REFACTOR (Phase 2.4, extracting `classUtilisation` into
+`src/features/reports/`) — Rule 3 requires that extraction be
+byte-for-byte behavior-identical, so the bug is preserved exactly in the
+move, not silently fixed. `classes.list` is untouched entirely by that
+extraction (out of its scope) and is documented here as a second,
+separate call site sharing the same root cause, not touched either.
+
+**What "fixed" would look like:** replace the correlated-subquery-column
+pattern with the same safe pattern `capacity-service.ts` already proves
+works — either two separate queries (one for classes, one aggregated
+`count(*)...group by classId` joined/merged in application code), or a
+`LEFT JOIN` + `GROUP BY` instead of a scalar subquery in the select
+list. Real fix candidate for Phase 5, and arguably higher priority than
+several already-`Fixed` items given it affects the primary public
+schedule page.
+
+**Phase 5 triage (2026-08-15):** worth fixing — top priority on this
+list. Highest real-world visibility (the public `/schedule` page and the
+admin dashboard both display wrong numbers, always) of any open item,
+and the safe replacement pattern is already proven correct in
+`capacity-service.ts`, so this isn't a design question, just an
+application of an existing pattern to two more call sites.
+
+---
+
+### ADMIN-004 — Admin class scheduler never surfaces cancel/swap-trainer mutation errors
+
+**Severity:** Medium (admin-facing — "Cancel Class" and "Confirm Swap"
+appear to silently do nothing on failure; the admin has no way to know
+why, or that anything went wrong at all)
+**Status:** Documented, not fixed (new — found during the Phase 3
+`ClassScheduler` extraction on branch `restructure-project1`)
+**Area:** Admin / Classes / Frontend
+**File:** `src/features/admin-classes/components/ClassScheduler.tsx`
+(formerly `src/app/admin/classes/page.tsx`)
+
+**Current behavior:** `cancelMutation` and `swapMutation` are both
+defined with `onSuccess` handlers but no error handling anywhere in the
+component — `cancelMutation.error`/`swapMutation.error` are never read,
+and no error `<p>` element exists in the JSX (unlike, for example,
+`schedule/page.tsx`'s `bookingError` panel, or `trainer/schedule`'s
+`actionError` panel). If either mutation rejects — most concretely,
+`swapTrainer` throwing `BAD_REQUEST` when the new trainer isn't
+available (`TRAINER-003`, fixed on the backend this session) — the
+button click simply does nothing visible: no toast, no inline message,
+no state change. The admin has to infer failure from the UI *not*
+changing.
+
+**Why not fixed here:** found while doing a pure Phase 3 REFACTOR (JSX
+moved verbatim, no logic changes per Rule 3) — surfacing the error would
+be a real UI behavior change, not a move, so it's logged instead of
+folded into that commit.
+
+**What "fixed" would look like:** the same pattern already used
+elsewhere in this codebase — render `cancelMutation.error?.message` /
+`swapMutation.error?.message` in a `panel` element near the button, same
+shape as `schedule/page.tsx`'s `bookingError` or
+`trainer/schedule`'s `actionError`. Small, low-risk, good Phase 5
+candidate.
+
+**Phase 5 triage (2026-08-15):** worth fixing. Same pattern already
+applied to the trainer roster's Check In/Admit errors this session
+(`EDIT_LOG.md`, 2026-08-15 "CHORE(trainer)" entry) — apply it here too,
+same shape, one file.
 
 ---
 
@@ -1488,6 +1753,11 @@ file's own header comment (updated alongside this entry) names this
 defect directly so the gap doesn't silently drift out of sync with
 `known-issues.md`.
 
+**Phase 5 triage (2026-08-15):** staying documented. plan.md itself
+puts this on the "fix only with strong tests" list, not the safe-now
+one — needs a merged lookup procedure and a shared attendance service,
+more surface than a local pre-deadline change.
+
 ---
 
 ### CORP-002 — Corporate booking capacity is judged independently of personal bookings on the same class
@@ -1637,6 +1907,9 @@ schema change (either a `bookingSource` + two nullable FK columns on
 `checkins`, or separate `membershipBookingId`/`corporateBookingId`
 columns), needing a migration — out of scope for this pass.
 
+**Phase 5 triage (2026-08-15):** staying documented. Needs a schema
+migration on `checkins` — out of scope without dedicated migration time.
+
 ---
 
 ### CORP-005 — No member-facing UI for corporate booking (schedule always called personal `bookings.book`)
@@ -1678,6 +1951,57 @@ only (see CORP-002) — the new company-credits button does not display a
 separate "full" state for the corporate side. Rescheduling a corporate
 booking is not supported (`reschedules.ts` only operates on the personal
 `bookings` table) — corporate rows on `/dashboard` only get Cancel.
+
+---
+
+### CORP-006 — Corporate check-ins always record `checkins.source` as `"front_desk"`, ignoring the real source
+
+**Severity:** Low (reporting/audit-trail inaccuracy, not a functional
+break — attendance still gets recorded, just with a wrong source label)
+**Status:** Documented, not fixed (new — found during the Phase 2.1
+`attendance-service.ts` extraction on branch `restructure-project1`;
+related to, but distinct from, `CORP-004`)
+**Area:** Corporate bookings / Attendance
+**File:** `src/server/routers/corporate-bookings.ts` — `markAttended`
+
+**Current behavior:** the mutation accepts
+`source: "front_desk" | "kiosk" | "app" | "trainer"` as input, but its
+`checkins` insert never passes `source` at all:
+```ts
+await ctx.db.insert(checkins).values({
+  userId: booking.userId,
+  bookingId: null,
+});
+```
+`checkins.source` is `NOT NULL DEFAULT "front_desk"` (`schema.ts`), so
+every corporate check-in's recorded source is silently `"front_desk"`
+regardless of what was actually passed — a check-in made from the
+trainer roster (`source: "trainer"`) or kiosk (`source: "kiosk"`) is
+indistinguishable from a front-desk one in the `checkins` table. The
+sibling personal path, `bookings.ts`'s `markAttended`, does pass
+`source: input.source` correctly — this is a one-sided inconsistency
+between the two otherwise-parallel mutations, not a shared bug.
+
+**Reproduction:** `attendance.test.ts`'s *"corporate: marks attended,
+checkins.bookingId is null, source is ALWAYS front_desk regardless of
+input"* — passes `source: "trainer"` and asserts the stored row is
+`"front_desk"`.
+
+**Why not fixed here:** found and locked in as a characterization test
+while extracting shared check-in logic into `attendance-service.ts`
+(Phase 2.1, a REFACTOR) — per Rule 3, a REFACTOR must be behavior-
+identical, so this was preserved exactly rather than silently corrected
+inside that commit. Fixing it is a one-line change
+(`source: input.source` added to the insert) but is a real behavior
+change and belongs in its own FIX commit, not bundled here.
+
+**What "fixed" would look like:** add `source: input.source` to the
+insert, matching the personal path exactly. Low risk, small blast
+radius — a reasonable Phase 5 candidate.
+
+**Phase 5 triage (2026-08-15):** worth fixing. One-line, exact template
+already exists in the sibling `bookings.ts` mutation, and the
+characterization test just needs its expectation flipped.
 
 ---
 

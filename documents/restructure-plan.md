@@ -1,0 +1,303 @@
+# FlexFit Studio — Restructuring Plan (Project 1, Item A)
+
+Full end-to-end plan for the "restructure and rewrite to sensible modern
+Next.js/TypeScript practice" ask in `plan.md` Item A, written before any
+code moves (per Item A's own "we mark whether the structure makes sense
+and whether you can explain why you picked it"). Supersedes the informal
+discussion that produced it — this is the version to actually follow.
+
+Every phase is designed so that **stopping at any phase boundary leaves
+the repo in a defensible, honestly-documented state.** Nothing here should
+ever be half-done and undocumented at the same time.
+
+---
+
+## Decisions needed before starting (flagged, not guessed — Rule 8)
+
+These three are genuinely open and should be picked before Phase 2 begins:
+
+1. **Commit granularity on this branch (`restructure-project1`).**
+   `admin-update-two` used one bundled commit at explicit user request,
+   overriding Rule 4/8. Recommended default here: **go back to strict
+   one-commit-per-change** (one REFACTOR per extraction, one FIX per
+   defect) — the deadline is no longer forcing the shortcut, and Rule 4's
+   discipline is what makes this restructuring reviewable/defensible.
+2. **Data model stance.** Item B says leaving the schema alone is fine;
+   changing it is also fine "if you think the design needs it" — either
+   way it wants a decision you can defend, not silence. Recommended
+   default: **state explicitly, in one `architecture-decisions.md`
+   paragraph, that the core schema is being left as-is** (a few
+   incidental changes already happened — e.g. `COMPANY-001`'s unique
+   constraint on `companyMembers.userId` — call those out as the
+   exceptions, not evidence of a broader redesign).
+3. **Transactions are not bundled into extraction REFACTORs.** When
+   Phase 2 moves logic into a new service file, that move must stay
+   byte-for-byte behavior-identical per Rule 3. Wrapping the newly
+   co-located multi-step operations in a real DB transaction (closing
+   plan.md item #44) is a **separate FIX commit, with its own defect ID,
+   done after the extraction lands** — not silently bundled in.
+
+---
+
+## Phase 0 — Foundation — ✅ done (2026-08-15)
+
+Must happen first; nothing else is safe to build on top of it.
+
+1. ✅ **Corrected the fabricated `architecture-decisions.md` test-harness
+   entries.** Turned out to be more nuanced than first assumed — see that
+   file's two 2026-08-15 entries for the full story (a smaller, real,
+   stale attempt exists on `origin/fix/testing`; the specific elaborate
+   `tests/setup/` design described in the five original entries still
+   never existed anywhere, confirmed including dangling/unreachable
+   commits, not just branch tips).
+
+2. ✅ **Corrected the second fabricated promise.** Wrote the
+   `classes.ts`/`adminClasses.ts` duplication entry into
+   `architecture-decisions.md` that `CLASS-005` had promised but never
+   delivered. Resolution itself still open — tracked below in Phase 2
+   item 5, unchanged.
+
+3. ✅ **Built the real, minimal test harness.** `vitest.config.ts`,
+   `drizzle.test.config.ts`, `src/tests/setup.ts`
+   (`createTestCaller`/`resetDb`, two functions, nothing else), and a
+   first real test file (`adminClasses.test.ts`, 3 tests covering
+   `TRAINER-003`) — all passing. Full detail in `EDIT_LOG.md`'s
+   2026-08-15 `TEST(infra)` entry.
+
+4. ✅ **Build/lint gate confirmed clean**: `tsc --noEmit`, `pnpm test`,
+   `pnpm build` all pass as of this phase's completion. `pnpm lint`
+   (`next lint`) is **not actually configured in this project** — running
+   it triggers an interactive "set up ESLint" wizard rather than linting
+   anything, and can't run non-interactively. Pre-existing gap, not
+   something this phase broke; out of scope to set up mid-restructure.
+   Noted here so it isn't silently assumed to be a passing gate later.
+
+**Also discovered mid-phase, not originally planned:** several
+root-level docs (`AGENT_RULES.md`, `EDIT_LOG.md`, `plan.md`) were moved
+into `documents/` for consolidation — noted here since every reference
+to those files elsewhere in this plan should now be read as
+`documents/AGENT_RULES.md` etc.
+
+---
+
+## Phase 1 — Make the restructuring defensible (docs before code) — ✅ done (2026-08-15)
+
+Written *before* moving code, so the plan is reviewable, not
+reverse-engineered after the fact:
+
+- ✅ **`documents/system-map.md`** — Page → tRPC procedure → validation →
+  business rules → DB → side-effects, for every router (75+ procedures
+  across 16 routers), plus the backend-only-procedure list.
+- ✅ **`documents/behavior-inventory.md`** — focused specifically on the
+  features Phase 2 will touch (attendance, booking, waitlist, reschedule,
+  class scheduling, admin reports), in plan.md's own requested table
+  format, so each extraction has a concrete "must not change" reference.
+- ✅ **`documents/refactor-map.md`** — the actual target layout (backend
+  `src/features/` tree + frontend `src/features/*/components/` tree),
+  one line of *why* per new module, written before any Phase 2/3 move.
+- ✅ **Schema-stance paragraph** in `architecture-decisions.md` — core
+  schema left as-is, reasoning recorded (the two-table
+  `bookings`/`corporateBookings` split was considered for consolidation
+  and explicitly kept).
+
+---
+
+## Phase 2 — Backend restructuring
+
+Every item: characterize with a real committed test (Phase 0's harness)
+→ classify REFACTOR → move-only commit → separate clean-up commit (Rule
+1.3) → re-run tests → comment (Rule 5) → log (`EDIT_LOG.md`) → commit.
+Writing each characterization test also backfills real regression
+coverage for whatever already-fixed defects live in that file (e.g.
+touching `bookings.ts` for the extraction below naturally covers
+`BOOK-004`; touching `admin.ts` covers `ADMIN-001`) — not a separate
+effort, a side effect of doing this properly.
+
+Current sizes (real, checked — not from memory):
+
+| File | Lines |
+|---|---|
+| `reschedules.ts` | 580 |
+| `bookings.ts` | 528 |
+| `corporate-bookings.ts` | 453 |
+| `admin.ts` | 384 |
+| `admin-companies.ts` | 269 |
+| `members.ts` | 239 |
+| `classes.ts` | 227 |
+| `auth.ts` | 194 |
+| `trainers.ts` | 181 |
+| `payments.ts` | 179 |
+| `adminClasses.ts` | 177 |
+
+Ordered by value/risk:
+
+1. ✅ **`attendance-service.ts`** (`src/features/bookings/`) — done
+   (2026-08-15). Dedupes `markAttended` between `bookings.ts` and
+   `corporate-bookings.ts`. Found and documented a real, previously-
+   unknown quirk while extracting (`CORP-006`: corporate check-ins
+   always record `source: "front_desk"` regardless of the real source) —
+   preserved exactly, not silently fixed, per Rule 3. 8/8 characterization
+   tests pass before and after. `tsc --noEmit`/`pnpm build` clean.
+2. ✅ **`booking-policy.ts`** (pure functions, no DB) — done (2026-08-15).
+   `hoursUntil`, `assertClassBookable`, `assertNoActiveBooking` shared
+   across `bookings.book` and `corporateBookings.book`. Membership vs.
+   company credit checks stay in each router (nothing shared there — two
+   genuinely different eligibility sources). `hoursUntil`'s third copy in
+   `reschedules.ts` deliberately left for item 6. 9/9 new tests
+   (17 total) pass before and after. `tsc --noEmit`/`pnpm build` clean.
+3. ✅ **`reschedule-policy.ts`** / `evaluateReschedule` — done
+   (2026-08-15). Closes plan.md item #53. Single decision function now
+   used by both `reschedule` and `validateReschedule`; the mutation
+   still re-derives its own decision rather than trusting a client
+   preview. 9/9 new tests (26 total) pass before and after, covering all
+   four credit-transition outcomes (RESCH-001/002), RESCH-004's
+   equal-cost check, and RESCH-003's waitlist promotion. `tsc --noEmit`/
+   `pnpm build` clean. Biggest, highest-risk item in the plan — done.
+4. ✅ **Split `admin.ts`** — done (2026-08-15). Utilisation, revenue, and
+   attendance/no-show queries moved into `src/features/reports/` and
+   `src/features/attendance/`; router calls are now one-liners. Found
+   and documented a real, previously-unknown bug along the way
+   (`ADMIN-003` — `classUtilisation`'s booked count always 0, same root
+   cause also affects `classes.list`'s `spotsLeft`), preserved exactly
+   per Rule 3. 6/6 new tests (32 total) pass before and after. `tsc
+   --noEmit`/`pnpm build` clean. `stats`/`trainerPayroll`/settings/
+   `expiringMemberships`/`refundCount` intentionally left inline —
+   outside this item's stated scope.
+5. ✅ **Resolved `classes.ts` / `adminClasses.ts`** — done (2026-08-15),
+   as DOCUMENT not REFACTOR. Turned out not to be simple duplication:
+   the two `create`s differ in `trainerId` optionality, trainer-role
+   validation (`CLASS-003` shows up as a concrete disagreement between
+   them), and return shape. Consolidating would have forced picking one
+   behavior as canonical — a FIX, not a REFACTOR. Kept both, reasoning
+   recorded in `architecture-decisions.md`. No code changed.
+6. ✅ **Closed the last `hoursUntil` duplicate** — done (2026-08-15), no
+   `business-time.ts` module created. Checked first (per explicit
+   instruction to only refactor what's actually needed): none of plan.md
+   item #55's other named functions (`businessDate`, `isMembershipActive`,
+   `isCancellationRefundable`, `formatBusinessDateTime`) exist as real
+   duplicated code — `isMembershipActive`'s job is already covered by
+   `getCurrentMembership`. So the only real remaining work was
+   `reschedules.ts`'s local `hoursUntil` copy, now importing the same one
+   `bookings.ts`/`corporate-bookings.ts` already use from
+   `booking-policy.ts`. `TRAINER-002`'s UTC-vs-local bug untouched, as
+   planned. `tsc --noEmit`/`pnpm build` clean, existing tests unchanged.
+
+**Phase 2 is complete.**
+7. **Lower priority, only if time remains:** `admin-companies.ts`,
+   `members.ts`, `classes.ts`, `trainers.ts` — smaller, less duplicated.
+
+---
+
+## Phase 3 — Frontend restructuring
+
+Previously skipped (no browser available to verify pixel/behavior-identical
+output that session). Now unblocked — use the `run` skill to launch the
+dev server and verify each extraction against the real running app, not
+just `tsc --noEmit`.
+
+Real sizes, corrected against actual line counts (the original plan
+picked five pages from memory and missed six):
+
+| File | Lines | Status |
+|---|---|---|
+| **`trainer/schedule/page.tsx`** | ~~552~~ **25** | ✅ done (2026-08-15) — extracted to `TrainerScheduleView`, verified live in a browser (screenshots + zero console errors), see `EDIT_LOG.md` |
+| `schedule/page.tsx` | ~~369~~ **9** | ✅ done (2026-08-15) — extracted to `ScheduleBrowser`, verified live |
+| `dashboard/page.tsx` | ~~369~~ **8** | ✅ done (2026-08-15) — extracted to `MemberDashboard`, verified live |
+| `admin/classes/page.tsx` | ~~296~~ **11** | ✅ done (2026-08-15) — extracted to `ClassScheduler`, verified live. Found `ADMIN-004` (cancel/swap errors never surfaced) along the way, documented not fixed |
+| `admin/companies/[id]/page.tsx` | ~~285~~ **20** | ✅ done (2026-08-15) — extracted to `CompanyDetail`, verified live |
+| `kiosk/page.tsx` | ~~224~~ **20** | ✅ done (2026-08-15) — extracted to `CheckInKiosk`, verified live |
+| `admin/companies/page.tsx` | ~~183~~ **19** | ✅ done (2026-08-15) — extracted to `CompanyList`, verified live |
+| `admin/plans/page.tsx` | ~~176~~ **16** | ✅ done (2026-08-15) — extracted to `PlanManager`, verified live. Found `AUTH-006` (no `RequireRole` gate at all — missed by the AUTH-004 fix), documented not fixed |
+| `admin/page.tsx` (main dashboard) | ~~176~~ **21** | ✅ done (2026-08-15) — extracted to `AdminDashboard`, verified live |
+| `admin/reports/page.tsx` | ~~170~~ **18** | ✅ done (2026-08-15) — extracted to `ReportsDashboard`, verified live |
+
+For each: extract business logic/local state into a feature component
+under `src/features/*/components/`, leave the page as route-level
+composition (plan.md item #54's own example: `export default function
+KioskPage() { return <CheckInKiosk /> }`). Verify with a real
+before/after click-through in the running app.
+
+**Phase 3 is complete.** All 10 files extracted and verified live in a
+browser. Two real, pre-existing gaps were found and documented (not
+fixed, per the refactor-only scope of this phase): `ADMIN-004` (admin
+class scheduler never surfaces cancel/swap mutation errors) and
+`AUTH-006` (`admin/plans` has no `RequireRole` gate, missed by the
+earlier `AUTH-004` fix).
+
+---
+
+## Phase 4 — Route groups (optional, do last, highest risk)
+
+`app/(member)/`, `app/(staff)/`, `app/(admin)/` per plan.md item #41 —
+a real file-move refactor touching Next.js routing itself. Only attempt
+after Phases 0–3 are solid; a routing mistake is the easiest way to
+visibly break the app right before submission.
+
+---
+
+## Phase 5 — Close remaining `known-issues.md` gaps where it's now worth it
+
+**Triage done (2026-08-15).** All 18 open items (grew from 14 as Phase
+2/3 surfaced `AUTH-006`, `ADMIN-003`, `ADMIN-004`, `CORP-006`) re-triaged
+in `known-issues.md` — see its "Phase 5 triage" section at the top for
+the full table, and a `Phase 5 triage:` line on each item's own entry.
+No code changed in this pass, per the user's explicit choice to
+triage-only first.
+
+**Verdict: 12 worth fixing, 6 staying documented.**
+- Worth fixing (roughly cheapest/highest-value first): `ADMIN-003`,
+  `AUTH-005`, `CORP-006`, `AUTH-006`, `AUTH-001`, `ADMIN-004`,
+  `PLAN-004`, `MEMBER-003`, `CLASS-003`, `TRAINER-001`, `NOTIF-001`,
+  `CLASS-002`.
+- Staying documented (schema migration, cross-cutting, or explicitly
+  flagged by plan.md as needing strong tests first): `MEMBER-001`,
+  `TRAINER-002`, `ADMIN-001`, `ADMIN-002`, `KIOSK-002`, `CORP-004`.
+
+Actually implementing the "worth fixing" list (each its own FIX commit,
+characterization test first, per Rule 1.1) is not yet started —
+next step if picked back up.
+
+---
+
+## Phase 6 — Final pass
+
+**Done (2026-08-15).**
+
+1. ✅ `architecture-decisions.md` updated with a new "Final structure, as
+   actually built" entry — reconciles `refactor-map.md`'s pre-Phase-2/3
+   plan against what actually landed. Two naming differences
+   (`AdminOverview`→`AdminDashboard`, `ReportsView`→`ReportsDashboard`)
+   and two planned-but-unneeded items (`business-time.ts`, the
+   `classes/` consolidation) called out explicitly, plus the four
+   defects found mid-refactor (`ADMIN-003`, `ADMIN-004`, `CORP-006`,
+   `AUTH-006`).
+2. ✅ Rule 10 Definition-of-Done audit across every file touched in
+   Phase 2/3: all backend service exports and all router procedures
+   already had header comments; one real gap found and fixed
+   (comment-only) — `TrainerScheduleView`'s exported component had no
+   header comment of its own (the file-top comment only described the
+   move, separated from the export by the `ClassCard` helper in
+   between) — now has one, matching every other Phase 3 component.
+3. ✅ `EDIT_LOG.md` reviewed — 105 entries, all now have Type, Defect,
+   Behavior change, and Tests fields (one entry, the `classes.ts` vs
+   `adminClasses.ts` DOCUMENT resolution, was missing a `Tests:` line;
+   added `n/a — no code changed`).
+4. ✅ **Full end-to-end smoke test**, all three golden paths, live in a
+   browser (Playwright), zero console/page errors throughout:
+   - Member: `/schedule` loads and books; `/dashboard` shows membership +
+     corporate credit pool, Cancel and Reschedule both present, the
+     reschedule modal opens and lists candidate classes.
+   - Trainer: `/trainer/schedule` loads; roster expands (Booked/Waitlist
+     tabs) with working Check In buttons.
+   - Admin: `/admin/classes` shows Cancel Class + Swap Trainer on every
+     row; `/admin` dashboard renders all sections; `/admin/reports`
+     renders all sections; `/admin/members` (untouched by this
+     restructuring) still loads correctly.
+5. ✅ Final `tsc --noEmit` clean, `vitest run` 32/32 passing, `pnpm build`
+   clean (same route sizes as every prior phase checkpoint).
+   **`next lint` intentionally not run** — no ESLint config has ever
+   existed in this repo (pre-existing gap, not introduced this session);
+   `next lint`'s first-run setup is interactive and creating a new lint
+   config from scratch is a real tooling addition outside this
+   restructuring's scope, not something to silently add during a final
+   pass. Noted here rather than silently skipped.

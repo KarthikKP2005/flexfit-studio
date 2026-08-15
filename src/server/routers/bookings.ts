@@ -1,11 +1,21 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { bookings, classes, memberships, checkins, users, studioSettings } from "@/db/schema";
+import { bookings, classes, memberships, checkins, users } from "@/db/schema";
 import { router, protectedProcedure, staffProcedure } from "../trpc";
 import { isClassFull } from "@/features/bookings/capacity-service";
 import { promoteNextWaitlisted } from "@/features/bookings/waitlist-service";
 import { getCurrentMembership } from "@/features/memberships/current-membership";
+import {
+  assertBookingCheckable,
+  assertCheckInWindow,
+  getCheckinWindowMinutes,
+} from "@/features/bookings/attendance-service";
+import {
+  hoursUntil,
+  assertClassBookable,
+  assertNoActiveBooking,
+} from "@/features/bookings/booking-policy";
 
 /**
  * Personal (membership-credit-funded) class bookings: browse, book,
@@ -18,6 +28,8 @@ import { getCurrentMembership } from "@/features/memberships/current-membership"
  * eligible to book against is resolved by the shared
  * `getCurrentMembership` (MEMBER-002, fixed) in
  * src/features/memberships/ — this file no longer keeps its own copy.
+ * `book`'s class-validity and duplicate-booking checks are now shared
+ * with corporate-bookings.ts via `booking-policy.ts` (Phase 2.2).
  */
 
 /**
@@ -28,11 +40,6 @@ export const FREE_CANCELLATION_HOURS = 12;
 
 /** Plans with this many credits are treated as unlimited and never decrement. */
 export const UNLIMITED_CREDITS = 999;
-
-/** Hours between `now` and an ISO timestamp (negative if `iso` is in the past). */
-function hoursUntil(iso: string, now = new Date()): number {
-  return (new Date(iso).getTime() - now.getTime()) / 36e5;
-}
 
 export const bookingsRouter = router({
   /** The caller's own bookings, soonest first; past classes excluded unless includePast. */
@@ -90,18 +97,7 @@ export const bookingsRouter = router({
       if (!cls) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
-      if (cls.cancelled) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has been cancelled.",
-        });
-      }
-      if (hoursUntil(cls.startsAt) <= 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This class has already started.",
-        });
-      }
+      assertClassBookable(cls);
 
       // BOOK-DUP-001: this is a check-then-insert, app-level only — there's
       // no unique constraint on (userId, classId) WHERE status IN
@@ -125,12 +121,7 @@ export const bookingsRouter = router({
         )
         .get();
 
-      if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "You are already on the list for this class.",
-        });
-      }
+      assertNoActiveBooking(existing);
 
       const membership = await getCurrentMembership(ctx.db, ctx.user.id);
       if (!membership) {
@@ -320,12 +311,15 @@ export const bookingsRouter = router({
   /**
    * Checks a member in: marks the booking attended and records a
    * checkin row. Two separate writes, not wrapped in a transaction.
-   * Does not enforce a check-in time window server-side — the 2-hour
-   * window in the kiosk UI is not re-verified here (a direct API call
-   * could check in a booking for a class hours away).
+   * Check-in window (studio-configured minutes before class start,
+   * through class end) IS enforced here via the shared
+   * `assertCheckInWindow` (Phase 2.1 extraction, `attendance-service.ts`)
+   * — a prior version of this comment incorrectly claimed no
+   * server-side window existed; it always has.
    *
    * @throws NOT_FOUND if the booking doesn't exist
-   * @throws BAD_REQUEST if the booking isn't currently "booked"
+   * @throws BAD_REQUEST if the booking isn't currently "booked", or if
+   *   outside the check-in window
    */
   markAttended: staffProcedure
     .input(
@@ -344,12 +338,7 @@ export const bookingsRouter = router({
       if (!booking) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found." });
       }
-      if (booking.status !== "booked") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Only confirmed bookings can be checked in.",
-        });
-      }
+      assertBookingCheckable(booking.status);
 
       const cls = await ctx.db
         .select()
@@ -361,20 +350,8 @@ export const bookingsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
       }
 
-      // WHY IT'S IMPLEMENTED: Infinite Check-in Window boundary. Check-ins are only allowed 
-      // from dynamic studio-configured mins before the class starts until the class ends.
-      let settingsRow = await ctx.db.select().from(studioSettings).limit(1).get();
-      const windowMinutes = settingsRow?.checkinWindowMinutes ?? 30;
-
-      const now = Date.now();
-      const startMs = new Date(cls.startsAt).getTime();
-      const endMs = startMs + cls.durationMin * 60000;
-      if (now < startMs - windowMinutes * 60000 || now > endMs) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Check-in is only allowed from ${windowMinutes} minutes before class starts until it ends.`,
-        });
-      }
+      const windowMinutes = await getCheckinWindowMinutes(ctx.db);
+      assertCheckInWindow(cls, windowMinutes);
 
       await ctx.db
         .update(bookings)
