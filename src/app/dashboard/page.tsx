@@ -32,6 +32,13 @@ export default function DashboardPage() {
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Upcoming bookings filter state (client-side only — same name/date
+  // filter pattern used on admin/classes/page.tsx and
+  // trainer/schedule/page.tsx, applied here to the member's own upcoming
+  // bookings list).
+  const [filterName, setFilterName] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+
   const utils = trpc.useUtils();
   const { data: profile, isLoading } = trpc.members.profile.useQuery(undefined, {
     retry: false,
@@ -168,10 +175,45 @@ export default function DashboardPage() {
           </p>
         )}
 
+        {/* Upcoming bookings filter bar: name/date, same client-side
+            filtering pattern as admin/classes/page.tsx and
+            trainer/schedule/page.tsx. Filters the already-fetched
+            `bookings` list, not a new query. */}
+        <div className="panel p-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="block text-sm muted mb-1">Filter by Name</label>
+            <input
+              className="input w-full"
+              type="text"
+              value={filterName}
+              onChange={(e) => setFilterName(e.target.value)}
+              placeholder="e.g. Yoga"
+            />
+          </div>
+          <div>
+            <label className="block text-sm muted mb-1">Filter by Date</label>
+            <input
+              className="input w-full"
+              type="date"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+            />
+          </div>
+        </div>
+
         {bookings && bookings.length > 0 ? (
           <div className="grid gap-3 sm:grid-cols-2">
             <AnimatePresence>
-              {bookings.filter(b => b.status !== "cancelled").map((b) => (
+              {bookings.filter(b => {
+                if (b.status === "cancelled") return false;
+                if (filterName && !b.className.toLowerCase().includes(filterName.toLowerCase())) return false;
+                if (filterDate) {
+                  const d = new Date(b.startsAt);
+                  const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                  if (localDate !== filterDate) return false;
+                }
+                return true;
+              }).map((b) => (
                 <motion.div 
                   key={b.id} 
                   initial={{ opacity: 0, y: 20 }}

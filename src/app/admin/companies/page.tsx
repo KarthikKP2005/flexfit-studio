@@ -93,8 +93,7 @@ function CompaniesList() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 border rounded"
-                style={{ borderColor: "var(--border)" }}
+                className="input"
                 placeholder="e.g. TechCorp Inc"
                 disabled={createMutation.isPending}
               />
@@ -106,8 +105,7 @@ function CompaniesList() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border rounded"
-                style={{ borderColor: "var(--border)" }}
+                className="input"
                 placeholder="contact@techcorp.com"
                 disabled={createMutation.isPending}
               />
@@ -119,8 +117,7 @@ function CompaniesList() {
                 type="number"
                 value={credits}
                 onChange={(e) => setCredits(e.target.value)}
-                className="w-full px-3 py-2 border rounded"
-                style={{ borderColor: "var(--border)" }}
+                className="input"
                 placeholder="0"
                 disabled={createMutation.isPending}
                 min="0"

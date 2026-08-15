@@ -22,7 +22,21 @@ export default function AdminClassesPage() {
   const [creditCost, setCreditCost] = useState("1");
   const [swapTrainerId, setSwapTrainerId] = useState<string>("");
 
+  // Filter State (client-side only, list filtering)
+  const [filterName, setFilterName] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+
   const trainers = staff?.filter((u) => u.role === "trainer") || [];
+
+  const filteredClasses = classes?.filter((c) => {
+    if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+    if (filterDate) {
+      const d = new Date(c.startsAt);
+      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (localDate !== filterDate) return false;
+    }
+    return true;
+  });
 
   const createMutation = trpc.adminClasses.create.useMutation({
     onSuccess: () => {
@@ -121,7 +135,12 @@ export default function AdminClassesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm muted mb-1">Date & Time</label>
+              <label className="block text-sm muted mb-1 flex items-center gap-2">
+                Date & Time
+                <span className="text-xs px-1.5 py-0.5 rounded bg-white/10 muted normal-case">
+                  click date, then time
+                </span>
+              </label>
               <input
                 className="input w-full"
                 type="datetime-local"
@@ -178,9 +197,32 @@ export default function AdminClassesPage() {
         </div>
       )}
 
+      {/* CLASS LIST FILTERS */}
+      <div className="panel p-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="block text-sm muted mb-1">Filter by Name</label>
+          <input
+            className="input w-full"
+            type="text"
+            value={filterName}
+            onChange={(e) => setFilterName(e.target.value)}
+            placeholder="e.g. Yoga"
+          />
+        </div>
+        <div>
+          <label className="block text-sm muted mb-1">Filter by Date</label>
+          <input
+            className="input w-full"
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+          />
+        </div>
+      </div>
+
       {/* CLASS LIST */}
       <div className="panel divide-y" style={{ borderColor: "var(--border)" }}>
-        {classes?.map((c) => (
+        {filteredClasses?.map((c) => (
           <div key={c.id} className="p-4 space-y-2">
             <div className="flex items-start justify-between">
               <div>

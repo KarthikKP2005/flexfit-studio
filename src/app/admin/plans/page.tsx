@@ -85,7 +85,7 @@ export default function AdminPlansPage() {
               />
             </div>
             <div>
-              <label className="block text-sm muted mb-1">Price ($)</label>
+              <label className="block text-sm muted mb-1">Price (₹)</label>
               <input
                 className="input w-full"
                 type="number"
