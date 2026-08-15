@@ -8,7 +8,8 @@ import { RequireRole } from "@/components/require-role";
 /**
  * Front-desk check-in flow: look up a member, pick from their classes
  * starting in the next 2 hours, mark attended. Not responsible for:
- * corporate check-ins — only `bookings.upcomingForMember`/`markAttended`
+ * corporate check-ins (KIOSK-002, documented not fixed — see
+ * known-issues.md) — only `bookings.upcomingForMember`/`markAttended`
  * (personal) are called here, so a company-linked member's corporate
  * bookings never show up at this kiosk.
  *

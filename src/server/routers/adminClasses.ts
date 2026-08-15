@@ -4,6 +4,7 @@ import { eq, desc } from "drizzle-orm";
 import { classes, users } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 import { isTrainerAvailable } from "@/features/trainers/availability-service";
+import { cancelClass } from "@/features/bookings/class-cancellation-service";
 
 /**
  * Admin Classes Router
@@ -86,29 +87,62 @@ export const adminClassesRouter = router({
       return { ok: true };
     }),
 
-  /** Cancels a class (prevents further bookings). */
+  /**
+   * Cancels a class and cleans up everything attached to it, via the
+   * shared `cancelClass` service (CLASS-005, fixed): cancels every
+   * still-active booking — personal AND corporate, `booked` AND
+   * `waitlisted` — refunds credits for the ones that had actually paid,
+   * and notifies every affected member. This is the same service
+   * `classesRouter.cancel` already uses (CLASS-004); this procedure
+   * previously did its own inline `update` that only flipped
+   * `classes.cancelled` and touched nothing else — see CLASS-005 in
+   * known-issues.md for the original behavior and how it was found.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   */
   cancel: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      // Note: A full implementation would also loop through existing `bookings` 
-      // for this class, refund credits, and send notifications.
-      await ctx.db
-        .update(classes)
-        .set({ cancelled: true })
-        .where(eq(classes.id, input.id));
+      const result = await cancelClass(ctx.db, input.id);
+
+      if (!result) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+      }
 
       return { ok: true };
     }),
 
-  /** 
-   * Trainer Availability Override Feature:
+  /**
    * Swaps the assigned trainer for a specific scheduled class.
-   * WHY IT'S IMPLEMENTED: Admins need the flexibility to override normal schedules 
+   * WHY IT'S IMPLEMENTED: Admins need the flexibility to override normal schedules
    * if a trainer calls in sick or is unavailable for a specific instance.
+   *
+   * Behavior note (TRAINER-003, fixed): this previously reassigned the
+   * class without checking whether the new trainer is actually
+   * available at that time — the only one of the three trainer-
+   * assigning mutations in this codebase (this one, `classes.ts`'s
+   * `create`/`update`, and this file's own `create`) that skipped
+   * `isTrainerAvailable`. It now runs the same check as the others,
+   * excluding this class itself from the conflict scan since it's the
+   * one being reassigned, not a competing booking.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   * @throws BAD_REQUEST if the target user isn't an active trainer, or
+   *   the trainer isn't available at this class's time
    */
   swapTrainer: adminProcedure
     .input(z.object({ classId: z.number(), newTrainerId: z.number() }))
     .mutation(async ({ ctx, input }) => {
+      const cls = await ctx.db
+        .select()
+        .from(classes)
+        .where(eq(classes.id, input.classId))
+        .get();
+
+      if (!cls) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+      }
+
       const trainer = await ctx.db
         .select()
         .from(users)
@@ -120,6 +154,17 @@ export const adminClassesRouter = router({
           code: "BAD_REQUEST",
           message: "Selected user is not a valid trainer.",
         });
+      }
+
+      const check = await isTrainerAvailable(
+        ctx.db,
+        input.newTrainerId,
+        cls.startsAt,
+        cls.durationMin,
+        input.classId,
+      );
+      if (!check.available) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: check.reason });
       }
 
       await ctx.db
