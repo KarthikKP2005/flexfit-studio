@@ -103,6 +103,16 @@ export const bookingsRouter = router({
         });
       }
 
+      // BOOK-DUP-001: this is a check-then-insert, app-level only — there's
+      // no unique constraint on (userId, classId) WHERE status IN
+      // ('booked', 'waitlisted') backing it up (see schema.ts's bookings
+      // table). Two concurrent calls can both pass this check before
+      // either insert lands, producing two active bookings for the same
+      // user+class. It also only protects rows created through this
+      // mutation — a row inserted any other way (e.g. seed data) isn't
+      // covered, which is exactly how Farhan Ahmed ended up with two
+      // active bookings on the same "Advanced Spin" class (id 849) in the
+      // seed data. See known-issues.md.
       const existing = await ctx.db
         .select()
         .from(bookings)
