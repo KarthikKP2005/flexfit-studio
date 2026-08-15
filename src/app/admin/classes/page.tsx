@@ -25,22 +25,15 @@ export default function AdminClassesPage() {
   // Filter State (client-side only, list filtering)
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [filterTime, setFilterTime] = useState("");
 
   const trainers = staff?.filter((u) => u.role === "trainer") || [];
 
   const filteredClasses = classes?.filter((c) => {
     if (filterName && !c.name.toLowerCase().includes(filterName.toLowerCase())) return false;
-    if (filterDate || filterTime) {
+    if (filterDate) {
       const d = new Date(c.startsAt);
-      if (filterDate) {
-        const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        if (localDate !== filterDate) return false;
-      }
-      if (filterTime) {
-        const localTime = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-        if (localTime !== filterTime) return false;
-      }
+      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (localDate !== filterDate) return false;
     }
     return true;
   });
@@ -205,7 +198,7 @@ export default function AdminClassesPage() {
       )}
 
       {/* CLASS LIST FILTERS */}
-      <div className="panel p-4 grid gap-4 sm:grid-cols-3">
+      <div className="panel p-4 grid gap-4 sm:grid-cols-2">
         <div>
           <label className="block text-sm muted mb-1">Filter by Name</label>
           <input
@@ -223,15 +216,6 @@ export default function AdminClassesPage() {
             type="date"
             value={filterDate}
             onChange={(e) => setFilterDate(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-sm muted mb-1">Filter by Time</label>
-          <input
-            className="input w-full"
-            type="time"
-            value={filterTime}
-            onChange={(e) => setFilterTime(e.target.value)}
           />
         </div>
       </div>
