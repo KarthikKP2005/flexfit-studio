@@ -4,6 +4,7 @@ import { eq, desc } from "drizzle-orm";
 import { classes, users } from "@/db/schema";
 import { router, adminProcedure } from "../trpc";
 import { isTrainerAvailable } from "@/features/trainers/availability-service";
+import { cancelClass } from "@/features/bookings/class-cancellation-service";
 
 /**
  * Admin Classes Router
@@ -86,16 +87,27 @@ export const adminClassesRouter = router({
       return { ok: true };
     }),
 
-  /** Cancels a class (prevents further bookings). */
+  /**
+   * Cancels a class and cleans up everything attached to it, via the
+   * shared `cancelClass` service (CLASS-005, fixed): cancels every
+   * still-active booking — personal AND corporate, `booked` AND
+   * `waitlisted` — refunds credits for the ones that had actually paid,
+   * and notifies every affected member. This is the same service
+   * `classesRouter.cancel` already uses (CLASS-004); this procedure
+   * previously did its own inline `update` that only flipped
+   * `classes.cancelled` and touched nothing else — see CLASS-005 in
+   * known-issues.md for the original behavior and how it was found.
+   *
+   * @throws NOT_FOUND if the class doesn't exist
+   */
   cancel: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      // Note: A full implementation would also loop through existing `bookings` 
-      // for this class, refund credits, and send notifications.
-      await ctx.db
-        .update(classes)
-        .set({ cancelled: true })
-        .where(eq(classes.id, input.id));
+      const result = await cancelClass(ctx.db, input.id);
+
+      if (!result) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found." });
+      }
 
       return { ok: true };
     }),

@@ -1002,6 +1002,66 @@ got none before this fix. `tsc --noEmit` and `pnpm build` both clean.
 
 ---
 
+### CLASS-005 — Admin UI's "Cancel" button calls a separate, never-fixed `adminClasses.cancel`, not the `cancelClass` service CLASS-004 already fixed
+
+**Severity:** High (member-facing — same impact as CLASS-004: a class
+cancelled from the admin panel today leaves waitlisted personal
+bookings, all corporate bookings, both credit sources, and every
+notification completely untouched — the exact bug CLASS-004 was
+supposed to have closed)
+**Status:** Fixed on branch `admin-update-two` (also flagged in
+plan.md's critical list, item 9, and plan.md's admin-flow item #9)
+**Area:** Classes (admin)
+**File:** `src/server/routers/adminClasses.ts` — `cancel`
+
+**Original behavior:** `admin/classes/page.tsx` calls
+`trpc.adminClasses.cancel`, a mutation in a second, separate router
+(`adminClassesRouter`) that duplicates parts of `classesRouter`
+(`create`, and this `cancel`). Its `cancel` only ever did:
+```ts
+await ctx.db.update(classes).set({ cancelled: true }).where(eq(classes.id, input.id));
+```
+with a comment on the line above admitting the gap ("A full
+implementation would also loop through existing `bookings` for this
+class, refund credits, and send notifications"). Meanwhile
+`classesRouter`'s own `cancel` already calls the shared `cancelClass`
+service and was fixed under CLASS-004 — but nothing in the UI has ever
+called `classesRouter.cancel`. So CLASS-004's fix shipped on a
+procedure with no frontend caller, while the procedure the admin UI
+actually uses was never touched and still has the original bug.
+Reproduced at the tRPC-caller level (temp script, deleted after use):
+a class with one personal `booked` booking, one personal `waitlisted`
+booking, one corporate `booked` booking, and one corporate
+`waitlisted` booking, all with real credit charges already applied —
+calling `adminClasses.cancel` set `classes.cancelled = true` and left
+all four bookings at their original status, both credit balances
+unchanged, and inserted zero notifications.
+
+**Fix:** `adminClasses.ts`'s `cancel` now calls the same
+`cancelClass(ctx.db, input.id)` service `classesRouter.cancel` already
+uses, instead of its own inline `update`. Output shape (`{ ok: true }`)
+is unchanged — `cancelClass`'s summary is available but not surfaced
+here, matching what the existing admin UI's `cancelMutation` already
+expects (Rule 1: no output-shape change as a side effect).
+
+**Not changed / left as-is (Rule 4 — one defect per commit):**
+`adminClassesRouter` and `classesRouter` still duplicate `create` and
+(only `adminClassesRouter` has) `swapTrainer`. Whether to consolidate
+the two routers is a separate, later architecture decision — logged as
+an open question in `architecture-decisions.md`, not resolved here.
+
+**Verified live — tRPC-caller level (Rule 6):** same temp script
+(`_tmp-e2e-test.ts`, deleted immediately after, never committed) run
+again after the fix, same seeded users, same class shape. Result:
+`classes.cancelled` true; both personal bookings (`booked` and
+`waitlisted`) and both corporate bookings (`booked` and `waitlisted`)
+flipped to `cancelled`; the personal member's membership credits and
+the company's credit pool were both refunded back to their exact
+pre-charge values; all 4 affected members received a
+`class_cancelled` notification. `tsc --noEmit` clean.
+
+---
+
 ### ADMIN-001 — `classUtilisation` counts only normal bookings, ignoring corporate bookings on the same class
 
 **Severity:** Medium (utilisation numbers shown to admins undercount real

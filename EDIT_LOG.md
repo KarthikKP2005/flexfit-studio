@@ -10,6 +10,26 @@ diff before it landed; nothing here was auto-applied.
 
 ---
 
+## 2026-08-15 — FIX(admin-classes): route cancel through the shared cancelClass service
+
+**Type:** FIX
+**Defect:** CLASS-005 (new — see `known-issues.md`)
+**Behavior change:** yes — the admin panel's "Cancel" button now cancels
+every active personal/corporate booking on the class, refunds credits,
+and sends `class_cancelled` notifications, where before it only flipped
+`classes.cancelled`.
+**Files touched:**
+- `src/server/routers/adminClasses.ts` — `cancel` now calls
+  `cancelClass(ctx.db, input.id)` (the same service `classesRouter.cancel`
+  already used, from CLASS-004) instead of its own inline `update`.
+**Tests:** tRPC-caller-level verification via a temporary, untracked
+script (`_tmp-e2e-test.ts`, deleted after use, never committed) — run
+once against the unmodified code to reproduce CLASS-005, then again
+after the fix to confirm it. Full detail in the CLASS-005 entry in
+`known-issues.md`.
+
+---
+
 ## 2026-08-15 — DOCUMENT(bookings): comment BOOK-DUP-001 (no uniqueness on active bookings)
 
 **Type:** DOCUMENT
